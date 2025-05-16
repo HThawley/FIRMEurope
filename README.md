@@ -12,5 +12,7 @@ Energy balance model for sizing grids with high penetration of renewables
 `pip install .[dev,test]`
 
 **Run model**
-`python firm_run.py`
+The model may be run directly from command line with  `firm`.
+You may want to try `firm --help` first. 
+Try `firm <cmd> --help` for more info on functionality.
 
