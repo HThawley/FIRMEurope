@@ -4,7 +4,7 @@ Energy balance model for sizing grids with high penetration of renewables
 # Quickstart for install and run
 
 **Clone the repo:**
-`git clone git@github.com:TimWeberRE100/FIRMPlus_Australia.git`
+`git clone git@github.com:HThawley/FIRMEurope.git`
 
 **Install dependencies**
 *NOTE - You may want to also create virtual env using venv/conda/other*
