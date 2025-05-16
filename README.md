@@ -1,4 +1,5 @@
-# FIRM_Australia
+# FIRM_Europe
+Energy balance model for sizing grids with high penetration of renewables
 
 # Quickstart for install and run
 
