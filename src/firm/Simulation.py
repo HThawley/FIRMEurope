@@ -12,16 +12,31 @@ from firm.Interconnection import Interconnection
 from firm.Utils import (
     cclock, 
     array_sum_2d_axis1, 
+    zero_safe_division,
 )  #type: ignore 
 
+@njit
+def Instantiate(solution):
+    solution.MNetload = solution.MLoad - solution.MPV - solution.MWind - solution.MRor
+    solution.MUnbalanced = solution.MNetload.copy()
+    solution.MDeficit, solution.MSpillage = np.maximum(0, solution.MNetload), -np.minimum(0, solution.MNetload)
 
+    solution.MHydro = np.zeros((solution.intervals, solution.nodes), dtype=np.float64)
+    solution.MGas = np.zeros((solution.intervals, solution.nodes), dtype=np.float64)
+
+    solution.MDischarge = np.zeros((solution.intervals, solution.nodes), dtype=np.float64)
+    solution.MCharge = np.zeros((solution.intervals, solution.nodes), dtype=np.float64)
+    solution.MStorage = np.zeros((solution.intervals, solution.nodes), dtype=np.float64)
+    solution.MStorage[-1] = 0.5 * solution.CPHS
+
+    solution.TImport = np.zeros((solution.intervals, solution.nodes, solution.nhvi), dtype=np.float64)
+    solution.TExport = np.zeros((solution.intervals, solution.nodes, solution.nhvi), dtype=np.float64)
+    solution.THVI = np.zeros((solution.intervals, solution.nodes), dtype=np.float64)
 
 
 @njit
 def Simulate(solution):
-
-    TransmissionSimulate(solution)
-
+    Instantiate(solution)
     if solution.profiling:
         time_adj = (solution.time_interconnection0+
                     solution.time_interconnection1+
@@ -36,54 +51,57 @@ def Simulate(solution):
                      solution.calls_spilldeft+
                      solution.calls_unbalancedt)
         start = cclock()
-    # meet deficits in place 
+        
+    ### Maximum Dispatch of Gas
+    solution.MGas = solution.CGas * np.ones((solution.intervals, solution.nodes), np.float64)
+    TransmissionSimulate(solution)
+    
+    ### Dispatch Hydro to fill deficits
+    FillSimulate(solution, solution.CHydro, solution.MHydro)
+    
+    # Energy units by which a node exceeds in Hydro resource 
+    flex_exceedance = np.zeros(solution.nodes, np.float64)
+    factor = np.zeros(solution.nodes, np.float64)
+    for n in range(solution.nodes):
+        for t in range(solution.intervals):
+            factor[n] += solution.MHydro[t, n]
+        flex_exceedance[n] = factor[n] - solution.RHydro[n]
+    for n in range(solution.nodes):
+        factor[n] = min(1, zero_safe_division(factor[n] - flex_exceedance[n], factor[n]))
     for t in range(solution.intervals):
         for n in range(solution.nodes):
-            solution.MFlexible[t, n] = min(solution.MDeficit[t, n], solution.CPeak[n])
-        UpdateUnbalancedt(solution, t)
-        UpdateSpillDeft(solution, t)
+            solution.MHydro[t, n] *= factor[n]
+    for n in range(solution.nodes):
+        _mhydro = 0.0
+        for t in range(solution.intervals):
+            _mhydro += solution.MHydro[t, n]
+        flex_exceedance[n] = _mhydro - solution.RHydro[n]
 
-    fill = np.zeros(solution.nodes, np.float64)
-    flex = 0.0
-    for t in range(solution.intervals - 1, -1, -1):
-        # timestep backwards
-        if solution.MDeficit[t].sum() > 1e-6:
-            # original import/export
-            _import = array_sum_2d_axis1(solution.TImport[t])
-            _export = array_sum_2d_axis1(solution.TExport[t])
-            # meet deficits just-in-time by importiing flex from neighbours
-            Interconnection(
-                solution,
-                solution.MDeficit[t],
-                solution.CPeak - solution.MFlexible[t],
-                solution.TImport[t],
-                solution.TExport[t],
-            )
-            # flexible += iexports from neighbours
-            solution.MFlexible[t] += np.maximum(
-                (_import + _export - array_sum_2d_axis1(solution.TImport[t] + solution.TExport[t])), 0
-            )
-            # accumulate remaing deficits
-            fill += solution.MDeficit[t] / solution.efficiency
-        if fill.sum() > 1e-6:
-            # clip fill by storage capacity
-            for n in range(solution.nodes):
-                fill[n] = min(fill[n], (solution.CPHS[n] - solution.MStorage[t - 1, n]) / solution.resolution / solution.efficiency)
-                flex = min(fill[n], solution.CPeak[n] - solution.MFlexible[t, n], solution.CPHP[n] - solution.MCharge[t, n] + solution.MDischarge[t, n])
-                fill[n] -= flex
-                solution.MFlexible[t, n] += flex
+    solution.MGas[:] = 0
+    solution.TImport[:] = 0
+    solution.TExport[:] = 0
+    
+    UpdateUnbalanced(solution)
+    UpdateSpillDef(solution)
+    TransmissionSimulate(solution)
+    
+    # Disptach gas 
+    FillSimulate(solution, solution.CGas, solution.MGas)
 
-            if fill.sum() > 1e-6:
-                _import = array_sum_2d_axis1(solution.TImport[t])
-                _export = array_sum_2d_axis1(solution.TExport[t])
-                Interconnection(
-                    solution, fill, solution.CPeak - solution.MFlexible[t], solution.TImport[t], solution.TExport[t]
-                )
-                solution.MFlexible[t] += np.maximum(
-                    (_import + _export - array_sum_2d_axis1(solution.TImport[t] + solution.TExport[t])), 0
-                )
-
-                # fill adjusted in-place
+    ### Redipatch as much as gas as possible to hydro
+    _mhydro = np.zeros(solution.intervals, np.float64)
+    for n in range(solution.nodes):
+        if flex_exceedance[n] < -10:
+            _mhfactor = 0.0
+            for t in range(solution.intervals):
+                _mhydro[t] = min(solution.MGas[t, n], solution.CHydro[n] - solution.MHydro[t, n])
+                _mhfactor += _mhydro[t]
+            _mhfactor = max(1, zero_safe_division(flex_exceedance[n], _mhfactor))
+            for t in range(solution.intervals):
+                _redispatch = _mhydro[t] * _mhfactor
+                solution.MHydro[t, n] += _redispatch
+                solution.MGas[t, n] -= _redispatch
+                
     if solution.profiling:
         solution.calls_backfill +=1 
         solution.time_backfill += cclock() - start
@@ -102,9 +120,78 @@ def Simulate(solution):
         solution.time_backfill += time_adj
         solution.time_backfill += calls_adj * solution.profile_overhead
 
-        
-
+    UpdateUnbalanced(solution)
+    UpdateSpillDef(solution)
     BasicSimulate(solution)
+
+@njit 
+def FillSimulate(solution, CFlex, MFlex):
+    
+    for t in range(solution.intervals):
+        for n in range(solution.nodes):
+            MFlex[t, n] = min(solution.MDeficit[t, n], CFlex[n])
+        UpdateUnbalancedt(solution, t)
+        UpdateSpillDeft(solution, t)
+
+    for t in range(solution.intervals - 1, -1, -1):
+        # timestep backwards
+        if solution.MDeficit[t].sum() > 1e-6:
+            # original import/export
+            _import = array_sum_2d_axis1(solution.TImport[t])
+            _export = array_sum_2d_axis1(solution.TExport[t])
+            # meet deficits just-in-time by importiing flex from neighbours
+            Interconnection(
+                solution,
+                solution.MDeficit[t],
+                CFlex - MFlex[t],
+                solution.TImport[t],
+                solution.TExport[t],
+            )
+            # flexible += im/exports from neighbours
+            MFlex[t] += np.maximum(
+                (_import + _export - array_sum_2d_axis1(solution.TImport[t] + solution.TExport[t])), 0
+                )
+   
+    fill = np.zeros(solution.nodes, np.float64)
+    flex = 0.0
+    for t in range(solution.intervals - 1, -1, -1):
+        # timestep backwards
+        if solution.MDeficit[t].sum() > 1e-6:
+            # original import/export
+            _import = array_sum_2d_axis1(solution.TImport[t])
+            _export = array_sum_2d_axis1(solution.TExport[t])
+            # meet deficits just-in-time by importiing flex from neighbours
+            Interconnection(
+                solution,
+                solution.MDeficit[t],
+                CFlex - MFlex[t],
+                solution.TImport[t],
+                solution.TExport[t],
+            )
+            # flexible += iexports from neighbours
+            MFlex[t] += np.maximum(
+                (_import + _export - array_sum_2d_axis1(solution.TImport[t] + solution.TExport[t])), 0
+            )
+            # accumulate remaing deficits
+            fill += solution.MDeficit[t] / solution.efficiency
+        if fill.sum() > 1e-6:
+            # clip fill by storage capacity
+            for n in range(solution.nodes):
+                fill[n] = min(fill[n], (solution.CPHS[n] - solution.MStorage[t - 1, n]) / solution.resolution / solution.efficiency)
+                flex = min(fill[n], CFlex[n] - MFlex[t, n], solution.CPHP[n] - solution.MCharge[t, n] + solution.MDischarge[t, n])
+                fill[n] -= flex
+                MFlex[t, n] += flex
+
+            if fill.sum() > 1e-6:
+                _import = array_sum_2d_axis1(solution.TImport[t])
+                _export = array_sum_2d_axis1(solution.TExport[t])
+                Interconnection(
+                    solution, fill, CFlex - MFlex[t], solution.TImport[t], solution.TExport[t]
+                )
+                MFlex[t] += np.maximum(
+                    (_import + _export - array_sum_2d_axis1(solution.TImport[t] + solution.TExport[t])), 0
+                )
+    
 
 @njit
 def TransmissionSimulate(solution):
@@ -229,7 +316,7 @@ def UpdateUnbalancedt(solution, t):
         for m in range(solution.nhvi):
             _timport += solution.TImport[t,n,m] 
             _timport += solution.TExport[t,n,m]
-        solution.MUnbalanced[t,n] = solution.MNetload[t,n] - solution.MFlexible[t,n] - _timport
+        solution.MUnbalanced[t,n] = solution.MNetload[t,n] - solution.MHydro[t,n] - solution.MGas[t,n] - _timport
     if solution.profiling:
         solution.calls_unbalancedt +=1 
         solution.time_unbalancedt += cclock() - start
@@ -247,7 +334,7 @@ def UpdateUnbalanced(solution):
             for m in range(solution.nhvi):
                 _timport += solution.TImport[t, n, m]
                 _timport += solution.TExport[t, n, m]
-            solution.MUnbalanced[t, n] = solution.MNetload[t, n] - solution.MFlexible[t, n] - _timport
+            solution.MUnbalanced[t, n] = solution.MNetload[t, n] - solution.MHydro[t,n] - solution.MGas[t,n] - _timport
 
     if solution.profiling:
         solution.calls_unbalanced +=1 

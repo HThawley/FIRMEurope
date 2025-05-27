@@ -10,7 +10,7 @@ from csv import writer
 from os import remove
 from shutil import copyfile
 
-class Fileprinter:
+class FilePrinter:
     
     def __init__(self, file_name:str, save_freq:int, header=None, resume=False):
         self.file_name=file_name

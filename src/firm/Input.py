@@ -1,6 +1,7 @@
 
 import numpy as np
-from numba import boolean, float64, int64, njit, types, objmode  # type: ignore
+import pandas as pd
+from numba import boolean, prange, float64, int64, njit, types, objmode  # type: ignore
 from numba.experimental import jitclass  # type: ignore
 from numba.typed.typeddict import Dict as TypedDict
 
@@ -8,77 +9,56 @@ from firm.Simulation import Simulate
 from firm.Utils import zero_safe_division, array_max, cclock
 from firm.Network import generate_network
 
-
-Nodel = np.array(["FNQ", "NSW", "NT", "QLD", "SA", "TAS", "VIC", "WA"])
-PVl = np.array(
-    ["NSW"] * 7
-    + ["FNQ"] * 1
-    + ["QLD"] * 2
-    + ["FNQ"] * 3
-    + ["SA"] * 6
-    + ["TAS"] * 0
-    + ["VIC"] * 1
-    + ["WA"] * 1
-    + ["NT"] * 1
-)
-Windl = np.array(
-    ["NSW"] * 8
-    + ["FNQ"] * 1
-    + ["QLD"] * 2
-    + ["FNQ"] * 2
-    + ["SA"] * 8
-    + ["TAS"] * 4
-    + ["VIC"] * 4
-    + ["WA"] * 3
-    + ["NT"] * 1
-)
-
+Nodel = np.genfromtxt("Data/load.csv", delimiter=",", max_rows=1, dtype=str)[1:]
 n_node = dict((name, i) for i, name in enumerate(Nodel))
-Nodel_int, PVl_int, Windl_int = (np.array([n_node[node] for node in x], dtype=np.int64) for x in (Nodel, PVl, Windl))
-
-MLoad = np.genfromtxt("Data/electricity.csv", delimiter=",", skip_header=1, usecols=range(4, 4 + len(Nodel))) 
+MLoad = np.genfromtxt("Data/load.csv", delimiter=",", skip_header=1, usecols=range(1, 1+len(Nodel))) 
 MLoad /= 1000  # MW to GW
 
-TSPV = np.genfromtxt("Data/pv.csv", delimiter=",", skip_header=1, usecols=range(4, 4 + len(PVl)))
-TSWind = np.genfromtxt("Data/wind.csv", delimiter=",", skip_header=1, usecols=range(4, 4 + len(Windl)))
+PVl = np.genfromtxt("Data/solar_cf.csv", delimiter=",", max_rows=1, dtype=str)
+PVl = np.array([' '.join(x.split(' ')[:2]) for x in PVl[1:]], dtype=str)
+TSPV = np.genfromtxt("Data/solar_cf.csv", delimiter=",", skip_header=1, usecols=range(1, 1 + len(PVl)))
 
-assets = np.genfromtxt("Data/hydrobio.csv", dtype=None, delimiter=",", encoding=None)[1:, 1:].astype(float)
-CHydro, CBio = (assets[:, x] * 0.001 for x in range(assets.shape[1])) # MW to GW
-CBaseload = np.array([0, 0, 0, 0, 0, 1.0, 0, 0])  # 24/7, GW
-CPeak = CHydro + CBio - CBaseload  # GW
+Windl = np.genfromtxt("Data/wind_cf.csv", delimiter=",", max_rows=1, dtype=str)
+Windl = np.array([' '.join(x.split(' ')[:2]) for x in Windl[1:]], dtype=str)
+TSWind = np.genfromtxt("Data/wind_cf.csv", delimiter=",", skip_header=1, usecols=range(1, 1 + len(Windl)))
 
-# FQ, NQ, NS, NV, AS, SW, only TV constrained
-lengths = np.array([1500, 1000, 1000, 800, 1200, 2400, 400], dtype=np.int64)
-DCloss = lengths * 0.03 * 0.001  # 3% per 1000 km
-undersea_mask = np.array([0, 0, 0, 0, 0, 0, 1], dtype=bool)
+CRor = dict(np.genfromtxt("Data/ror_plants.csv", delimiter=",", skip_header=1, dtype=None, usecols=[1,2]))
+Rorl = np.genfromtxt("Data/ror_cf.csv", delimiter=",", max_rows=1, dtype=str)
+Rorl = np.array([' '.join(x.split(' ')[:2]) for x in Rorl[1:]], dtype=str)
+TSRor = np.genfromtxt("Data/ror_cf.csv", delimiter=",", skip_header=1, usecols=range(1, 1 + len(Rorl)))
+MRor= np.zeros(MLoad.shape)
+MRor[:, np.isin(Nodel, Rorl, True)] = TSRor * np.array([CRor[node] for node in Rorl])
 
-coverage = [
-    np.array(["NSW", "QLD", "SA", "TAS", "VIC"]),
-    np.array(["NSW", "QLD", "SA", "TAS", "VIC", "WA"]),
-    np.array(["NSW", "NT", "QLD", "SA", "TAS", "VIC"]),
-    np.array(["NSW", "NT", "QLD", "SA", "TAS", "VIC", "WA"]),
-    np.array(["FNQ", "NSW", "QLD", "SA", "TAS", "VIC"]),
-    np.array(["FNQ", "NSW", "QLD", "SA", "TAS", "VIC", "WA"]),
-    np.array(["FNQ", "NSW", "NT", "QLD", "SA", "TAS", "VIC"]),
-    np.array(["FNQ", "NSW", "NT", "QLD", "SA", "TAS", "VIC", "WA"]),
-]
-coverage_int = [np.array([n_node[node] for node in node_array], dtype=np.int64) for node_array in coverage]
-coverage_maxlen = max((len(c) for c in coverage))
-coverage_int = np.stack([np.pad(c, (0, coverage_maxlen - len(c)), constant_values=-1) for c in coverage_int])
+Nodel_int, PVl_int, Windl_int = (np.array([n_node[node] for node in x], dtype=np.int64) for x in (Nodel, PVl, Windl))
 
+CHydro = dict(np.genfromtxt("Data/hydro_plants.csv", delimiter=",", skip_header=1, dtype=None, usecols=[1,2]))
+CHydro = np.array([CHydro[node] if node in CHydro.keys() else 0 for node in Nodel]) / 1000.
 
-basic_network = np.array(
-    [
-        [0, 3],  # FNQ-QLD
-        [1, 3],  # NSW-QLD
-        [1, 4],  # NSW-SA
-        [1, 6],  # NSW-VIC
-        [2, 4],  # NT-SA
-        [4, 7],  # SA-WA
-        [5, 6],  # TAS-VIC
-    ],
-    dtype=np.int64,
-)
+RHydro = pd.read_csv("Data/inflow.csv", sep=',')
+RHydro = RHydro.drop(columns=['snapshot'])
+RHydro = RHydro.sum() 
+RHydro.index = [' '.join(x.split(' ')[:2]) for x in RHydro.index]
+RHydro = np.array([RHydro[node] if node in RHydro.index else 0 for node in Nodel]) / 1000
+
+CGas = pd.read_csv("Data/gas.csv", sep=",", usecols=[1,2])
+CGas = CGas.groupby('bus')['p_nom'].sum()
+CGas = np.array([CGas[node] if node in CGas.keys() else 0 for node in Nodel]) / 1000. 
+
+Net = pd.concat((
+    pd.read_csv("Data/links.csv", usecols=range(1,6), delimiter=","), 
+    pd.read_csv("Data/lines.csv", usecols=range(1,6), delimiter=",")
+    ))
+Net['p_nom'] = Net[['p_nom', 's_nom']].apply(lambda row: row['p_nom'] if not pd.isna(row['p_nom']) else row['s_nom'], axis=1)
+Net[['bus0', 'bus1']] = Net[['bus0', 'bus1']].map(lambda bus: n_node[bus])
+Net['loss'] = Net['length'] * 0.05 * 0.001 #5% per 1000 km
+CNet = Net.groupby(['bus0', 'bus1'])['p_nom'].sum().to_numpy()
+LNet = Net.groupby(['bus0', 'bus1'])['loss'].mean().to_numpy()
+BNet = Net[['bus0', 'bus1']].drop_duplicates().to_numpy()
+NetCost = Net.groupby(['bus0', 'bus1'])['capital_cost'].mean().to_numpy()
+NetLength = Net.groupby(['bus0', 'bus1'])['length'].mean().to_numpy()
+del Net
+
+#%%
 
 data_spec=[
     ("scenario", int64),
@@ -88,28 +68,33 @@ data_spec=[
     ("years", int64),
     ("intervals", int64),
     ("MLoad", float64[:, :]),
+    ("MRor", float64[:, :]),
+    ("RHydro", float64[:]),
     ("TSPV", float64[:, :]),
     ("TSWind", float64[:, :]),
     ("CHydro", float64[:]),
-    ("CBio", float64[:]),
-    ("CBaseload", float64[:]),
+    ("CGas", float64[:]),
+    ("CHVI", float64[:]),
     ("CPeak", float64[:]),
     ("coverage_int", int64[:]),
     ("Nodel_int", int64[:]),
     ("PVl_int", int64[:]),
     ("Windl_int", int64[:]),
-    ("basic_network", int64[:, :]),
-    ("network", int64[:, :, :, :]),
+    ("network", int64[:, :]),
     ("network_mask", boolean[:]),
-    ("directconns", int64[:, :]),
+    ("networksteps", int64),
     ("trans_mask", boolean[:, :]),
-    ("triangulars", int64[:]),
+    
+    ("cache_0_donors", types.DictType(int64, int64[:, :])),
+    ("cache_n_donors", types.DictType(types.UniTuple(int64, 2), int64[:, :, :])),
+    
     ("nhvi", int64),
     ("nodes", int64),
     ("pzones", int64),
     ("wzones", int64),
     ("pidx", int64),
     ("widx", int64),
+    ("gidx", int64),
     ("spidx", int64),
     ("seidx", int64),
     ("energy", float64),
@@ -119,17 +104,19 @@ data_spec=[
     ]
 
 @jitclass(data_spec)
-class Solution_data:
+class SolutionData:
     def __init__(
             self, 
             scenario: int, 
             years: int,
             profiling: bool,
+            networksteps: int
             ):
         self.scenario = scenario
         self.profiling = profiling
-        self.resolution = 0.5
+        self.resolution = 1
         self.efficiency = 0.8
+        self.networksteps = networksteps
         
         maxyears = int(self.resolution * len(MLoad) / 8760) 
         if years == -1:
@@ -140,68 +127,41 @@ class Solution_data:
             raise Exception
         self.intervals = int(self.years * 8760 / self.resolution)
         
-        if scenario <= 17:
-            node = Nodel_int[scenario % 10]
+        # Retain flexibility to define scenarios later
+        self.coverage_int = Nodel_int.copy()
         
-            self.MLoad =  np.atleast_2d(MLoad[: self.intervals,  Nodel_int == node]).T
-            self.TSPV =   np.atleast_2d(TSPV[: self.intervals,   PVl_int ==   node]).T
-            self.TSWind = np.atleast_2d(TSWind[: self.intervals, Windl_int == node]).T
+        self.MLoad =  MLoad[: self.intervals,  np.isin(Nodel_int, self.coverage_int)]
+        self.MRor  =  MRor[: self.intervals,  np.isin(Nodel_int, self.coverage_int)]
+        self.TSPV =   TSPV[: self.intervals,   np.isin(PVl_int,   self.coverage_int)]
+        self.TSWind = TSWind[: self.intervals, np.isin(Windl_int, self.coverage_int)]
+        
+        self.CHydro =    CHydro[   np.isin(Nodel_int, self.coverage_int)]
+        self.CGas =      CGas[     np.isin(Nodel_int, self.coverage_int)] 
+        self.RHydro =    RHydro[   np.isin(Nodel_int, self.coverage_int)]
+
+        self.Nodel_int = Nodel_int[np.isin(Nodel_int, self.coverage_int)]
+        self.PVl_int =   PVl_int[  np.isin(PVl_int,   self.coverage_int)]
+        self.Windl_int = Windl_int[np.isin(Windl_int, self.coverage_int)]
+
+        with objmode():
+            (self.network, 
+             self.network_mask, 
+             self.trans_mask, 
+             self.cache_0_donors,
+             self.cache_n_donors, 
+            ) = generate_network(BNet, self.Nodel_int, self.networksteps)
             
-            self.CHydro =    CHydro[   Nodel_int == node]
-            self.CBio =      CBio[     Nodel_int == node]
-            self.CBaseload = CBaseload[Nodel_int == node]
-            self.CPeak =     CPeak[    Nodel_int == node]
-        
-            self.Nodel_int = Nodel_int[Nodel_int == node]
-            self.PVl_int =   PVl_int[  PVl_int ==   node]
-            self.Windl_int = Windl_int[Windl_int == node]
-            # Nodel, PVl, Windl = [x[x == node] for x in (Nodel, PVl, Windl)]
-            self.basic_network=np.empty((0,0), np.int64)
-            self.network = np.empty((0, 0, 0, 0), dtype=np.int64)
-            self.network_mask = np.zeros(len(basic_network), dtype=np.bool_)
-            self.directconns = np.empty((0, 0), dtype=np.int64)
-            self.trans_mask = np.empty((0, 0), dtype=np.bool_)
-            self.triangulars = np.zeros(1, np.int64)
-        
-        elif scenario >= 21:
-            self.coverage_int = coverage_int[self.scenario % 10 - 1]
-            self.coverage_int = self.coverage_int[self.coverage_int != -1]
-        
-            self.MLoad =  MLoad[: self.intervals,  np.isin(Nodel_int, self.coverage_int)]
-            self.TSPV =   TSPV[: self.intervals,   np.isin(PVl_int,   self.coverage_int)]
-            self.TSWind = TSWind[: self.intervals, np.isin(Windl_int, self.coverage_int)]
-            
-            self.CHydro =    CHydro[   np.isin(Nodel_int, self.coverage_int)]
-            self.CBio =      CBio[     np.isin(Nodel_int, self.coverage_int)]
-            self.CBaseload = CBaseload[np.isin(Nodel_int, self.coverage_int)]
-            self.CPeak =     CPeak[    np.isin(Nodel_int, self.coverage_int)]
-        
-            if int64(0) not in self.coverage_int:
-                self.MLoad[:, np.where(self.coverage_int == 3)[0][0]] /= 0.9
-        
-            self.Nodel_int = Nodel_int[np.isin(Nodel_int, self.coverage_int)]
-            self.PVl_int =   PVl_int[  np.isin(PVl_int,   self.coverage_int)]
-            self.Windl_int = Windl_int[np.isin(Windl_int, self.coverage_int)]
-        
-            with objmode():
-                (self.basic_network, 
-                 self.network, 
-                 self.network_mask, 
-                 self.trans_mask, 
-                 self.directconns, 
-                 self.triangulars,
-                ) = generate_network(basic_network, self.Nodel_int)
-            
-        # firstyear, finalyear, timestep = (2020, 2020 + years - 1, 1)
-    
         self.nhvi = self.network_mask.sum()
+        self.CHVI = CNet[self.network_mask]
+        
         self.nodes = len(self.Nodel_int)
         
         self.pzones = len(self.PVl_int)
         self.wzones = len(self.Windl_int)
         self.pidx = self.pzones
         self.widx = self.pidx + self.wzones
-        self.spidx = self.widx + self.nodes
+        self.gidx = self.widx + self.nodes
+        self.spidx = self.gidx + self.nodes
         self.seidx = self.spidx + self.nodes
         
         self.energy = self.MLoad.sum() * 1000 * self.resolution / self.years  # MWh p.a.
@@ -209,13 +169,15 @@ class Solution_data:
         self.lb = np.array(
             [0.0] * self.pzones + 
             [0.0] * self.wzones + 
+            list(self.CGas) + 
             [0.0] * self.nodes + 
             [0.0] * self.nodes + 
-            [0.0] * self.nhvi
+            list(self.CHVI)
             )
         self.ub = np.array(
             [24.0]  * self.pzones + 
             [24.0]  * self.wzones + 
+            [24.0]  * self.nodes + 
             [24.0]  * self.nodes + 
             [600.0] * self.nodes + 
             [20.0]  * self.nhvi
@@ -226,14 +188,16 @@ class Solution_data:
         mloadmax = np.array([array_max(col) for col in self.MLoad.T])
         self.x0 = np.concatenate(
             (
-                self.MLoad.sum() / self.intervals * 0.75 / self.pzones / tspvmean,
-                self.MLoad.sum() / self.intervals * 0.75 / self.wzones / tswindmean,
+                self.MLoad.sum() / self.intervals * 0.70 / self.pzones / tspvmean,
+                self.MLoad.sum() / self.intervals * 0.70 / self.wzones / tswindmean,
+                mloadmax * 0.25,
                 mloadmax * 1,
                 mloadmax * 36,
                 np.repeat(array_max(mloadmax) * 0.6, self.nhvi),
             )
         )
-        self.x0 = np.minimum(self.ub, self.x0)
+        self.x0 = np.clip(self.x0, self.lb, self.ub)
+        
     
 #%%
 
@@ -248,28 +212,27 @@ solution_spec = [
     ("years", int64),
     ("efficiency", float64),
     ("energy", float64),
-    ("Flex_res", float64),
     ("Nodel_int", int64[:]),
     # ('PVl_int', int64[:]),
     # ('Windl_int', int64[:]),
-    ("networksteps", int64),
+    # Topology
     ("network_mask", boolean[:]),
-    ("network", int64[:, :, :, :]),
-    ("basic_network", int64[:, :]),
-    ("triangulars", int64[:]),
-    # ("directconns", int64[:, :]),
+    ("network", int64[:, :]),
+    ("networksteps", int64),
+    ("cache_0_donors", types.DictType(int64, int64[:, :])),
+    ("cache_n_donors", types.DictType(types.UniTuple(int64, 2), int64[:, :, :])),
     # Capacities in GW/GWh
     ("CPV", float64[:]),
     ("CWind", float64[:]),
     ("CPHP", float64[:]),
     ("CPHS", float64[:]),
     ("CHVI", float64[:]),
-    ("CBaseload", float64[:]),
     ("CPeak", float64[:]),
     ("CHydro", float64[:]),
-    ("CBio", float64[:]),
+    ("CGas", float64[:]),
+    # Nodally disaggregated Hydro resource     
+    ("RHydro", float64[:]), # for fast maths, kept in units such that (MHydro.sum(axis=0)<=RHydro).all()
     # Nodally diaggregated operations in GW/GWh
-    ("MFlexible", float64[:, :]),
     ("MDischarge", float64[:, :]),
     ("MCharge", float64[:, :]),
     ("MStorage", float64[:, :]),
@@ -280,12 +243,12 @@ solution_spec = [
     ("MPV", float64[:, :]),
     ("MWind", float64[:, :]),
     ("MLoad", float64[:, :]),
-    ("MBaseload", float64[:, :]),
+    ("MRor", float64[:, :]),
     ("MHydro", float64[:, :]),
-    ("MBio", float64[:, :]),
+    ("MGas", float64[:, :]),
     ("MUnbalanced", float64[:,:]),
     # Transmission
-    ("TDC", float64[:, :]),
+    ("THVI", float64[:, :]),
     ("Topology", float64[:, :]),
     ("trans_mask", boolean[:, :]),
     ("TImport", float64[:, :, :]),
@@ -302,12 +265,7 @@ solution_spec = [
     ("LCOBL", float64),
     ("CAPEX", float64),
     ("OPEX", float64),
-    
-    ("cache_primary_donors", types.DictType(int64, int64[:, :])),
-    ("cache_secondary_donors", types.DictType(int64, int64[:, :, :])),
-    ("cache_tertiary_donors", types.DictType(int64, int64[:, :, :])),
-    ("cache_quaternary_donors", types.DictType(int64, int64[:, :, :])),
-    
+    # Profiling
     ("profiling", boolean),
     ('profile_overhead', float64),
     # time profiling
@@ -348,7 +306,7 @@ class Solution:
     def __init__(
             self, 
             x: np.ndarray, 
-            sd: Solution_data
+            sd: SolutionData
             ):
         assert len(x) == len(sd.lb)
 
@@ -366,38 +324,31 @@ class Solution:
         # self.PVl_int, self.Windl_int = sd.PVl_int, sd.Windl_int
         self.network_mask = sd.network_mask
         self.network = sd.network
-        self.basic_network = sd.basic_network
-        # self.directconns = sd.directconns
-        self.triangulars = sd.triangulars
-        self.networksteps = np.where(self.triangulars == self.network.shape[2])[0][0]
+        self.networksteps = sd.networksteps
         self.trans_mask = sd.trans_mask
 
         self.nhvi = self.network_mask.sum()
 
-        self.Flex_res = 20000 / self.resolution * self.years
-
-
         self.CPV =   x[        : sd.pidx]
         self.CWind = x[sd.pidx : sd.widx]
-        self.CPHP =  x[sd.widx : sd.spidx]
+        self.CGas =  x[sd.widx : sd.gidx]
+        self.CPHP =  x[sd.gidx : sd.spidx]
         self.CPHS =  x[sd.spidx: sd.seidx]
         self.CHVI =  x[sd.seidx: ]
-        self.CBaseload = sd.CBaseload
-        self.CPeak =     sd.CPeak
         self.CHydro =    sd.CHydro
-        self.CBio =      sd.CBio
-        
+
+        self.RHydro = sd.RHydro * self.years # units such that (MHydro.sum(axis=0)<=RHydro).all()
+
         self.MLoad = sd.MLoad
+        self.MRor = sd.MRor
         self.MPV = np.zeros((self.intervals, self.nodes))
         self.MWind = np.zeros((self.intervals, self.nodes))
         for i, n in enumerate(self.Nodel_int):
             self.MPV[:, i] += (sd.TSPV[:self.intervals, sd.PVl_int == n] * self.CPV[sd.PVl_int == n]).sum(axis=1)
             self.MWind[:, i] += (sd.TSWind[:self.intervals, sd.Windl_int == n] * self.CWind[sd.Windl_int == n]).sum(axis=1)
 
-        self.cache_primary_donors = TypedDict.empty(int64, int64[:, :])
-        self.cache_secondary_donors = TypedDict.empty(int64, int64[:, :, :])
-        self.cache_tertiary_donors = TypedDict.empty(int64, int64[:, :, :])
-        self.cache_quaternary_donors = TypedDict.empty(int64, int64[:, :, :])
+        self.cache_0_donors = sd.cache_0_donors
+        self.cache_n_donors = sd.cache_n_donors
         
         self.profile_overhead=0.0
         self.profiling = sd.profiling
@@ -442,28 +393,10 @@ class Solution:
             self.calls_transmission += 1
             self.profile_overhead/=10000
         
-    def _instantiate_operations(self):
-        self.MNetload = self.MLoad - self.MPV - self.MWind - self.CBaseload
-        self.MUnbalanced = self.MNetload.copy()
-        self.MDeficit, self.MSpillage = np.maximum(0, self.MNetload), -np.minimum(0, self.MNetload)
-
-        self.MFlexible = np.zeros((self.intervals, self.nodes), dtype=np.float64)
-
-        self.MDischarge = np.zeros((self.intervals, self.nodes), dtype=np.float64)
-        self.MCharge = np.zeros((self.intervals, self.nodes), dtype=np.float64)
-        self.MStorage = np.zeros((self.intervals, self.nodes), dtype=np.float64)
-        self.MStorage[-1] = 0.5 * self.CPHS
-
-        self.TImport = np.zeros((self.intervals, self.nodes, self.nhvi), dtype=np.float64)
-        self.TExport = np.zeros((self.intervals, self.nodes, self.nhvi), dtype=np.float64)
-        self.TDC = np.zeros((self.intervals, self.nodes), dtype=np.float64)
-
-
 #%% 
 
 @njit
-def Evaluate(S, cost_model):
-    S._instantiate_operations()
+def Evaluate(S, costFactors):
     Simulate(S)
 
     S.Penalties = np.maximum(0, S.MDeficit.sum())*1000  # MWh/resolution
@@ -474,40 +407,38 @@ def Evaluate(S, cost_model):
     cost = np.array(
         [
             # generation capex
-            S.CPV.sum() * cost_model.pv[0],
-            S.CWind.sum() * cost_model.onsw[0],
-            0,  # S.CGas.sum()  * cost_model.gas[0],
-            (S.CHydro.sum() + S.CBio.sum() + S.CBaseload.sum()) * cost_model.hydro[0],
+            S.CPV.sum() * costFactors.pv[0],
+            S.CWind.sum() * costFactors.onsw[0],
+            S.CGas.sum()  * costFactors.gas[0],
+            S.CHydro.sum() * costFactors.hydro[0],
             # generation fom
-            S.CPV.sum() * cost_model.pv[1],
-            S.CWind.sum() * cost_model.onsw[1],
-            0,  # S.CGas.sum()  * cost_model.gas[1],
-            (S.CHydro.sum() + S.CBio.sum() + S.CBaseload.sum()) * cost_model.hydro[1],
+            S.CPV.sum() * costFactors.pv[1],
+            S.CWind.sum() * costFactors.onsw[1],
+            S.CGas.sum()  * costFactors.gas[1],
+            S.CHydro.sum() * costFactors.hydro[1],
             # generation vom
             # pv, onsw, battery are 0
-            0,  # S.GGas.sum() * S.resolution / S.years * cost_model.gas[2],
-            (S.MFlexible.sum() + S.CBaseload.sum() * S.intervals) * S.resolution / S.years * cost_model.hydro[2],
+            S.MGas.sum() * S.resolution / S.years * costFactors.gas[2],
+            S.MHydro.sum() * S.resolution / S.years * costFactors.hydro[2],
             # storage
-            S.CPHP.sum() * cost_model.phes[0],
-            S.CPHS.sum() * cost_model.phes[1],
-            S.CPHP.sum() * cost_model.phes[2],
-            S.MDischarge.sum() * S.resolution / S.years * cost_model.phes[3],
-            cost_model.phes[4],
+            S.CPHP.sum() * costFactors.phes[0],
+            S.CPHS.sum() * costFactors.phes[1],
+            S.CPHP.sum() * costFactors.phes[2],
+            S.MDischarge.sum() * S.resolution / S.years * costFactors.phes[3],
+            costFactors.phes[4],
         ]
         +
         # transmission network
         list(
             (
-                S.CPV.sum()
-                + S.CWind.sum()
-                +
-                # S.CGas.sum() +
+                S.CPV.sum() +
+                S.CWind.sum() +
+                S.CGas.sum() +
                 S.CHydro.sum()
-                + S.CBio.sum()
             )
-            * cost_model.ac
+            * costFactors.ac
         )
-        + list((CHVI * cost_model.hvi).sum(axis=1))
+        + list((CHVI * costFactors.hvi).sum(axis=1))
     )
 
     # Levelised Costs of:
@@ -515,15 +446,11 @@ def Evaluate(S, cost_model):
     S.LCOE = cost.sum() / S.energy
     # Generation
     S.LCOG = cost[:10].sum() / (
-        1000
-        * S.resolution
-        / S.years
-        * (
+        1000 * S.resolution / S.years * (
             S.MPV.sum()
             + S.MWind.sum()
-            # +S.MGas.sum()
-            + S.MFlexible.sum()
-            + S.CBaseload.sum() * S.intervals
+            + S.MGas.sum()
+            + S.MHydro.sum()
         )
     )
     # Storage

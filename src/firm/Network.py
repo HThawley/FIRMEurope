@@ -1,63 +1,113 @@
 import numpy as np
+from numba import njit, int64, uint64, prange
+from numba.types import UniTuple
+from numba.typed.typeddict import Dict as TypedDict
+from datetime import datetime as dt
 
 
-def network_neighbours(network, n):
-    isn_mask = np.isin(network, n)
-    hasn_mask = isn_mask.sum(axis=1).astype(bool)
-    joins_n = network[hasn_mask][~isn_mask[hasn_mask]]
-    return joins_n
+@njit
+def network_neighbours(directconns, n, conn_cache):
+    cache_result = conn_cache.get(n, None)
+    if cache_result is not None:
+        return cache_result
+    result = np.stack((
+        np.where(directconns[n]!=-1)[0], 
+        directconns[n][np.where(directconns[n]!=-1)[0]]
+    ))
+    conn_cache[n] = result
+    return result
 
 
-def nthary_network(network0, network_1):
+@njit
+def _nthary_network(network_piece, cache_0_donors):
+    joins_start = cache_0_donors[network_piece[0]][0]
+    joins_end = cache_0_donors[network_piece[-1]][0]
+    
+    joins_start = np.array([n for n in joins_start if n not in network_piece])
+    num_srows = len(joins_start)
+    joins_end = np.array([n for n in joins_end if n not in network_piece])
+    num_erows = len(joins_end)
+    
+    _networkn = np.empty((num_srows+num_erows, len(network_piece) + 1), dtype=np.int64)
+    
+    for i in range(num_srows):
+        _networkn[i, 0] = joins_start[i]
+        _networkn[i, 1:] = network_piece
+    for i in range(num_erows):
+        _networkn[num_srows + i, -1] = joins_end[i]
+        _networkn[num_srows + i, :-1] = network_piece
+    
+    return np.atleast_2d(_networkn)
+    
+@njit
+def canonical_row(row):
+    """Return the lexicographically smaller of the row or its reverse."""
+    m = len(row)
+    rev = np.empty(m, dtype=row.dtype)
+    for i in range(m):
+        rev[i] = row[m - 1 - i]
+
+    for i in range(m):
+        if row[i] < rev[i]:
+            return row
+        elif row[i] > rev[i]:
+            return rev
+    return row  # Equal
+
+@njit
+def dedup_networkn(networkn):
+    n, m = networkn.shape
+    keys = np.empty((n, m), dtype=networkn.dtype)
+
+    for i in range(n):
+        keys[i] = canonical_row(networkn[i])
+
+    # Proxy lexsort using stable key — workaround for no lexsort in njit
+    sort_idx = np.argsort(np.sum(keys * (np.arange(m)[::-1] + 1), axis=1))
+    keep = np.ones(n, dtype=np.bool_)
+
+    for i in range(1, n):
+        same = True
+        a = keys[sort_idx[i]]
+        b = keys[sort_idx[i - 1]]
+        for j in range(m):
+            if a[j] != b[j]:
+                same = False
+                break
+        if same:
+            keep[sort_idx[i]] = False
+
+    return networkn[keep]
+
+@njit
+def nthary_network(network_1, cache_0_donors):
     """primary, secondary, tertiary, ..., nthary"""
-    """supply n-1thary to generate nthary etc."""
-    networkn = -1 * np.ones((1, network_1.shape[1] + 1), dtype=np.int64)
-    for row in network_1:
-        _networkn = -1 * np.ones((1, network_1.shape[1] + 1), dtype=np.int64)
-        joins_start = network_neighbours(network0, row[0])
-        joins_end = network_neighbours(network0, row[-1])
-        for n in joins_start:
-            if n not in row:
-                _networkn = np.vstack((_networkn, np.insert(row, 0, n)))
-        for n in joins_end:
-            if n not in row:
-                _networkn = np.vstack((_networkn, np.append(row, n)))
-        _networkn = _networkn[1:, :]
-        dup = []
-        # find rows which are already in network
-        for i, r in enumerate(_networkn):
-            for s in networkn:
-                if np.setdiff1d(r, s).size == 0:
-                    dup.append(i)
-        # find duplicated rows within n3
-        for i, r in enumerate(_networkn):
-            for j, s in enumerate(_networkn):
-                if i == j:
-                    continue
-                if np.setdiff1d(r, s).size == 0:
-                    dup.append(i)
-        _networkn = np.delete(_networkn, np.unique(np.array(dup, dtype=np.int64)), axis=0)
-        if _networkn.size > 0:
-            networkn = np.vstack((networkn, _networkn))
-    networkn = networkn[1:, :]
+    """supply (n-1)thary to generate nthary etc."""
+    network_cache = TypedDict.empty(int64, int64[:, :])
+    num_rows = 0
+    for i in range(len(network_1)):
+        network_cache[i] = _nthary_network(network_1[i], cache_0_donors)
+        num_rows += len(network_cache[i])        
+    
+    networkn = np.empty((num_rows, network_1.shape[1] + 1), dtype=np.int64)
+    
+    row = 0
+    for i in range(len(network_1)): 
+        nrows = len(network_cache[i])
+        networkn[row : row + nrows, :] = network_cache[i]
+        row += nrows
+    
+    networkn = dedup_networkn(networkn)
+        
     return networkn
 
-def count_lines(network):
-    unique, counts = np.unique(network[:, np.array([0, -1])], return_counts=True)
-    if counts.size > 0:
-        return counts.max()
-    return 0
-
-
-def generate_network(network, Nodel_int):
-
+def generate_network(network, Nodel_int, networksteps):
     # direct network connections
     network_mask = np.array([(network == j).sum(axis=1).astype(np.bool_) for j in Nodel_int]).sum(axis=0) == 2
     network = network[network_mask, :]
     networkdict = {v: k for k, v in enumerate(Nodel_int)}
     # translate into indicies rather than Nodel_int values
-    basic_network = np.array([networkdict[n] for n in network.flatten()], np.int64).reshape(network.shape)
-    network = basic_network.copy()
+    network = np.array([networkdict[n] for n in network.flatten()], np.int64).reshape(network.shape)
     
     trans_mask = np.zeros((len(Nodel_int), len(network)), np.bool_)
     for line, row in enumerate(network):
@@ -67,35 +117,31 @@ def generate_network(network, Nodel_int):
     for n, row in enumerate(network):
         directconns[*row] = n
         directconns[*row[::-1]] = n
+    
+    # build cache in advance of parallelisation
+    cache_0_donors = TypedDict.empty(int64, int64[:, :])
+    cache_n_donors = TypedDict.empty(UniTuple(int64, 2), int64[:, :, :])
+    
+    for n in Nodel_int:
+        network_neighbours(directconns, n, cache_0_donors)
+  
+    nthary = network.copy()
+    for leg in range(1, networksteps):
+        nthary = nthary_network(nthary, cache_0_donors)
+        for n in Nodel_int: 
+            forward = np.where(n==nthary[:, 0])[0] 
+            reverse = np.where(n==nthary[:,-1])[0]
+            
+            nodes = np.vstack((nthary[forward, 1:], nthary[reverse, :-1][:, ::-1]))
+            lines = np.empty_like(nodes)
+            
+            for i in range(nodes.shape[0]):
+                lines[i, 0] = directconns[n, nodes[i, 0]]
+                for j in range(1, nodes.shape[1]):
+                    lines[i, j] = directconns[nodes[i, j-1], nodes[i, j]]
+            
+            cache_n_donors[(n, leg)] = np.dstack((nodes, lines)).T
+        
+    return network, network_mask, trans_mask, cache_0_donors, cache_n_donors
 
-    networks = [network]
-    while True:
-        n = nthary_network(network, networks[-1])
-        if n.size > 0:
-            networks.append(n)
-        else:
-            break
-    triangulars = np.array([sum(range(n)) for n in range(1, len(networks) + 2)], np.int64)  # enough for now
 
-    maxconnections = max([count_lines(network) for network in networks])
-
-    network = -1 * np.ones((2, len(Nodel_int), triangulars[len(networks)], maxconnections), dtype=np.int64)
-    for i, net in enumerate(networks):
-        conns = np.zeros(len(Nodel_int), int)
-        for j, row in enumerate(net):
-            network[0, row[0], triangulars[i] : triangulars[i + 1], conns[row[0]]] = row[1:]
-            network[0, row[-1], triangulars[i] : triangulars[i + 1], conns[row[-1]]] = row[:-1][::-1]
-            conns[row[0]] += 1
-            conns[row[-1]] += 1
-
-    for i in range(network.shape[1]):
-        for j in range(network.shape[2]):
-            for k in range(network.shape[3]):
-                if j in triangulars:
-                    start = i
-                else:
-                    start = network[0, i, j - 1, k]
-                network[1, i, j, k] = directconns[start, network[0, i, j, k]]
-
-    directconns = directconns[:-1, :-1]
-    return basic_network, network, network_mask, trans_mask, directconns, triangulars

@@ -5,9 +5,10 @@ class Parameters:
     s: int  # scenario
     y: int  # years
     p: bool # profiling
-    
+    n: int  # max. transmission steps
+        
     def __iter__(self):
-        return iter((self.s, self.y, self.p))
+        return iter((self.s, self.y, self.p, self.n))
     
     
 @dataclass
