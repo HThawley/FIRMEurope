@@ -11,38 +11,6 @@ from numba import njit  # type: ignore
 
 from firm.Utils import cclock, array_min, array_max_2d_axis1, array_sum_2d_axis0, zero_safe_division # type: ignore
 
-
-@njit
-def get_primary_donors(solution, n):
-    cache_result = solution.cache_primary_donors.get(n, None)
-    if cache_result is not None:
-        return cache_result
-
-    result = solution.network[:, n, 0, :]
-    result = result[:, result[0] != -1]
-    solution.cache_primary_donors[n] = result
-    return result
-
-@njit
-def get_nthary_donors(solution, n, leg):
-    if leg == 1: 
-        cache = solution.cache_secondary_donors
-    elif leg == 2:
-        cache = solution.cache_tertiary_donors
-    elif leg == 3:
-        cache = solution.cache_quaternary_donors
-    
-    cache_result = cache.get(n, None)
-    if cache_result is not None:
-        return cache_result
-    
-    result = solution.network[:, n, solution.triangulars[leg] : solution.triangulars[leg + 1], :]
-    result = result[:, :, result[0, 0, :] != -1]
-    cache[n] = result
-    return result
-    
-
-
 @njit
 def Interconnection(solution, Fillt, Surplust, Importt, Exportt):
     # The primary connections are simpler (and faster) to model than the general
@@ -60,7 +28,7 @@ def Interconnection(solution, Fillt, Surplust, Importt, Exportt):
         # appropriate slice of network array
         # pdonors is equivalent to donors later on but has different ndim so needs to
         #   be a different variable name for static typing
-        pdonors, pdonor_lines = get_primary_donors(solution, n)
+        pdonors, pdonor_lines = solution.cache_0_donors[n]
         _usage = 0.0 # badly named by avoids creating more variables
         for d in pdonors: 
             _usage += Surplust[d]
@@ -120,7 +88,7 @@ def Interconnection(solution, Fillt, Surplust, Importt, Exportt):
                     if Fillt[n] < 1e-6:
                         continue
                     
-                    donors, donor_lines = get_nthary_donors(solution, n, leg)
+                    donors, donor_lines = solution.cache_n_donors[(n, leg)]
 
                     if donors.shape[1] == 0:
                         break  # break if no valid donors

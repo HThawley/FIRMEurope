@@ -28,11 +28,11 @@ def Debug(solution):
                 + solution.MSpillage[t]
                 - solution.MPV[t]
                 - solution.MWind[t]
-                - solution.CBaseload
-                - solution.MFlexible[t]
+                - solution.MHydro[t]
+                - solution.MGas[t]
                 - solution.MDischarge[t]
                 - solution.MDeficit[t]
-                - (solution.TImport[t] + solution.TExport[t]).sum(axis=0)
+                - (solution.TImport[t] + solution.TExport[t]).sum(axis=1)
             )
             < 0.001
         ).all(), f"Energy Balance, {t}"
@@ -100,13 +100,13 @@ def LPGM(solution):
             solution.MStorage.sum(axis=1),
         )
     )
-    TDC = np.zeros((len(solution.network_mask), solution.intervals))
-    TDC[solution.network_mask] = solution.TDC.T
+    THVI = np.zeros((len(solution.network_mask), solution.intervals))
+    THVI[solution.network_mask] = solution.THVI.T
     
     C = np.vstack(
         (
             C, 
-            TDC
+            THVI
         )
     )
     C = np.around(1000.*C.T)
@@ -236,7 +236,7 @@ def Information(x):
         assert S.MDeficit.sum() < 0.1, "Energy generation and demand are not balanced."
     except AssertionError:
         pass
-    S.TDC = (np.atleast_3d(S.trans_mask).T * (S.TImport + S.TExport)).sum(axis=2)
+    S.THVI = (np.atleast_3d(S.trans_mask).T * (S.TImport + S.TExport)).sum(axis=2)
     S.MImport = (S.TImport+S.TExport).sum(axis=1)
 
     S.MHydro = np.minimum(S.MFlexible, S.CHydro)

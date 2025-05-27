@@ -2,8 +2,21 @@ from numba import njit
 import numpy as np
 
 @njit
+def zero_safe_division(numerator, denominator, error=0.0):
+    return error if denominator == 0.0 else numerator / denominator
+
+@njit
+def zsd_array(numerator, denominator, error=0.0):
+    retarr = np.full(numerator.shape, error)
+    for i in range(len(numerator)):
+        if denominator[i] != 0.0:
+            retarr[i] = numerator[i]/denominator[i] 
+    return retarr
+
+@njit
 def zero_safe_division(numerator, denominator, error=0):
     return error if denominator == 0 else numerator / denominator
+
 
 @njit
 def itemwise_minimum_2d_0d(arr1, scal, retarr):

@@ -6,33 +6,33 @@ from firm.Utils import zero_safe_division
 from firm.Input import (
     Evaluate,
     Solution,
-    Solution_data,
+    SolutionData,
 )
 
 
-def Benchmark(n, sd, cost_model):
-    _benchmark(n, sd, cost_model)
+def Benchmark(n, sd, costFactors):
+    _benchmark(n, sd, costFactors)
 
 @njit(parallel=True)
-def _benchmark(n, sd, cost_model):
+def _benchmark(n, sd, costFactors):
     result = np.empty(n)
     for j in prange(n):
-        result[j] = test(sd.x0, sd, cost_model)
+        result[j] = test(sd.x0, sd, costFactors)
 
 @njit
-def test(x, sd, cost_model):
+def test(x, sd, costFactors):
     solution = Solution(x, sd)
-    Evaluate(solution, cost_model)
+    Evaluate(solution, costFactors)
     return solution.LCOE+solution.Penalties
 
 def profile(x, 
-            solution_data,
-            cost_model, 
+            solutionData,
+            costFactors, 
             disp: bool = True, 
             ):
-    solution = Solution(x, solution_data)
+    solution = Solution(x, solutionData)
     start = perf_counter()
-    Evaluate(solution, cost_model)
+    Evaluate(solution, costFactors)
     time = perf_counter() - start
 
     profiles = [item[5:] for item in dir(solution) if item.startswith('time_')]

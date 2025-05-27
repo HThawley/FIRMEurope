@@ -1,7 +1,7 @@
 import numpy as np
 from numba import boolean, float64, int64, njit  # type: ignore
 from numba.experimental import jitclass  # type: ignore
-from firm.Input import lengths, undersea_mask
+from firm.Input import NetLength, NetCost
 
 USD_to_AUD = 1 / 0.65  # AUD to USD where necessary
 discount_rate = 0.0599  # Real discount rate - same as gencost
@@ -259,12 +259,10 @@ def annualization_fossils(capex, fom, vom, fuel, carbon, life, dr):
         ("hvi", float64[:]),
         ("hvu", float64[:]),
         ("scenario", int64),
-        ("lengths", int64[:]),
-        ("undersea_mask", boolean[:]),
         ("network_mask", boolean[:]),
     ]
 )
-class Raw_Costs:
+class RawCosts:
     def __init__(
         self,
         solution_data
@@ -281,7 +279,7 @@ class Raw_Costs:
         self.phes = np.array(phes, np.float64)
         self.battery = np.array(battery, np.float64)
         self.hvac = np.array(hvac, np.float64)
-        self.hvi = np.array(interconnector, np.float64)
+        # self.hvi = np.array(interconnector, np.float64)
         self.hvu = np.array(hv_undersea, np.float64)
 
         self.dr = discount_rate
@@ -291,8 +289,8 @@ class Raw_Costs:
         self.gas[4] = tCO2e_per_GJ_gas / MWh_per_GJ * price
         self.coal[4] = tCO2e_per_GJ_coal / MWh_per_GJ * price
 
-    def CostFactors(self):
-        return Cost_Factors(self)
+    def GetCostFactors(self):
+        return CostFactors(self)
 
 
 @jitclass(
@@ -309,86 +307,73 @@ class Raw_Costs:
         ("hvi", float64[:, :]),
     ]
 )
-class Cost_Factors:
-    def __init__(self, raw_costs):
-        self.pv = annualization(raw_costs.pv[0], raw_costs.pv[1], raw_costs.pv[2], raw_costs.pv[3], raw_costs.dr)
+class CostFactors:
+    def __init__(self, rc):
+        self.pv = annualization(rc.pv[0], rc.pv[1], rc.pv[2], rc.pv[3], rc.dr)
         self.onsw = annualization(
-            raw_costs.onsw[0], raw_costs.onsw[1], raw_costs.onsw[2], raw_costs.onsw[3], raw_costs.dr
+            rc.onsw[0], rc.onsw[1], rc.onsw[2], rc.onsw[3], rc.dr
         )
         self.offw = annualization(
-            raw_costs.offw[0], raw_costs.offw[1], raw_costs.offw[2], raw_costs.offw[3], raw_costs.dr
+            rc.offw[0], rc.offw[1], rc.offw[2], rc.offw[3], rc.dr
         )
 
         self.gas = annualization_fossils(
-            raw_costs.gas[0],
-            raw_costs.gas[1],
-            raw_costs.gas[2],
-            raw_costs.gas[3],
-            raw_costs.gas[4],
-            raw_costs.gas[5],
-            raw_costs.dr,
+            rc.gas[0],
+            rc.gas[1],
+            rc.gas[2],
+            rc.gas[3],
+            rc.gas[4],
+            rc.gas[5],
+            rc.dr,
         )
         self.coal = annualization_fossils(
-            raw_costs.coal[0],
-            raw_costs.coal[1],
-            raw_costs.coal[2],
-            raw_costs.coal[3],
-            raw_costs.coal[4],
-            raw_costs.coal[5],
-            raw_costs.dr,
+            rc.coal[0],
+            rc.coal[1],
+            rc.coal[2],
+            rc.coal[3],
+            rc.coal[4],
+            rc.coal[5],
+            rc.dr,
         )
 
         self.hydro = annualization(
-            raw_costs.hydro[0], raw_costs.hydro[1], raw_costs.hydro[2], raw_costs.hydro[3], raw_costs.dr
+            rc.hydro[0], rc.hydro[1], rc.hydro[2], rc.hydro[3], rc.dr
         )
         self.phes = annualization_phes(
-            raw_costs.phes[0],
-            raw_costs.phes[1],
-            raw_costs.phes[2],
-            raw_costs.phes[3],
-            raw_costs.phes[4],
-            raw_costs.phes[5],
-            raw_costs.phes[6],
-            raw_costs.dr,
+            rc.phes[0],
+            rc.phes[1],
+            rc.phes[2],
+            rc.phes[3],
+            rc.phes[4],
+            rc.phes[5],
+            rc.phes[6],
+            rc.dr,
         )
 
         self.battery = annualization_battery(
-            raw_costs.battery[0],
-            raw_costs.battery[1],
-            raw_costs.battery[2],
-            raw_costs.battery[3],
-            raw_costs.battery[4],
-            raw_costs.dr,
+            rc.battery[0],
+            rc.battery[1],
+            rc.battery[2],
+            rc.battery[3],
+            rc.battery[4],
+            rc.dr,
         )
 
         self.ac = annualization_transmission(
-            raw_costs.hvac[0], raw_costs.hvac[1], raw_costs.hvac[2], raw_costs.hvac[3], 20, raw_costs.dr
+            rc.hvac[0], rc.hvac[1], rc.hvac[2], rc.hvac[3], 20, rc.dr
         )
 
-        self.hvi = np.zeros((len(raw_costs.network_mask), 3), np.float64)
-        if raw_costs.scenario >= 21:
-            for i, undersea in enumerate(undersea_mask):
-                if raw_costs.network_mask[i] is False:
-                    continue
-                if undersea:
-                    self.hvi[i] = annualization_transmission(
-                        raw_costs.hvu[0],
-                        raw_costs.hvu[1],
-                        raw_costs.hvu[2],
-                        raw_costs.hvu[3],
-                        lengths[i],
-                        raw_costs.dr,
-                    )  # vom is 0
-                else:
-                    self.hvi[i] = annualization(
-                        raw_costs.hvi[0], raw_costs.hvi[1], raw_costs.hvi[2], raw_costs.hvi[3], raw_costs.dr
-                    )
+        self.hvi = np.zeros((len(rc.network_mask), 3), np.float64)
+        for i in range(len(rc.network_mask)):
+            self.hvi[i] = annualization_transmission(
+                NetCost[i], 0, 0, 30, NetLength[i], rc.dr
+            )
         self.hvi = self.hvi.T
 
 if __name__=='__main__':
     from firm.Parameters import Parameters
-    from firm.Input import Solution_data
-    parameters = Parameters(21, 1, False)
-    sd = Solution_data(*parameters)
-    costs = Raw_Costs(sd).CostFactors()
+    from firm.Input import SolutionData
+    parameters = Parameters(21, 1, False, 4)
+    sd = SolutionData(*parameters)
+    costFactors = RawCosts(sd).GetCostFactors()
     

@@ -52,7 +52,16 @@ def statistics(
 )
 @click.option(
     "-n", 
-    "--number", 
+    "--networksteps", 
+    default=5,
+    type=click.IntRange(-1), 
+    required=False,   
+    show_default=True, 
+    help="maximum number of transmission steps",
+)
+@click.option(
+    "-r", 
+    "--repeats", 
     default=3, 
     type=click.IntRange(1),
     show_default=True, 
@@ -66,30 +75,31 @@ def statistics(
     type=click.IntRange(1),
     show_default=True, 
     required=False, 
-    help="How many evaluations per batch",
+    help="How many evaluations per batch (default 3*cpus)",
     )
 def benchmark(
     scenario: int,
     years: int,
-    number: int, 
+    networksteps: int,
+    repeats: int, 
     evals: int, 
 ):
     
     print("Running Benchmarking...", end="")
     from firm.Benchmark import Benchmark
-    from firm.Input import Solution_data
-    from firm.Costs import Raw_Costs
+    from firm.Input import SolutionData
+    from firm.Costs import RawCosts
     
-    parameters = Parameters(scenario, years, False)
-    sd = Solution_data(*parameters)
-    cost_model = Raw_Costs(sd).CostFactors()
+    parameters = Parameters(scenario, years, False, networksteps)
+    sd = SolutionData(*parameters)
+    costFactors = RawCosts(sd).GetCostFactors()
     #compile
-    Benchmark(2, sd, cost_model)
+    Benchmark(2, sd, costFactors)
     start = perf_counter()
-    for i in range(number): 
-        Benchmark(evals, sd, cost_model)
+    for i in range(repeats): 
+        Benchmark(evals, sd, costFactors)
     time = perf_counter() - start
-    print(f"\rBenchmarking took {time/number} per parallel batch of {evals} ({time/number/evals} per eval).")
+    print(f"\rBenchmarking took {time/repeats} per parallel batch of {evals} ({time/repeats/evals} per eval).")
 
 @click.command
 @click.option(
@@ -110,22 +120,32 @@ def benchmark(
     show_default=True, 
     help="no. of years to model",
 )
+@click.option(
+    "-n", 
+    "--networksteps", 
+    default=5,
+    type=click.IntRange(-1), 
+    required=False,   
+    show_default=True, 
+    help="maximum number of transmission steps",
+)
 def profile(
     scenario: int,
     years: int,
+    networksteps: int,
 ):
-    #%%
+    
     print("Running Profiling...", end="")
     from firm.Benchmark import profile
-    from firm.Input import Solution_data
-    from firm.Costs import Raw_Costs
+    from firm.Input import SolutionData
+    from firm.Costs import RawCosts
     from firm.Utils import zero_safe_division
-    parameters = Parameters(scenario, years, True)
-    sd = Solution_data(*parameters)
-    cost_model = Raw_Costs(sd).CostFactors()
+    parameters = Parameters(scenario, years, True, networksteps)
+    sd = SolutionData(*parameters)
+    costFactors = RawCosts(sd).GetCostFactors()
     
-    solution, time, ctwt = profile(sd.x0, sd, cost_model, False) # compile
-    solution, time, ctwt = profile(sd.x0, sd, cost_model, False)
+    solution, time, ctwt = profile(sd.x0, sd, costFactors, False) # compile
+    solution, time, ctwt = profile(sd.x0, sd, costFactors, False)
     ctwt = ctwt*1000 # seconds to microseconds
     print("\r", " "*25, "\r")
     print("""Warning: 
@@ -382,6 +402,15 @@ Profiling overhead is not evenly split between components
     help="No. of years to simulate. -1 indicates max",
 )
 @click.option(
+    "-n", 
+    "--networksteps", 
+    default=5,
+    type=click.IntRange(-1), 
+    required=False,   
+    show_default=True, 
+    help="maximum number of transmission steps",
+)
+@click.option(
     "-i",
     "--iterations",
     default=1000,
@@ -456,6 +485,7 @@ Profiling overhead is not evenly split between components
 def optimise(
     scenario: int,
     years: int,
+    networksteps: int,
     iterations: int,
     popsize: int,
     mutation: float,
@@ -470,6 +500,7 @@ def optimise(
         s = scenario,
         y = years,
         p = False,
+        n = networksteps,
     )
     hyperparam = DE_Hyperparameters(
         i = iterations, 
@@ -483,12 +514,12 @@ def optimise(
         f = fileprint,
         )
     
-    from firm.Input import Solution_data
+    from firm.Input import SolutionData
     from firm.Optimisation import Optimise
     
-    solution_data = Solution_data(*param)
+    solutionData = SolutionData(*param)
   
-    result, time = Optimise(solution_data, hyperparam)
+    result, time = Optimise(solutionData, hyperparam)
     # print(result.x)
 
 @click.command
@@ -509,6 +540,15 @@ def optimise(
     required=False,
     show_default=True,
     help="No. of years to simulate. -1 indicates max",
+)
+@click.option(
+    "-n", 
+    "--networksteps", 
+    default=5,
+    type=click.IntRange(-1), 
+    required=False,   
+    show_default=True, 
+    help="maximum number of transmission steps",
 )
 @click.option(
     "-i",
@@ -585,6 +625,7 @@ def optimise(
 def polish(
     scenario: int,
     years: int,
+    networksteps: int,
     iterations: int,
     popsize: int,
     mutation: float,
@@ -618,12 +659,12 @@ def polish(
         f = fileprint,
         )
     
-    from firm.Input import Solution_data
+    from firm.Input import SolutionData
     from firm.Optimisation import Polish
     
-    solution_data = Solution_data(*param)
+    solutionData = SolutionData(*param)
     
-    result, time = Polish(x0, solution_data, hyperparam)
+    result, time = Polish(x0, solutionData, hyperparam)
     print(result.x)
 
 @click.command
