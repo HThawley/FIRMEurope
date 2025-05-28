@@ -64,8 +64,6 @@ class FilePrinter:
         self._copyfile(False)
         print('\r'+' '*40, end='\r')
     
-    def _cr
-    
     def _createfile(self, header):
         with open(self.file_name, 'w', newline='') as file:
             writer(file).writerow(header)
