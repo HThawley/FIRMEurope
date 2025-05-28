@@ -17,6 +17,8 @@ class FilePrinter:
         self.temp_file_path = '-temp.csv'.join(self.file_name.split('.csv'))
         self.save_freq=save_freq
         self.callno = 0
+        if 'Results' not in os.listdir():
+            os.mkdir("Results")
         if header is not None and self.save_freq > 0: 
             if resume is False:
                 self._createfile(header)
@@ -61,6 +63,8 @@ class FilePrinter:
         print('\rWriting out to file. Do not interrupt', end='\r')
         self._copyfile(False)
         print('\r'+' '*40, end='\r')
+    
+    def _cr
     
     def _createfile(self, header):
         with open(self.file_name, 'w', newline='') as file:
