@@ -7,7 +7,7 @@ Created on Thu Mar 13 17:14:25 2025
 
 import numpy as np
 from csv import writer
-from os import remove
+from os import remove, listdir, mkdir
 from shutil import copyfile
 
 class FilePrinter:
@@ -17,8 +17,8 @@ class FilePrinter:
         self.temp_file_path = '-temp.csv'.join(self.file_name.split('.csv'))
         self.save_freq=save_freq
         self.callno = 0
-        if 'Results' not in os.listdir():
-            os.mkdir("Results")
+        if 'Results' not in listdir():
+            mkdir("Results")
         if header is not None and self.save_freq > 0: 
             if resume is False:
                 self._createfile(header)
