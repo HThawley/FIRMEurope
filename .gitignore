@@ -1,6 +1,6 @@
 # Project Specific
 Results/*
-
+Data/*.nc
 
 ## Python (Based off https://github.com/github/gitignore/blob/main/Python.gitignore)
 
