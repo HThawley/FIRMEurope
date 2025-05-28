@@ -1,4 +1,4 @@
-import csv
+from csv import writer
 from datetime import datetime as dt
 
 import numpy as np
@@ -122,9 +122,11 @@ def Optimise(solutionData, hyperparameters):
     timetaken = endtime - starttime
     print("Optimisation took", timetaken)
 
+    from os import listdir, mkdir
+    if not 'Results' in listdir():
+        mkdir("Results")
     with open(f"Results/Optimisation_resultx{solutionData.scenario}.csv", "w", newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(result.x)
+        writer(csvfile).writerow(result.x)
 
     return result, timetaken
 
@@ -207,15 +209,17 @@ def Polish(
     timetaken = endtime - starttime
     print("Optimisation took", timetaken)
 
+    from os import listdir, mkdir
+    if not 'Results' in listdir():
+        mkdir("Results")
     with open(f"Results/Optimisation_resultx{solutionData.scenario}.csv", "a", newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(result.x)
+        writer(csvfile).writerow(result.x)
 
     return result, timetaken
 
 
 if __name__ == "__main__":
-    parameters = Parameters(s=21, y=1, p=False)
+    parameters = Parameters(s=21, y=1, p=False, n=1)
     hyperparameters = DE_Hyperparameters(
         i = 10, 
         p = 10, 
@@ -236,10 +240,10 @@ if __name__ == "__main__":
         )
     
     solutionData = SolutionData(*parameters)
-    costFactors = RawCosts(solutionata).GetCostFactors()
+    costFactors = RawCosts(solutionData).GetCostFactors()
     
     print(Objective(solutionData.x0, solutionData, costFactors))
-    
+    raise KeyboardInterrupt
     result, time = Optimise(solutionData, hyperparameters)
     result, time = Polish(result.x, solutionData, polish_hparameters)
 
