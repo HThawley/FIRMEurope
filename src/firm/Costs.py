@@ -1,7 +1,7 @@
 import numpy as np
 from numba import boolean, float64, int64, njit  # type: ignore
 from numba.experimental import jitclass  # type: ignore
-from firm.Input import NetLength, NetCost
+# from firm.Input import NetLength, NetCost
 
 USD_to_AUD = 1 / 0.65  # AUD to USD where necessary
 discount_rate = 0.0599  # Real discount rate - same as gencost
@@ -363,12 +363,12 @@ class CostFactors:
             rc.hvac[0], rc.hvac[1], rc.hvac[2], rc.hvac[3], 20, rc.dr
         )
 
-        self.hvi = np.zeros((len(rc.network_mask), 3), np.float64)
-        for i in range(len(rc.network_mask)):
-            self.hvi[i] = annualization_transmission(
-                NetCost[i], 0, 0, 30, NetLength[i], rc.dr
-            )
-        self.hvi = self.hvi.T
+        # self.hvi = np.zeros((len(rc.network_mask), 3), np.float64)
+        # for i in range(len(rc.network_mask)):
+        #     self.hvi[i] = annualization_transmission(
+        #         NetCost[i], 0, 0, 30, NetLength[i], rc.dr
+        #     )
+        # self.hvi = self.hvi.T
 
 if __name__=='__main__':
     from firm.Parameters import Parameters
