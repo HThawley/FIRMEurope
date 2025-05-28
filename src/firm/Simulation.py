@@ -31,7 +31,7 @@ def Instantiate(solution):
 
     solution.TImport = np.zeros((solution.intervals, solution.nodes, solution.nhvi), dtype=np.float64)
     solution.TExport = np.zeros((solution.intervals, solution.nodes, solution.nhvi), dtype=np.float64)
-    solution.THVI = np.zeros((solution.intervals, solution.nodes), dtype=np.float64)
+    # solution.THVI = np.zeros((solution.intervals, solution.nodes), dtype=np.float64)
 
 
 @njit
@@ -53,11 +53,11 @@ def Simulate(solution):
         start = cclock()
         
     ### Maximum Dispatch of Gas
-    solution.MGas = solution.CGas * np.ones((solution.intervals, solution.nodes), np.float64)
+    solution.MGas = solution.GGas * np.ones((solution.intervals, solution.nodes), np.float64)
     TransmissionSimulate(solution)
     
     ### Dispatch Hydro to fill deficits
-    FillSimulate(solution, solution.CHydro, solution.MHydro)
+    FillSimulate(solution, solution.EHydro, solution.MHydro)
     
     # Energy units by which a node exceeds in Hydro resource 
     flex_exceedance = np.zeros(solution.nodes, np.float64)
@@ -86,7 +86,7 @@ def Simulate(solution):
     TransmissionSimulate(solution)
     
     # Disptach gas 
-    FillSimulate(solution, solution.CGas, solution.MGas)
+    FillSimulate(solution, solution.GGas, solution.MGas)
 
     ### Redipatch as much as gas as possible to hydro
     _mhydro = np.zeros(solution.intervals, np.float64)
@@ -94,7 +94,7 @@ def Simulate(solution):
         if flex_exceedance[n] < -10:
             _mhfactor = 0.0
             for t in range(solution.intervals):
-                _mhydro[t] = min(solution.MGas[t, n], solution.CHydro[n] - solution.MHydro[t, n])
+                _mhydro[t] = min(solution.MGas[t, n], solution.EHydro[n] - solution.MHydro[t, n])
                 _mhfactor += _mhydro[t]
             _mhfactor = max(1, zero_safe_division(flex_exceedance[n], _mhfactor))
             for t in range(solution.intervals):

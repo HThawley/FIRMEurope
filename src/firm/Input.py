@@ -31,8 +31,8 @@ MRor[:, np.isin(Nodel, Rorl, True)] = TSRor * np.array([CRor[node] for node in R
 
 Nodel_int, PVl_int, Windl_int = (np.array([n_node[node] for node in x], dtype=np.int64) for x in (Nodel, PVl, Windl))
 
-CHydro = dict(np.genfromtxt("Data/hydro_plants.csv", delimiter=",", skip_header=1, dtype=None, usecols=[1,2]))
-CHydro = np.array([CHydro[node] if node in CHydro.keys() else 0 for node in Nodel]) / 1000.
+EHydro = pd.read_csv("Data/hydro_plants.csv", index_col=['bus'], usecols=[1, 2])['p_nom']
+EHydro = np.array([EHydro[node] if node in EHydro.index else 0 for node in Nodel]) / 1000.
 
 RHydro = pd.read_csv("Data/inflow.csv", sep=',')
 RHydro = RHydro.drop(columns=['snapshot'])
@@ -40,23 +40,39 @@ RHydro = RHydro.sum()
 RHydro.index = [' '.join(x.split(' ')[:2]) for x in RHydro.index]
 RHydro = np.array([RHydro[node] if node in RHydro.index else 0 for node in Nodel]) / 1000
 
-CGas = pd.read_csv("Data/gas.csv", sep=",", usecols=[1,2])
-CGas = CGas.groupby('bus')['p_nom'].sum()
-CGas = np.array([CGas[node] if node in CGas.keys() else 0 for node in Nodel]) / 1000. 
+Gas = pd.read_csv("Data/gas.csv", sep=",")
+EGas = Gas.groupby('bus')['p_nom'].sum()
+EGas = np.array([EGas[node] if node in EGas.index else 0 for node in Nodel]) / 1000. 
+## TODO: improve this assumption
+EGasMarginal = Gas.groupby('bus')['marginal_cost'].mean() 
+## TODO: include in SD and S so can be [coverage_int]ed
+EGasMarginal = np.array([EGasMarginal[node] if node in EGasMarginal.index else 0 for node in Nodel]) 
+EGasCapexSum = (Gas['capital_cost'] * Gas['p_nom']).sum()
+Gas['type'] = Gas['Generator'].str.split(' ').str[2]
 
-Net = pd.concat((
-    pd.read_csv("Data/links.csv", usecols=range(1,6), delimiter=","), 
-    pd.read_csv("Data/lines.csv", usecols=range(1,6), delimiter=",")
-    ))
-Net['p_nom'] = Net[['p_nom', 's_nom']].apply(lambda row: row['p_nom'] if not pd.isna(row['p_nom']) else row['s_nom'], axis=1)
-Net[['bus0', 'bus1']] = Net[['bus0', 'bus1']].map(lambda bus: n_node[bus])
-Net['loss'] = Net['length'] * 0.05 * 0.001 #5% per 1000 km
-CNet = Net.groupby(['bus0', 'bus1'])['p_nom'].sum().to_numpy()
-LNet = Net.groupby(['bus0', 'bus1'])['loss'].mean().to_numpy()
-BNet = Net[['bus0', 'bus1']].drop_duplicates().to_numpy()
-NetCost = Net.groupby(['bus0', 'bus1'])['capital_cost'].mean().to_numpy()
-NetLength = Net.groupby(['bus0', 'bus1'])['length'].mean().to_numpy()
-del Net
+## TODO: include in SD and S so can be [coverage_int]ed
+CGasCapex, CGasMarginal = Gas.groupby('type')[['capital_cost', 'marginal_cost']].mean().loc['OCGT']
+CGasCapex /= 1000 # per MW to per GW
+del Gas
+
+links = pd.read_csv("Data/links.csv", usecols=range(1,6), delimiter=",")
+lines = pd.read_csv("Data/lines.csv", usecols=range(1,6), delimiter=",")
+links[['bus0', 'bus1']] = links[['bus0', 'bus1']].map(lambda bus: n_node[bus])
+lines[['bus0', 'bus1']] = lines[['bus0', 'bus1']].map(lambda bus: n_node[bus])
+lines = lines.rename(columns={'s_nom':'p_nom'})
+HVI = pd.concat((links, lines))
+HVI['loss'] = HVI['length'] * 0.05 * 0.001 #5% per 1000 km
+HVI_index = HVI.groupby(['bus0', 'bus1']).sum().index
+EHVI = HVI.groupby(['bus0', 'bus1'])['p_nom'].sum()[HVI_index].to_numpy()
+## TODO: improve this assumption
+LHVI = HVI.groupby(['bus0', 'bus1'])['loss'].mean()[HVI_index].to_numpy()
+network = HVI[['bus0', 'bus1']].drop_duplicates().to_numpy()
+
+## TODO: include in SD and S so can be [network_mask]ed
+CHVICapex = HVI.groupby(['bus0', 'bus1'])['capital_cost'].min()[HVI_index].to_numpy() / 1000 # per MW to per GW
+EHVICapexSum = (HVI['p_nom'] * HVI['length'] * HVI['capital_cost']).sum() / 1000 
+
+del HVI, links, lines
 
 #%%
 
@@ -72,10 +88,9 @@ data_spec=[
     ("RHydro", float64[:]),
     ("TSPV", float64[:, :]),
     ("TSWind", float64[:, :]),
-    ("CHydro", float64[:]),
-    ("CGas", float64[:]),
-    ("CHVI", float64[:]),
-    ("CPeak", float64[:]),
+    ("EHydro", float64[:]),
+    ("EGas", float64[:]),
+    ("EHVI", float64[:]),
     ("coverage_int", int64[:]),
     ("Nodel_int", int64[:]),
     ("PVl_int", int64[:]),
@@ -135,8 +150,8 @@ class SolutionData:
         self.TSPV =   TSPV[: self.intervals,   np.isin(PVl_int,   self.coverage_int)]
         self.TSWind = TSWind[: self.intervals, np.isin(Windl_int, self.coverage_int)]
         
-        self.CHydro =    CHydro[   np.isin(Nodel_int, self.coverage_int)]
-        self.CGas =      CGas[     np.isin(Nodel_int, self.coverage_int)] 
+        self.EHydro =    EHydro[   np.isin(Nodel_int, self.coverage_int)]
+        self.EGas =      EGas[     np.isin(Nodel_int, self.coverage_int)] 
         self.RHydro =    RHydro[   np.isin(Nodel_int, self.coverage_int)]
 
         self.Nodel_int = Nodel_int[np.isin(Nodel_int, self.coverage_int)]
@@ -149,10 +164,10 @@ class SolutionData:
              self.trans_mask, 
              self.cache_0_donors,
              self.cache_n_donors, 
-            ) = generate_network(BNet, self.Nodel_int, self.networksteps)
+            ) = generate_network(network, self.Nodel_int, self.networksteps)
             
         self.nhvi = self.network_mask.sum()
-        self.CHVI = CNet[self.network_mask]
+        self.EHVI = EHVI[self.network_mask]
         
         self.nodes = len(self.Nodel_int)
         
@@ -169,10 +184,10 @@ class SolutionData:
         self.lb = np.array(
             [0.0] * self.pzones + 
             [0.0] * self.wzones + 
-            list(self.CGas) + 
             [0.0] * self.nodes + 
             [0.0] * self.nodes + 
-            list(self.CHVI)
+            [0.0] * self.nodes + 
+            [0.0] * self.nhvi
             )
         self.ub = np.array(
             [24.0]  * self.pzones + 
@@ -193,7 +208,7 @@ class SolutionData:
                 mloadmax * 0.25,
                 mloadmax * 1,
                 mloadmax * 36,
-                np.repeat(array_max(mloadmax) * 0.6, self.nhvi),
+                np.repeat(array_max(mloadmax) * 0.1, self.nhvi),
             )
         )
         self.x0 = np.clip(self.x0, self.lb, self.ub)
@@ -221,15 +236,20 @@ solution_spec = [
     ("networksteps", int64),
     ("cache_0_donors", types.DictType(int64, int64[:, :])),
     ("cache_n_donors", types.DictType(types.UniTuple(int64, 2), int64[:, :, :])),
-    # Capacities in GW/GWh
+    # Capacity expansion in GW/GWh
     ("CPV", float64[:]),
     ("CWind", float64[:]),
     ("CPHP", float64[:]),
     ("CPHS", float64[:]),
     ("CHVI", float64[:]),
-    ("CPeak", float64[:]),
-    ("CHydro", float64[:]),
     ("CGas", float64[:]),
+    # Existing capacites in GW/GWh
+    ("EHydro", float64[:]),
+    ("EGas", float64[:]),
+    ("EHVI", float64[:]),
+    # Existing + Expanded capacity (only where both are used)
+    ("GGas", float64[:]),
+    ("GHVI", float64[:]),
     # Nodally disaggregated Hydro resource     
     ("RHydro", float64[:]), # for fast maths, kept in units such that (MHydro.sum(axis=0)<=RHydro).all()
     # Nodally diaggregated operations in GW/GWh
@@ -335,7 +355,13 @@ class Solution:
         self.CPHP =  x[sd.gidx : sd.spidx]
         self.CPHS =  x[sd.spidx: sd.seidx]
         self.CHVI =  x[sd.seidx: ]
-        self.CHydro =    sd.CHydro
+        
+        self.EHydro = sd.EHydro
+        self.EGas = sd.EGas
+        self.EHVI = sd.EHVI
+        
+        self.GGas = self.CGas + self.EGas
+        self.GHVI = self.CHVI + self.EHVI
 
         self.RHydro = sd.RHydro * self.years # units such that (MHydro.sum(axis=0)<=RHydro).all()
 
@@ -396,74 +422,77 @@ class Solution:
 #%% 
 
 @njit
-def Evaluate(S, costFactors):
-    Simulate(S)
+def Evaluate(solution, costFactors):
+    Simulate(solution)
 
-    S.Penalties = np.maximum(0, S.MDeficit.sum())*1000  # MWh/resolution
+    solution.Penalties = np.maximum(0, solution.MDeficit.sum())*1000  # MWh/resolution
 
-    CHVI = np.zeros(len(S.network_mask), dtype=np.float64)
-    CHVI[S.network_mask] = S.CHVI
+    CHVI = np.zeros(len(solution.network_mask), dtype=np.float64)
+    CHVI[solution.network_mask] = solution.CHVI
 
-    cost = np.array(
-        [
-            # generation capex
-            S.CPV.sum() * costFactors.pv[0],
-            S.CWind.sum() * costFactors.onsw[0],
-            S.CGas.sum()  * costFactors.gas[0],
-            S.CHydro.sum() * costFactors.hydro[0],
-            # generation fom
-            S.CPV.sum() * costFactors.pv[1],
-            S.CWind.sum() * costFactors.onsw[1],
-            S.CGas.sum()  * costFactors.gas[1],
-            S.CHydro.sum() * costFactors.hydro[1],
-            # generation vom
-            # pv, onsw, battery are 0
-            S.MGas.sum() * S.resolution / S.years * costFactors.gas[2],
-            S.MHydro.sum() * S.resolution / S.years * costFactors.hydro[2],
-            # storage
-            S.CPHP.sum() * costFactors.phes[0],
-            S.CPHS.sum() * costFactors.phes[1],
-            S.CPHP.sum() * costFactors.phes[2],
-            S.MDischarge.sum() * S.resolution / S.years * costFactors.phes[3],
-            costFactors.phes[4],
-        ]
-        +
-        # transmission network
-        list(
-            (
-                S.CPV.sum() +
-                S.CWind.sum() +
-                S.CGas.sum() +
-                S.CHydro.sum()
-            )
-            * costFactors.ac
-        )
-        + list((CHVI * costFactors.hvi).sum(axis=1))
-    )
+    capex = np.array([
+        solution.CPV.sum() * costFactors.pv[0],
+        solution.CWind.sum() * costFactors.onsw[0],
+        solution.EHydro.sum() * costFactors.hydro[0],
+        solution.CPHP.sum() * costFactors.phes[0],
+        solution.CPHS.sum() * costFactors.phes[1],
+        costFactors.phes[4],
+        ((solution.CPV.sum() + solution.CWind.sum() + solution.CGas.sum())*costFactors.ac[:2]).sum(), # new_build connection
+        (solution.CHVI * CHVICapex).sum(),
+        EHVICapexSum, 
+        EGasCapexSum,
+        ])
+
+    EMGas = np.zeros(solution.nodes, np.float64)
+    CMGas = np.zeros(solution.nodes, np.float64)
+    
+    for t in range(solution.intervals):
+        for n in range(solution.nodes):
+            EMGas[n] += min(solution.EGas[n], solution.MGas[t, n]) # use existing gas plants first
+            CMGas[n] += max(0, solution.MGas[t, n] - solution.EGas[n]) # use new gas second
+    GasOpex = 0.0
+    for n in range(solution.nodes):
+        GasOpex += EMGas[n] * EGasMarginal[n] 
+        GasOpex += CMGas[n] * CGasMarginal
+    GasOpex *= solution.resolution / solution.years / 1000
+    
+    opex = np.array([
+        solution.CPV.sum() * costFactors.pv[1],
+        solution.CWind.sum() * costFactors.onsw[1],
+        solution.EHydro.sum() * costFactors.hydro[1], 
+        solution.MHydro.sum() * solution.resolution / solution.years * costFactors.hydro[2],
+        solution.CPHP.sum() * costFactors.phes[2],
+        solution.MDischarge.sum() * solution.resolution / solution.years * costFactors.phes[3],
+        GasOpex,
+        ])
+    
 
     # Levelised Costs of:
     # Electricity
-    S.LCOE = cost.sum() / S.energy
+    solution.LCOE = (capex.sum() + opex.sum()) / solution.energy
+    
+# =============================================================================
+#     LCOx are low priority to fix
+# =============================================================================
     # Generation
-    S.LCOG = cost[:10].sum() / (
-        1000 * S.resolution / S.years * (
-            S.MPV.sum()
-            + S.MWind.sum()
-            + S.MGas.sum()
-            + S.MHydro.sum()
-        )
-    )
-    # Storage
-    # S.LCOSP = zero_safe_division(cost[10:15].sum(), S.MDischarge.sum()*S.resolution/S.years)
-    # Balancing - Storage
-    S.LCOBS = cost[10:15].sum() / S.energy
-    # Balancing - Transmission
-    S.LCOBT = cost[15:].sum() / S.energy
-    # Balancing - Spillage
-    S.LCOBL = S.LCOE - S.LCOG - S.LCOBS - S.LCOBT
-    S.LCOB = S.LCOBS + S.LCOBT + S.LCOBL
+    # solution.LCOG = cost[:10].sum() / (
+    #     1000 * solution.resolution / solution.years * (
+    #         solution.MPV.sum()
+    #         + solution.MWind.sum()
+    #         + solution.MGas.sum()
+    #         + solution.MHydro.sum()
+    #     )
+    # )
+    # # Storage
+    # # solution.LCOSP = zero_safe_division(cost[10:15].sum(), solution.MDischarge.sum()*solution.resolution/solution.years)
+    # # Balancing - Storage
+    # solution.LCOBS = cost[10:15].sum() / solution.energy
+    # # Balancing - Transmission
+    # solution.LCOBT = cost[15:].sum() / solution.energy
+    # # Balancing - Spillage
+    # solution.LCOBL = solution.LCOE - solution.LCOG - solution.LCOBS - solution.LCOBT
+    # solution.LCOB = solution.LCOBS + solution.LCOBT + solution.LCOBL
+    # solution.CAPEX = capex.sum()
+    # solution.OPEX = opex.sum()
 
-    S.CAPEX = sum([cost[i] for i in [0, 1, 2, 3, 10, 11, 15, 18]]) / S.energy
-    S.OPEX = S.LCOE - S.CAPEX
-
-    return S.LCOE, S.Penalties
+    return solution.LCOE, solution.Penalties

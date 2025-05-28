@@ -44,7 +44,7 @@ def Interconnection(solution, Fillt, Surplust, Importt, Exportt):
             # maximum exportable
             _transmission[d] = min(
                 Surplust[d],  # power resource constraint
-                solution.CHVI[l] - _usage, # line capacity constraint
+                solution.GHVI[l] - _usage, # line capacity constraint
             )  
 
         # scale down to fill requirement
@@ -100,7 +100,7 @@ def Interconnection(solution, Fillt, Surplust, Importt, Exportt):
                     if _usage < 1e-6:
                         continue
 
-                    _capacity[:] = solution.CHVI - array_sum_2d_axis0(Importt)
+                    _capacity[:] = solution.GHVI - array_sum_2d_axis0(Importt)
                     for d, dl in zip(donors[-1], donor_lines.T): # print(d,dl)
                         # power use of each line, clipped to maximum capacity of lowest leg
                         _import[d, dl] = min(array_min(_capacity[dl]), Surplust[d])
