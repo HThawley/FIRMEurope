@@ -4,6 +4,7 @@ from numba.experimental import jitclass  # type: ignore
 # from firm.Input import NetLength, NetCost
 
 USD_to_AUD = 1 / 0.65  # AUD to USD where necessary
+USD_to_EUR = 1 / 1.15  # AUD to USD where necessary
 discount_rate = 0.0599  # Real discount rate - same as gencost
 USD_inflation = 1.18  # 2020->2023
 AUD_inflation = 1.16  # 2020->2023

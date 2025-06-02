@@ -17,17 +17,19 @@ from firm.Utils import (
 
 @njit
 def Instantiate(solution):
-    solution.MNetload = solution.MLoad - solution.MPV - solution.MWind - solution.MRor
+    solution.MNetload = solution.MLoad - (solution.MPvFix + solution.MPvSat + 
+                                          solution.MOnsw + solution.MOffw + 
+                                          solution.MRor) - 0.9*solution.ENuke
     solution.MUnbalanced = solution.MNetload.copy()
     solution.MDeficit, solution.MSpillage = np.maximum(0, solution.MNetload), -np.minimum(0, solution.MNetload)
 
     solution.MHydro = np.zeros((solution.intervals, solution.nodes), dtype=np.float64)
-    solution.MGas = np.zeros((solution.intervals, solution.nodes), dtype=np.float64)
+    solution.MFlex = np.zeros((solution.intervals, solution.nodes), dtype=np.float64)
 
     solution.MDischarge = np.zeros((solution.intervals, solution.nodes), dtype=np.float64)
     solution.MCharge = np.zeros((solution.intervals, solution.nodes), dtype=np.float64)
     solution.MStorage = np.zeros((solution.intervals, solution.nodes), dtype=np.float64)
-    solution.MStorage[-1] = 0.5 * solution.CPHS
+    solution.MStorage[-1] = 0.5 * solution.GPhse
 
     solution.TImport = np.zeros((solution.intervals, solution.nodes, solution.nhvi), dtype=np.float64)
     solution.TExport = np.zeros((solution.intervals, solution.nodes, solution.nhvi), dtype=np.float64)
@@ -53,11 +55,11 @@ def Simulate(solution):
         start = cclock()
         
     ### Maximum Dispatch of Gas
-    solution.MGas = solution.GGas * np.ones((solution.intervals, solution.nodes), np.float64)
+    solution.MFlex = solution.GFlex * np.ones((solution.intervals, solution.nodes), np.float64)
     TransmissionSimulate(solution)
     
     ### Dispatch Hydro to fill deficits
-    FillSimulate(solution, solution.EHydro, solution.MHydro)
+    FillSimulate(solution, solution.EHydp, solution.MHydro)
     
     # Energy units by which a node exceeds in Hydro resource 
     flex_exceedance = np.zeros(solution.nodes, np.float64)
@@ -77,7 +79,7 @@ def Simulate(solution):
             _mhydro += solution.MHydro[t, n]
         flex_exceedance[n] = _mhydro - solution.RHydro[n]
 
-    solution.MGas[:] = 0
+    solution.MFlex[:] = 0
     solution.TImport[:] = 0
     solution.TExport[:] = 0
     
@@ -86,7 +88,7 @@ def Simulate(solution):
     TransmissionSimulate(solution)
     
     # Disptach gas 
-    FillSimulate(solution, solution.GGas, solution.MGas)
+    FillSimulate(solution, solution.GFlex, solution.MFlex)
 
     ### Redipatch as much as gas as possible to hydro
     _mhydro = np.zeros(solution.intervals, np.float64)
@@ -94,13 +96,13 @@ def Simulate(solution):
         if flex_exceedance[n] < -10:
             _mhfactor = 0.0
             for t in range(solution.intervals):
-                _mhydro[t] = min(solution.MGas[t, n], solution.EHydro[n] - solution.MHydro[t, n])
+                _mhydro[t] = min(solution.MFlex[t, n], solution.EHydp[n] - solution.MHydro[t, n])
                 _mhfactor += _mhydro[t]
             _mhfactor = max(1, zero_safe_division(flex_exceedance[n], _mhfactor))
             for t in range(solution.intervals):
                 _redispatch = _mhydro[t] * _mhfactor
                 solution.MHydro[t, n] += _redispatch
-                solution.MGas[t, n] -= _redispatch
+                solution.MFlex[t, n] -= _redispatch
                 
     if solution.profiling:
         solution.calls_backfill +=1 
@@ -177,8 +179,8 @@ def FillSimulate(solution, CFlex, MFlex):
         if fill.sum() > 1e-6:
             # clip fill by storage capacity
             for n in range(solution.nodes):
-                fill[n] = min(fill[n], (solution.CPHS[n] - solution.MStorage[t - 1, n]) / solution.resolution / solution.efficiency)
-                flex = min(fill[n], CFlex[n] - MFlex[t, n], solution.CPHP[n] - solution.MCharge[t, n] + solution.MDischarge[t, n])
+                fill[n] = min(fill[n], (solution.GPhse[n] - solution.MStorage[t - 1, n]) / solution.resolution / solution.efficiency)
+                flex = min(fill[n], CFlex[n] - MFlex[t, n], solution.GPhsp[n] - solution.MCharge[t, n] + solution.MDischarge[t, n])
                 fill[n] -= flex
                 MFlex[t, n] += flex
 
@@ -236,7 +238,7 @@ def TransmissionSimulate(solution):
                 Surplust[n] = max(0, 
                     solution.MSpillage[t, n]
                     + solution.MCharge[t, n]
-                    + min(solution.CPHP[n], solution.MStorage[t - 1, n] / solution.resolution)
+                    + min(solution.GPhsp[n], solution.MStorage[t - 1, n] / solution.resolution)
                     - solution.MDischarge[t, n])
             if (Surplust > 1e-6).any():
                 Interconnection(solution, solution.MDeficit[t], Surplust, solution.TImport[t], solution.TExport[t])
@@ -255,7 +257,7 @@ def TransmissionSimulate(solution):
             if (solution.MSpillage[t] > 1e-6).any():
                 # cap fill by storage capacity
                 for n in range(solution.nodes):
-                    fill[n] = min(fill[n], (solution.CPHS[n] - solution.MStorage[t - 1, n]) / solution.resolution / solution.efficiency)
+                    fill[n] = min(fill[n], (solution.GPhse[n] - solution.MStorage[t - 1, n]) / solution.resolution / solution.efficiency)
                 # meet fill with neighbours' spillage - don't draw down power as this affects future SOC
                 Interconnection(solution, fill, solution.MSpillage[t], solution.TImport[t], solution.TExport[t])
                 # fill adjusted in-place
@@ -316,7 +318,7 @@ def UpdateUnbalancedt(solution, t):
         for m in range(solution.nhvi):
             _timport += solution.TImport[t,n,m] 
             _timport += solution.TExport[t,n,m]
-        solution.MUnbalanced[t,n] = solution.MNetload[t,n] - solution.MHydro[t,n] - solution.MGas[t,n] - _timport
+        solution.MUnbalanced[t,n] = solution.MNetload[t,n] - solution.MHydro[t,n] - solution.MFlex[t,n] - _timport
     if solution.profiling:
         solution.calls_unbalancedt +=1 
         solution.time_unbalancedt += cclock() - start
@@ -334,7 +336,7 @@ def UpdateUnbalanced(solution):
             for m in range(solution.nhvi):
                 _timport += solution.TImport[t, n, m]
                 _timport += solution.TExport[t, n, m]
-            solution.MUnbalanced[t, n] = solution.MNetload[t, n] - solution.MHydro[t,n] - solution.MGas[t,n] - _timport
+            solution.MUnbalanced[t, n] = solution.MNetload[t, n] - solution.MHydro[t,n] - solution.MFlex[t,n] - _timport
 
     if solution.profiling:
         solution.calls_unbalanced +=1 
@@ -347,8 +349,8 @@ def UpdateStoraget(solution, t):
     if solution.profiling:
         start = cclock()
     for n in range(solution.nodes):
-        solution.MCharge[t, n] = min(-min(0,solution.MUnbalanced[t, n]), solution.CPHP[n], (solution.CPHS[n] - solution.MStorage[t - 1, n]) / solution.efficiency / solution.resolution)
-        solution.MDischarge[t, n] = min(max(0, solution.MUnbalanced[t, n]), solution.CPHP[n], solution.MStorage[t - 1, n] / solution.resolution)
+        solution.MCharge[t, n] = min(-min(0,solution.MUnbalanced[t, n]), solution.GPhsp[n], (solution.GPhse[n] - solution.MStorage[t - 1, n]) / solution.efficiency / solution.resolution)
+        solution.MDischarge[t, n] = min(max(0, solution.MUnbalanced[t, n]), solution.GPhsp[n], solution.MStorage[t - 1, n] / solution.resolution)
 
     if solution.profiling:
         solution.calls_storage_behaviort +=1 
@@ -363,8 +365,8 @@ def UpdateStorage(solution):
 
     for t in range(solution.intervals):
         for n in range(solution.nodes):
-            solution.MCharge[t, n] = min(-min(solution.MUnbalanced[t, n], 0), solution.CPHP[n])
-            solution.MDischarge[t, n] = min(max(solution.MUnbalanced[t, n], 0), solution.CPHP[n])
+            solution.MCharge[t, n] = min(-min(solution.MUnbalanced[t, n], 0), solution.GPhsp[n])
+            solution.MDischarge[t, n] = min(max(solution.MUnbalanced[t, n], 0), solution.GPhsp[n])
 
     if solution.profiling:
         solution.calls_storage_behavior +=1 
@@ -387,10 +389,10 @@ def UpdateSOCt(solution, t):
 def UpdateSOC(solution):
     if solution.profiling:
         start = cclock()
-    solution.MStorage[-1] = 0.5 * solution.CPHS 
+    solution.MStorage[-1] = 0.5 * solution.GPhse 
     for t in range(solution.intervals):
         for n in range(solution.nodes):
-            solution.MCharge[t, n] = min(solution.MCharge[t, n], (solution.CPHS[n] - solution.MStorage[t - 1, n]) / solution.efficiency / solution.resolution)
+            solution.MCharge[t, n] = min(solution.MCharge[t, n], (solution.GPhse[n] - solution.MStorage[t - 1, n]) / solution.efficiency / solution.resolution)
             solution.MDischarge[t, n] = min(solution.MDischarge[t, n], solution.MStorage[t - 1, n] / solution.resolution)
             solution.MStorage[t, n] = solution.MStorage[t - 1, n] + solution.resolution * (solution.MCharge[t, n] * solution.efficiency - solution.MDischarge[t, n])
     if solution.profiling:
