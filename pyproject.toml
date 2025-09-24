@@ -1,104 +1,46 @@
-[build-system]
-requires = ["setuptools>=61.2", "wheel"]
-build-backend = "setuptools.build_meta"
+[tool.black]
+line-length = 120
 
-[project]
-name = "firm_ce"
-version = "0.0.1"
-dependencies = [
-    "numpy==2.0.2",
-    "pandas==2.2.3",
-    "pathlib==1.0.1",
-    "numba==0.60.0",
-    "scipy==1.14.1",
-    "icc-rt==2020.0.133",
-]
-authors = [
-    {name = "Timothy Webster", email = "Timothy.Weber@anu.edu.au"},
-    {name = "Cheng Cheng", email = "Cheng.Cheng1@anu.edu.au"},
-    {name = "Harry Thawley", email = "Harry.Thawley@anu.edu.au"},
-    {name = "Michael Thomas", email = "michael.thomas@anu.edu.au"},
-]
-maintainers = [
-    {name = "Timothy Webster", email = "Timothy.Weber@anu.edu.au"},
-    {name = "Cheng Cheng", email = "Cheng.Cheng1@anu.edu.au"},
-    {name = "Harry Thawley", email = "Harry.Thawley@anu.edu.au"},
-    {name = "Michael Thomas", email = "michael.thomas@anu.edu.au"},
-]
-description = "Capacity Expansion Modelling using FIRM"
-readme = "README.md"
-license = {text = ""}
-requires-python = ">= 3.12"
-keywords = ["multi-energy system", "optimisation", "modelling", "energy system", "energy"]
-classifiers = [
-    "Development Status :: 3 - Alpha",
+[tool.pytest.ini_options]
+pythonpath = ["src/"]
+testpaths = "tests"
 
-    "Intended Audience :: Developers",
-    "Intended Audience :: Science/Research",
-    
-    "Topic :: Scientific/Engineering",
-    "Topic :: Scientific/Engineering :: Physics",
-    "Topic :: Software Development :: Libraries",
-    "Topic :: Software Development :: Libraries :: Python Modules",
-
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.12",
-]
-
-[project.urls]
-Repository = "https://github.com/TimWeberRE100/FIRM_CE"
-Issues = "https://github.com/TimWeberRE100/FIRM_CE/issues"
-Changelog = "https://github.com/TimWeberRE100/FIRM_CE/blob/main/CHANGELOG.md"
-
-[project.optional-dependencies]
-dev = [
-    "bandit[toml]>=1.8.6,<2",
-    "black>=25.1.0,<26",
-    "codespell>=2.4.1,<3",
-    "coverage>=7.8.2,<8",
-    "flake8>=7.3.0,<8",
-    "flake8-bugbear>=24.12.12,<25",
-    "isort>=6.0.1,<7",
-    "mccabe>=0.7.0,<1",
-    "mypy>=1.17.1,<2",
-    "pytest>=8.4.1,<9",
-    "pytest-dependency>=0.6.0,<0.7.0",
-]
+[tool.isort]
+profile = "black"
 
 [tool.bandit]
 exclude_dirs = ["tests"]
 
-[tool.black]
-line-length = 120
-
-[tool.codespell]
-ignore-words-list = ["fom"]
-
-[tool.isort]
-profile = "black"
-line_length = 120
-force_grid_wrap = 0
-multi_line_output = 3
-include_trailing_comma = true
-use_parentheses = true
-
 [tool.mypy]
-mypy_path = "src"
 exclude = ["tests"]
-check_untyped_defs = true
+check_untyped_defs = false
+disallow_untyped_calls = false
+disallow_untyped_defs = false
 disallow_incomplete_defs = true
-disallow_untyped_calls = true
 disallow_untyped_decorators = true
-disallow_untyped_defs = true
 namespace_packages = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 
-[tool.setuptools]
-package-dir = {"" = "src"}
-include-package-data = false
 
-[tool.setuptools.packages.find]
-where = ["src"]
-namespaces = true
+[build-system]
+requires = ["setuptools >= 40.9.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "firm"
+version = "0.0.1"
+description = "Long-term energy planning model focused on optimising grid-balancing technologies"
+dependencies = ["numba>=0.60", "numpy>=1.25", "scipy>=1.12"]
+
+[project.optional-dependencies]
+dev = ["bandit", "flake8", "mypy", "black", "coverage", "scipy-stubs"]
+test = ["pytest"]
+cli = ["click", "rich"]
+
+[tool.setuptools.package-data]
+"firm" = ["py.typed"]
+
+[project.scripts]
+firm = "firm.CmdLineEntry:Entry"
+
