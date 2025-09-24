@@ -21,19 +21,7 @@ else:
 @jitclass(unitcost_spec)
 class UnitCost:
     """
-    Exogenous cost assumptions for a Generator, Storage, or Line object.
-
-    Attributes:
-    -------
-    capex_p (float64): Power capacity capital cost, units $/kW for Generator/Storage, $/MW-km for Line.
-    capex_e (float64): Energy capacity capital cost, units $/kWh (for storage only).
-    fom (float64): Fixed O&M cost, units $/kW/year for Generator/Storage, $/MW/km/year for Line.
-    vom (float64): Variable O&M cost, units $/MWh.
-    lifetime (int64): Asset economic lifetime in years.
-    discount_rate (float64): Annual discount rate in range (0,1].
-    fuel_cost_mwh (float64): First order marginal fuel cost term, $/MWh.
-    fuel_cost_h (float64): Constant fuel cost term, $/h.
-    transformer_capex (float64): Transformer-specific capital cost, units $/MW.
+    Represents cost parameters for a generator, storage, or line object.
     """
 
     def __init__(
@@ -49,19 +37,21 @@ class UnitCost:
         transformer_capex: float64,
     ) -> None:
         """
-        Initialise UnitCost instance.
+        Initialize cost attributes for a Generator, Storage or Line object.
 
         Parameters:
         -------
-        capex_p (float64): Power capacity capital cost, units $/kW for Generator/Storage, $/MW-km for Line.
-        fom (float64): Fixed O&M cost, units $/kW/year for Generator/Storage, $/MW/km/year for Line.
-        vom (float64): Variable O&M cost, units $/MWh.
-        lifetime (int64): Asset economic lifetime in years.
-        discount_rate (float64): Annual discount rate in range (0,1].
-        fuel_cost_mwh (float64): First order marginal fuel cost term, $/MWh.
-        fuel_cost_h (float64): Constant fuel cost term, $/h.
-        capex_e (float64): Energy capacity capital cost, units $/kWh (for storage only).
-        transformer_capex (float64): Transformer-specific capital cost, units $/MW.
+        capex_p (float): Power capacity capital cost ($/kW for generator/storage, $/MW-km for line)
+        fom (float): Fixed O&M cost ($/kW/year for generator/storage, $/MW/km/year for line)
+        vom (float): Variable O&M cost ($/MWh)
+        lifetime (int): Asset lifetime in years
+        discount_rate (float): Annual discount rate in range [0,1]
+        heat_rate_base (float): Constant heat rate term (GJ/h)
+        heat_rate_incr (float): First order marginal heat rate term (GJ/MWh)
+        fuel (Fuel): Fuel object
+        capex_e (float): Energy capacity capital cost ($/kWh for storage only)
+        transformer_capex (float): Transformer-specific cost ($/MW)
+        length (float): Line length (used for scaling costs and transmission losses)
         """
 
         self.capex_p = capex_p  # $/kW
@@ -95,32 +85,7 @@ else:
 
 @jitclass(ltcosts_spec)
 class LTCosts:
-    """
-    Endogenously derived total long-term costs over the modelling horizon.
-
-    Attributes:
-    -------
-    annualised_build (float64): The total build costs for an asset over the entire modelling horizon, annualised
-        using the net present value factor. Each year over the modelling horizon is assumed to incur the annualised
-        build cost of each asset. Existing assets in the system are assumed to be fully depreciated by the start of
-        the modelling period. Units of $/modelling period.
-    fom (float64): The total fixed operation and maintenance (FO&M) costs for an asset. Existing assets in the system are
-        assumed to be fully depreciated by the start of the modelling period. Fully depreciated assets still incur FO&M.
-        Units of $/modelling period.
-    vom (float64): The total variable operation and maintenance (VO&M) costs for an asset. Requires completion
-        of unit committment. Units of $/modelling period.
-    fuel (float64): The fuel costs for an asset. Requires completion of unit committment. Line and Storage objects are assumed
-        to have fuel costs of $0. Fuel costs are based upon a first order heat rate function, assuming each
-        unit of the asset consumes fuel as a function of hours of operation and MWh of electricity generated. Units of
-        $/modelling period.
-    """
-
     def __init__(self):
-        """
-        Initialise the LTCosts instance.
-
-        All attributes are initialised to 0.0 since they are calculated at the end of the unit committment process.
-        """
         self.annualised_build = 0.0
         self.fom = 0.0
         self.vom = 0.0

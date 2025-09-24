@@ -1,8 +1,11 @@
-# Project Specific
-Results/*
-Data/*.nc
-
-## Python (Based off https://github.com/github/gitignore/blob/main/Python.gitignore)
+__pycache__
+*/__pycache__
+results
+preprocessing
+inputs/*
+!inputs/config
+!inputs/data
+project
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -26,6 +29,7 @@ parts/
 sdist/
 var/
 wheels/
+pip-wheel-metadata/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
@@ -47,7 +51,7 @@ htmlcov/
 .tox/
 .nox/
 .coverage
-.coverage.*
+.coverage*
 .cache
 nosetests.xml
 coverage.xml
@@ -55,7 +59,6 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
-cover/
 
 # Translations
 *.mo
@@ -75,10 +78,9 @@ instance/
 .scrapy
 
 # Sphinx documentation
-docs/_build/
+docs/build/
 
 # PyBuilder
-.pybuilder/
 target/
 
 # Jupyter Notebook
@@ -89,9 +91,7 @@ profile_default/
 ipython_config.py
 
 # pyenv
-#   For a library or package, you might want to ignore these files since the code is
-#   intended to run in multiple environments; otherwise, check them in:
-# .python-version
+.python-version
 
 # pipenv
 #   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
@@ -100,22 +100,7 @@ ipython_config.py
 #   install all needed dependencies.
 #Pipfile.lock
 
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-#poetry.lock
-
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#pdm.lock
-#   pdm stores project-wide configurations in .pdm.toml, but it is recommended to not include it
-#   in version control.
-#   https://pdm.fming.dev/#use-with-ide
-.pdm.toml
-
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
+# PEP 582; used by e.g. github.com/David-OConnor/pyflow
 __pypackages__/
 
 # Celery stuff
@@ -152,21 +137,11 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# pytype static type analyzer
-.pytype/
+# idea file
+.idea/
 
-# Cython debug symbols
-cython_debug/
+# vscode file
+.vscode/
 
-## Operating System
-
-# macOS. Other exclusions can be found here: https://github.com/github/gitignore/blob/main/Global/macOS.gitignore
-.DS_Store
-
-## Editors
-
-# VS Code
-.vscode
-
-# PyCharm
-.idea
+# Temporarily add .git/coverage*yml so that it can be merged into main
+.github/workflows/coverage*yml

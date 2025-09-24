@@ -35,7 +35,8 @@ class Solver:
         network_static: Network_InstanceType,
         scenario_logger: Logger,
         scenario_name: str,
-        initial_population: Union[NDArray[np.float64], str] = "latinhypercube",
+        polish_flag: bool = False,
+        initial_population: Union[NDArray[np.float64], None] = None,
     ) -> None:
         self.config = config
         self.decision_x0 = initial_x_candidate if len(initial_x_candidate) > 0 else None
@@ -49,7 +50,11 @@ class Solver:
         self.result = None
         self.optimal_lcoe = None
         self.initial_population = initial_population
-        self.iterations = config.iterations
+
+        if polish_flag:
+            self.iterations = int(config.iterations // 2)
+        else:
+            self.iterations = config.iterations
 
     def get_bounds(self) -> NDArray[np.float64]:
         def power_capacity_bounds(
@@ -122,7 +127,6 @@ class Solver:
             tol=0,
             maxiter=self.iterations,
             popsize=self.config.population,
-            init=self.initial_population,
             mutation=(0.2, self.config.mutation),
             recombination=self.config.recombination,
             disp=True,
@@ -180,7 +184,6 @@ class Solver:
                     tol=0,
                     maxiter=self.iterations,
                     popsize=self.config.population,
-                    init=self.initial_population,
                     mutation=(0.2, self.config.mutation),
                     recombination=self.config.recombination,
                     disp=True,
@@ -249,7 +252,6 @@ class Solver:
                     tol=0,
                     maxiter=self.iterations,
                     popsize=self.config.population,
-                    init=self.initial_population,
                     mutation=(0.2, self.config.mutation),
                     recombination=self.config.recombination,
                     disp=True,
@@ -298,11 +300,6 @@ def callback(intermediate_result: OptimizeResult) -> None:
         # Save population from last iteration
         if hasattr(intermediate_result, "population"):
             with open(os.path.join(results_dir, "population.csv"), "a", newline="") as f:
-                writer = csv.writer(f)
-                for individual in intermediate_result.population:
-                    writer.writerow(list(individual))
-
-            with open(os.path.join(results_dir, "latest_population.csv"), "w", newline="") as f:
                 writer = csv.writer(f)
                 for individual in intermediate_result.population:
                     writer.writerow(list(individual))

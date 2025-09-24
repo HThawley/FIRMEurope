@@ -28,27 +28,6 @@ else:
 
 @jitclass(scenario_parameters_spec)
 class ScenarioParameters:
-    """
-    Represents the static parameters for a model scenario.
-
-    Attributes:
-    -------
-    resolution (float64): Length of a single time interval in hours (based on input time-series data).
-    interval_resolutions (float64[:]): Array of interval lengths in hours, one per interval.
-    allowance (float64): Annual allowance for unserved energy, as a percentage of annual demand.
-    first_year (int64): First year in modelling horizon (YYYY).
-    final_year (int64): Final year in modelling horizon (YYYY).
-    year_count (int64): Total number of years in the scenario.
-    leap_year_count (int64): Number of leap years in the modelling horizon.
-    year_first_t (int64[:]): Array mapping each year to its first time interval index.
-    intervals_count (int64): Total number of intervals in the modelling horizon.
-    block_lengths (int64[:]): Array of block lengths in intervals, defaults to 1 interval per block. Allows for
-        variable length blocks for simplified balancing method in future.
-    node_count (int64): Number of Nodes in the Network.
-    fom_scalar (float64): Scaling factor to adjust fixed O&M to account for leap years (PLEXOS consistency).
-    year_energy_demand (float64[:]): Array of total annual energy demand for each simulated year, units GWh.
-    """
-
     def __init__(
         self,
         resolution: float64,
@@ -61,21 +40,7 @@ class ScenarioParameters:
         intervals_count: int64,
         node_count: int64,
     ):
-        """
-        Initialise a ScenarioParameters instance.
 
-        Parameters:
-        -------
-        resolution (float64): Length of a single time interval in hours (based on input time-series data).
-        allowance (float64): Annual allowance for unserved energy, as a percentage of annual demand.
-        first_year (int64): First year in modelling horizon (YYYY).
-        final_year (int64): Final year in modelling horizon (YYYY).
-        year_count (int64): Total number of years in the scenario.
-        leap_year_count (int64): Number of leap years in the modelling horizon.
-        year_first_t (int64[:]): Array mapping each year to its first time interval index.
-        intervals_count (int64): Total number of intervals in the modelling horizon.
-        node_count (int64): Number of Nodes in the Network.
-        """
         self.resolution = resolution  # length of time interval in hours
         self.interval_resolutions = resolution * np.ones(
             intervals_count, dtype=np.float64
@@ -92,7 +57,7 @@ class ScenarioParameters:
         self.fom_scalar = (
             year_count + leap_year_count / 365
         ) / year_count  # Scale average annual fom to account for leap days for PLEXOS consistency
-        self.year_energy_demand = np.zeros(self.year_count, dtype=np.float64)  # GWh
+        self.year_energy_demand = np.zeros(self.year_count, dtype=np.float64)
 
 
 if JIT_ENABLED:
@@ -102,35 +67,7 @@ else:
 
 
 class ModelConfig:
-    """
-    Data class for model configuration parameters loaded from CSV input.
-
-    Attributes:
-    -------
-    type (str): Type of model (e.g., 'single_time', 'broad_optimum').
-    model_name (str): User-defined name of the model run.
-    iterations (int): Maximum number of differential evolution iterations.
-    population (int): Population size multiplier for the differential evolution algorithm.
-    mutation (float): Mutation rate for the differential evolution algorithm.
-    recombination (float): Recombination rate for the differential evolution algorithm.
-    near_optimal_tol (float): Tolerance for near-optimal optimisation (default: 0.0). For example, a tolerance of
-        0.1 will search for solutions that are within 10% of the cost of the least-cost solution.
-    midpoint_count (int): Number of midpoint samples for the broad optimum midpoint optimisation (default: 0).
-    balancing_type (str): Method used for system balancing (e.g., 'full'). Allows for simplified balancing to be
-        implemented in future.
-    fixed_costs_threshold (float): Maximum ratio of fixed costs to total energy demand ($/MWh) (default: 500.0).
-        Allows for high cost solutions to be rapidly discarded using a penalty function before beginning unit
-        committment processes.
-    """
-
     def __init__(self, config_dict: Dict[str, str]) -> None:
-        """
-        Initialise ModelConfig data class instance.
-
-        Parameters:
-        -------
-        config_dict (Dict[str, str]): Data imported from the `config.csv` input file, keyed by variable name.
-        """
         config_dict = {item["name"]: item["value"] for item in config_dict.values()}
         self.type = config_dict["type"]
         self.model_name = config_dict["model_name"]

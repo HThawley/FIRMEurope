@@ -22,37 +22,18 @@ else:
 class Fuel:
     """
     Represents a fuel type with associated cost and emissions.
-
-    Notes:
-    -------
-    Instances can be flagged as *static* or *dynamic* via static_instance. Static instances must not be
-    modified inside worker processes used for the stochastic optimisation, whereas dynamic instances are
-    safe to modify.
-
-    Attributes:
-    -------
-    static_instance (boolean): True value indicates 'static' instance, False indicates 'dynamic' instance.
-        A static instance is unsafe to modify within a worker process for the unit committment process.
-    id (int64): A model-level identifier for the Fuel instance.
-    name (unicode_type): A string providing the oridinary name of the fuel.
-    cost (float64): Cost of the fuel with units of $/GJ.
-    emissions (float64): Emissions intensity of the fuel in kg-CO2eq/GJ.
     """
 
     def __init__(
         self, static_instance: boolean, idx: int64, name: unicode_type, cost: float64, emissions: float64
     ) -> None:
         """
-        Initialise a Fuel instance.
+        Initialize a Fuel object.
 
         Parameters:
         -------
-        static_instance (boolean): True value indicates 'static' instance, False indicates 'dynamic' instance.
-            A static instance is unsafe to modify within a worker process for the unit committment process.
-        idx (int64): A model-level identifier for the Fuel instance.
-        name (unicode_type): A string providing the oridinary name of the fuel.
-        cost (float64): Cost of the fuel with units of $/GJ.
-        emissions (float64): Emissions intensity of the fuel in kg-CO2eq/GJ.
+        id (int): Unique identifier for the fuel.
+        fuel_dict (Dict[str, str]): Dictionary containing 'name', 'cost', and 'emissions' keys.
         """
 
         self.static_instance = static_instance
@@ -113,64 +94,11 @@ else:
 @jitclass(generator_spec)
 class Generator:
     """
-    Electricity generation asset.
+    Represents a generator unit within the system.
 
-    Solar, wind and baseload generators require generation trace data files. Flexible
-    generators require data files for annual generation limits. Datafiles must be stored in
-    the `inputs/data` folder and referenced in `inputs/config/datafiles.csv`.
-
-    Notes:
-    -----
-    - Instances can be flagged as *static* or *dynamic* via static_instance. Static instances must not be
-    modified inside worker processes used for the stochastic optimisation, whereas dynamic instances are
-    safe to modify.
-    - Memory for endogenous time-series dispatch and remaining energy arrays (flexible Generators) is allocated
-    within worker processes for the optimisation.
-    - Exogenous time-series data traces and annual constraint data is loaded prior to starting an optimisation.
-    - Precharging fields are used in storage precharging period/deficit block steps.
-
-    Attributes:
-    -------
-    static_instance (boolean): True value indicates 'static' instance, False indicates 'dynamic' instance.
-        A static instance is unsafe to modify within a worker process for the unit committment process.
-    id (int64): A model-level identifier for the Generator instance.
-    order (int64): A scenario-level identifier for the Generator instance.
-    name (unicode_type): A string providing the oridinary name of the Generator.
-    unit_size (float64): Nameplate unit size in GW. A Generator could be formed from multiple units.
-    max_build (float64): Maximum build limit in GW.
-    min_build (float64): Minimum build limit in GW.
-    initial_capacity (float64): Installed capacity at model start in GW.
-    unit_type (unicode_type): Type of Generator (e.g., 'solar', 'wind', 'baseload', 'flexible').
-    near_optimum_check (boolean): Flag to perform near-optimum optimisation.
-    node (Node_InstanceType): The Network Node where the Generator is located.
-    fuel (Fuel_InstanceType): The Fuel consumed by the Generator.
-    line (Line_InstanceType): Minor line connecting Generator to the transmission network.
-    group (unicode_type): Group label used by broad optimum optimisation. Grouped assets are considered in aggregate
-        when minimising/maximising installed capacity within the broad optimum space.
-    cost (UnitCost_InstanceType): Exogenously defined cost assumptions.
-    data_status (unicode_type): Status of data loading (e.g., 'unloaded').
-    data (float64[:]): Interval capacity factor trace data. Each value represents the capacity factor of the solar, wind
-        or baseload Generator in each time interval of the modelling horizon.
-    annual_constraints_data (float64[:]): Annual generation constraints for flexible Generators, units GWh/year.
-    candidate_x_idx (int64): Index of the Generator's decision variable (new build capacity) in the candidate solution vector.
-    new_build (float64): Capacity built for the candidate solution, units GW.
-    capacity (float64): Current installed capacity, units GW.
-    dispatch_power (float64[:]): Interval dispatch power of a flexible Generator, units GW.
-    remaining_energy (float64[:]): Remaining annual energy for flexible Generators, units GWh.
-    flexible_max_t (float64): Maximum dispatchable power in the current interval for a flexible Generator, units GW.
-    lt_generation (float64): Long-term total generation over the entire modelling horizon, units GWh.
-    unit_lt_hours (float64): Total hours of operation per unit, units hours.
-    lt_costs (LTCosts_InstanceType): Endogenously calculated long-term costs of the generator over the modelling horizon.
-    remaining_energy_temp_reverse (float64): Temporary value for remaining energy when balancing deficit block in reverse time,
-        units GWh.
-    remaining_energy_temp_forward (float64): Temporary value for remaining energy when balancing deficit block in forward time,
-        units GWh.
-    deficit_block_max_energy (float64): Maximum value of remaining energy within a deficit block, units GWh.
-    deficit_block_min_energy (float64): Minimum value of remaining energy within a deficit block, units GWh.
-    trickling_flag (boolean): Flag indicating if flexible Generator is a trickle-charger and can precharge Storage systems.
-    trickling_reserves (float64): Energy that must be retained during precharging so that flexible Generator can dispatch
-        during deficit block, units GWh.
-    remaining_trickling_reserves (float64): Energy remaining for trickle charging in the precharging period, units GWh.
+    Solar, wind and baseload generators require generation trace datafiles. Flexible
+    generators require datafiles for annual generation limits. Datafiles must be stored in
+    the 'data' folder and referenced in 'config/datafiles.csv'.
     """
 
     def __init__(
@@ -192,27 +120,16 @@ class Generator:
         cost: UnitCost_InstanceType,
     ) -> None:
         """
-        Initialise a Generator instance.
+        Initialize a Generator object.
 
         Parameters:
         -------
-        static_instance (boolean): True value indicates 'static' instance, False indicates 'dynamic' instance.
-            A static instance is unsafe to modify within a worker process for the unit committment process.
-        idx (int64): A model-level identifier for the Generator instance.
-        order (int64): A scenario-level identifier for the Generator instance.
-        name (unicode_type): A string providing the oridinary name of the Generator.
-        unit_size (float64): Nameplate unit size in GW. A Generator could be formed from multiple units.
-        max_build (float64): Maximum build limit in GW.
-        min_build (float64): Minimum build limit in GW.
-        capacity (float64): Installed capacity at model start in GW.
-        unit_type (unicode_type): Type of Generator (e.g., 'solar', 'wind', 'baseload', 'flexible').
-        near_optimum_check (boolean): Flag to perform near-optimum optimisation.
-        node (Node_InstanceType): The Network Node where the Generator is located.
-        fuel (Fuel_InstanceType): The Fuel consumed by the Generator.
-        line (Line_InstanceType): Minor line connecting Generator to the transmission network.
-        group (unicode_type): Group label used by broad optimum optimisation. Grouped assets are considered in aggregate
-            when minimising/maximising installed capacity within the broad optimum space.
-        cost (UnitCost_InstanceType): Exogenously defined cost assumptions.
+        id (int): Unique identifier for the generator.
+        generator_dict (Dict[str, str]): Dictionary containing generator attributes.
+        fuel (Fuel): The associated fuel object.
+        line (Line): The generic minor line defined to connect the generator to the transmission network.
+                        Minor lines should have empty node_start and node_end values. They do not form part
+                        of the network topology, but are used to estimate connection costs.
         """
         self.static_instance = static_instance
         self.id = idx
@@ -317,72 +234,7 @@ else:
 @jitclass(storage_spec)
 class Storage:
     """
-    Energy storage asset.
-
-    Notes:
-    -----
-    - Instances can be flagged as *static* or *dynamic* via static_instance. Static instances must not be
-    modified inside worker processes used for the stochastic optimisation, whereas dynamic instances are
-    safe to modify.
-    - Memory for endogenous time-series dispatch and stored energy arrays is allocated within worker
-    processes for the optimisation.
-    - Precharging fields are used in storage precharging period/deficit block steps.
-
-    Attributes:
-    -------
-    static_instance (boolean): True value indicates 'static' instance, False indicates 'dynamic' instance.
-        A static instance is unsafe to modify within a worker process for the unit commitment process.
-    id (int64): A model-level identifier for the Storage instance.
-    order (int64): A scenario-level identifier for the Storage instance.
-    name (unicode_type): A string providing the ordinary name of the Storage system.
-    initial_power_capacity (float64): Initial power capacity, units GW.
-    initial_energy_capacity (float64): Initial energy capacity, units GWh.
-    duration (int64): Storage duration in hours.
-    charge_efficiency (float64): Charging efficiency (fraction).
-    discharge_efficiency (float64): Discharging efficiency (fraction).
-    max_build_p (float64): Maximum build limit for power capacity, units GW.
-    max_build_e (float64): Maximum build limit for energy capacity, units GWh.
-    min_build_p (float64): Minimum build limit for power capacity, units GW.
-    min_build_e (float64): Minimum build limit for energy capacity, units GWh.
-    unit_type (unicode_type): Type of storage (e.g., 'PHES', 'BESS').
-    near_optimum_check (boolean): Flag to perform near-optimum optimisation.
-    node (Node_InstanceType): The Network Node where the Storage is located.
-    line (Line_InstanceType): Minor line connecting Storage to the transmission network.
-    group (unicode_type): Group label used by broad optimum optimisation. Grouped assets are considered in aggregate
-        when minimising/maximising installed capacity within the broad optimum space.
-    cost (UnitCost_InstanceType): Exogenously defined cost assumptions.
-    candidate_p_x_idx (int64): Index of one Storage decision variable (new build power capacity) in the candidate
-        solution vector.
-    candidate_e_x_idx (int64): Index of one Storage decision variable (new build energy capacity) in the candidate
-        solution vector.
-    new_build_p (float64): New build power capacity, units GW.
-    new_build_e (float64): New build energy capacity, units GWh.
-    power_capacity (float64): Current installed power capacity, units GW.
-    energy_capacity (float64): Current installed energy capacity, units GWh.
-    dispatch_power (float64[:]): Interval charging (-) or discharging (+) power, units GW.
-    stored_energy (float64[:]): Interval stored energy, units GWh.
-    discharge_max_t (float64): Maximum discharging power in the current interval, units GW.
-    charge_max_t (float64): Maximum charging power in the current interval, units GW.
-    lt_discharge (float64): Long-term total energy discharged over the entire modelling horizon, units GWh.
-    lt_costs (LTCosts_InstanceType): Endogenously calculated long-term costs of the generator over the modelling horizon.
-    deficit_block_min_storage (float64): Minimum value of stored energy within a deficit block, units GWh.
-    deficit_block_max_storage (float64): Maximum value of stored energy within a deficit block, units GWh.
-    stored_energy_temp_reverse (float64): Temporary value for stored energy when balancing deficit block in reverse time,
-        units GWh.
-    stored_energy_temp_forward (float64): Temporary value for stored energy when balancing deficit block in forward time,
-        units GWh.
-    precharge_energy (float64): Additional energy that a precharger must be charged with during the precharging period
-        so that it can dispatch during the deficit block, units GWh.
-    trickling_reserves (float64): Energy that must be retained during precharging so that flexible Generator can dispatch
-        during deficit block, units GWh.
-    remaining_trickling_reserves (float64): Energy remaining for trickle charging in the precharging period, units GWh.
-    precharge_flag (boolean): Flag indicating whether Storage is a precharger.
-    trickling_flag (boolean): Flag indicating whether Storage can trickle-charge the prechargers through inter-storage
-        transfers.
-    remaining_discharge_max_t (float64): Remaining discharging capacity in the current interval, units GW. Includes the
-        available reduction in charging power.
-    remaining_charge_max_t (float64): Remaining charging capacity in the current interval, units GW. Includes the
-        available reduction in discharging power.
+    Represents an energy storage system unit in the system.
     """
 
     def __init__(
@@ -408,31 +260,15 @@ class Storage:
         cost: UnitCost_InstanceType,
     ) -> None:
         """
-        Initialise a Storage instance.
+        Initialize a Storage object.
 
         Parameters:
         -------
-        static_instance (boolean): True value indicates 'static' instance, False indicates 'dynamic' instance.
-            A static instance is unsafe to modify within a worker process for the unit commitment process.
-        idx (int64): A model-level identifier for the Storage instance.
-        order (int64): A scenario-level identifier for the Storage instance.
-        name (unicode_type): A string providing the ordinary name of the Storage system.
-        power_capacity (float64): Initial power capacity, units GW.
-        energy_capacity (float64): Initial energy capacity, units GWh.
-        duration (int64): Storage duration in hours.
-        charge_efficiency (float64): Charging efficiency (fraction).
-        discharge_efficiency (float64): Discharging efficiency (fraction).
-        max_build_p (float64): Maximum build limit for power capacity, units GW.
-        max_build_e (float64): Maximum build limit for energy capacity, units GWh.
-        min_build_p (float64): Minimum build limit for power capacity, units GW.
-        min_build_e (float64): Minimum build limit for energy capacity, units GWh.
-        unit_type (unicode_type): Type of storage (e.g., 'PHES', 'BESS').
-        near_optimum_check (boolean): Flag to perform near-optimum optimisation.
-        node (Node_InstanceType): The Network Node where the Storage is located.
-        line (Line_InstanceType): Minor line connecting Storage to the transmission network.
-        group (unicode_type): Group label used by broad optimum optimisation. Grouped assets are considered in aggregate
-            when minimising/maximising installed capacity within the broad optimum space.
-        cost (UnitCost_InstanceType): Exogenously defined cost assumptions.
+        id (int): Unique identifier for the storage unit.
+        storage_dict (Dict[str, str]): Dictionary containing storage attributes.
+        line (Line): The generic minor line defined to connect the generator to the transmission network.
+                        Minor lines should have empty node_start and node_end values. They do not form part
+                        of the network topology, but are used to estimate connection costs.
         """
 
         self.static_instance = static_instance
@@ -504,34 +340,12 @@ else:
 
 @jitclass(fleet_spec)
 class Fleet:
-    """
-    Represents a collection of Generators and Storage systems in the scenario.
-
-    Attributes:
-    -------
-    static_instance (boolean): True value indicates 'static' instance, False indicates 'dynamic' instance.
-        A static instance is unsafe to modify within a worker process for the unit commitment process.
-    generators (DictType(int64, Generator_InstanceType)): Typed dictionary of Generator instances keyed by their
-        scenario-level orders.
-    storages (DictType(int64, Storage_InstanceType)): Typed dictionary of Storage instances keyed by their scenario-level orders.
-    """
-
     def __init__(
         self,
         static_instance: boolean,
         generators: DictType(int64, Generator_InstanceType),
         storages: DictType(int64, Storage_InstanceType),
     ):
-        """
-        Parameters:
-        -------
-        static_instance (boolean): True value indicates 'static' instance, False indicates 'dynamic' instance.
-            A static instance is unsafe to modify within a worker process for the unit commitment process.
-        generators (DictType(int64, Generator_InstanceType)): Typed dictionary of Generator instances keyed by their
-            scenario-level orders.
-        storages (DictType(int64, Storage_InstanceType)): Typed dictionary of Storage instances keyed by their
-            scenario-level orders.
-        """
         self.static_instance = static_instance
         self.generators = generators
         self.storages = storages

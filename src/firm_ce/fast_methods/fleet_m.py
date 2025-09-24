@@ -91,10 +91,6 @@ def build_capacities(
     Attributes modified for each Storage instance in Fleet.storages: power_capacity, new_build_p, energy_capacity, new_build_e,
         line.
     Attributes modified for each Line instance referenced in Storage.line: new_build, capacity.
-
-    Raises:
-    -------
-    RuntimeError: Raised if static_instance is True. Only dynamic instances can be modified by this pseudo-method.
     """
     if fleet_instance.static_instance:
         raise_static_modification_error()
@@ -128,10 +124,6 @@ def allocate_memory(fleet_instance: Fleet_InstanceType, intervals_count: int64) 
     -------
     Attributes modified for each 'flexible' Generator instance in Fleet.generators: dispatch_power, remaining_energy.
     Attributes modified for each Storage instance in Fleet.storages: dispatch_power, stored_energy.
-
-    Raises:
-    -------
-    RuntimeError: Raised if static_instance is True. Only dynamic instances can be modified by this pseudo-method.
     """
     if fleet_instance.static_instance:
         raise_static_modification_error()
@@ -163,10 +155,6 @@ def initialise_stored_energies(fleet_instance: Fleet_InstanceType) -> None:
     Side-effects:
     -------
     Attributes modified for each Storage instance in Fleet.storages: stored_energy.
-
-    Raises:
-    -------
-    RuntimeError: Raised if static_instance is True. Only dynamic instances can be modified by this pseudo-method.
     """
     if fleet_instance.static_instance:
         raise_static_modification_error()
@@ -195,10 +183,6 @@ def initialise_annual_limits(fleet_instance: Fleet_InstanceType, year: int64, fi
     Side-effects:
     -------
     Attributes modified for each flexible Generator instance in Fleet.generators: remaining_energy.
-
-    Raises:
-    -------
-    RuntimeError: Raised if static_instance is True. Only dynamic instances can be modified by this pseudo-method.
     """
     if fleet_instance.static_instance:
         raise_static_modification_error()
@@ -234,7 +218,7 @@ def update_stored_energies(
 ) -> None:
     """
     Once the dispatch_power for the Storage objects have been determined for a time interval, the stored_energy
-    for each Storage system is updated. Within the deficit block, a temporary value is updated to track stored_energy
+    for each Storage system is updated. During precharging actions, a temporary value is updated to track stored_energy
     constraints for dispatching.
 
     Parameters:
@@ -243,7 +227,7 @@ def update_stored_energies(
     interval (int64): Index for the time interval.
     resolution (float64): Resolution of the time interval (hours per time interval).
     forward_time_flag (boolean): True indicates the unit committment is iterating forwards through time. False
-        indicates that it is moving backwards through time within the deficit block.
+        indicates that it is moving backwards through time during precharging.
 
     Returns:
     -------
@@ -269,7 +253,7 @@ def update_remaining_flexible_energies(
 ) -> None:
     """
     Once the dispatch_power for the flexible Generator objects have been determined for a time interval, the remaining_energy
-    for each flexible Generator system is updated. Within the deficit block, a temporary value is updated to track
+    for each flexible Generator system is updated. During precharging actions, a temporary value is updated to track
     remaining_energy constraints for dispatching.
 
     Parameters:
@@ -278,10 +262,9 @@ def update_remaining_flexible_energies(
     interval (int64): Index for the time interval.
     resolution (float64): Resolution of the time interval (hours per time interval).
     forward_time_flag (boolean): True indicates the unit committment is iterating forwards through time. False
-        indicates that it is moving backwards through time within the deficit block.
-    previous_year_flag (boolean): True indicates that the time interval has crossed into the previous year (iterating backwards
-        through reverse time), indicating that the remaining_energy_temp_reverse must be based upon the previous year's
-        remaining_energy constraint.
+        indicates that it is moving backwards through time during precharging.
+    previous_year_flag (boolean): True indicates that the interval for the precharging process has crossed into the previous
+        year, indicating that the remaining_energy_temp_reverse must be based upon the previous year's remaining_energy constraint.
 
     Returns:
     -------
@@ -336,8 +319,8 @@ def calculate_lt_generations(fleet_instance: Fleet_InstanceType, interval_resolu
 def initialise_deficit_block(fleet_instance: Fleet_InstanceType, interval_after_deficit_block: int64) -> None:
     """
     Initialise temporary energy constraint parameters and deficit block min/max energies for flexible Generator and
-    Storage objects upon beginning the balancing of the deficit block. The min/max energies for the deficit block are
-    used to ensure Generator and Storage objects maintain sufficient reserves during precharging to complete dispatch during the
+    Storage objects upon beginning precharging. The min/max energies for the deficit block are used to ensure
+    Generator and Storage objects maintain sufficient reserves during precharging to complete dispatch during the
     deficit block.
 
     Parameters:
@@ -418,9 +401,10 @@ def reset_dispatch(fleet_instance: Fleet_InstanceType, interval: int64) -> None:
 @njit(fastmath=FASTMATH)
 def update_deficit_block(fleet_instance: Fleet_InstanceType) -> None:
     """
-    Updates the min/max energies for Storage and flexible Generator objects within the deficit block. The min/max
-    energies for the deficit block are used to ensure Generator and Storage objects maintain sufficient reserves
-    during precharging to complete dispatch during the deficit block.
+    Updates the min/max energies for Storage and flexible Generator objects within the deficit block
+    during precharging. The min/max energies for the deficit block are used to ensure
+    Generator and Storage objects maintain sufficient reserves during precharging to complete dispatch during the
+    deficit block.
 
     Parameters:
     -------
@@ -450,7 +434,7 @@ def assign_precharging_values(
     fleet_instance: Fleet_InstanceType, interval: int64, resolution: float64, year: int64
 ) -> None:
     """
-    Once the first time interval in a deficit block is located (during reverse-time balancing),
+    Once the first time interval in a deficit block is located (during reverse-time precharging),
     the precharging energy for Storage prechargers and trickling reserves for Storage tricklers and
     flexible Generators are defined. These parameters are used to constrain discharging from trickle
     chargers (ensuring they maintain enough energy to dispatch during deficit block) and charging from

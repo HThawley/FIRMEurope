@@ -90,10 +90,6 @@ def build_capacity(line_instance: Line_InstanceType, new_build_power_capacity: f
     Side-effects:
     -------
     Attributes modified for the Line instance: capacity, new_build.
-
-    Raises:
-    -------
-    RuntimeError: Raised if static_instance is True. Only dynamic instances can be modified by this pseudo-method.
     """
     if line_instance.static_instance:
         raise_static_modification_error()
@@ -119,11 +115,7 @@ def allocate_memory(line_instance: Line_InstanceType, intervals_count: int64) ->
 
     Side-effects:
     -------
-    Attributes modified for the Line instance: flows.
-
-    Raises:
-    -------
-    RuntimeError: Raised if static_instance is True. Only dynamic instances can be modified by this pseudo-method.
+    Attributes modified for the Line instance: flows
     """
     if line_instance.static_instance:
         raise_static_modification_error()
@@ -133,46 +125,12 @@ def allocate_memory(line_instance: Line_InstanceType, intervals_count: int64) ->
 
 @njit(fastmath=FASTMATH)
 def calculate_lt_flow(line_instance: Line_InstanceType, interval_resolutions: float64[:]) -> None:
-    """
-    Calculate total line flows for a Line over the modelling horizon.
-
-    Parameters:
-    -------
-    line_instance (Line_InstanceType): A dynamic instance of the Line jitclass.
-    interval_resolutions (float64[:]): A 1-dimensional array containing the resolution for every time interval
-        in the unit committment formulation (hours per time interval). An array is used instead of a single
-        scalar value to allow for variable time step simplified balancing methods to be developed in future.
-
-    Returns:
-    -------
-    None.
-
-    Side-effects:
-    -------
-    Attributes modified for the Line instance: lt_flows.
-    """
     line_instance.lt_flows = sum(np.abs(line_instance.flows) * interval_resolutions)
     return None
 
 
 @njit(fastmath=FASTMATH)
 def calculate_variable_costs(line_instance: Line_InstanceType) -> float64:
-    """
-    Calculate the total variable costs for a Line at the end of unit committment.
-
-    Parameters:
-    -------
-    line_instance (Line_InstanceType): An instance of the Line jitclass.
-
-    Returns:
-    -------
-    float64: Total variable costs ($), equal to sum of fuel and VO&M costs.
-
-    Side-effects:
-    -------
-    Attributes modified for the Line instance: lt_costs.
-    Attributes modified for the referenced Line.lt_costs: vom, fuel.
-    """
     ltcosts_m.calculate_vom(line_instance.lt_costs, line_instance.lt_flows, line_instance.cost)
     ltcosts_m.calculate_fuel(line_instance.lt_costs, line_instance.lt_flows, 0, line_instance.cost)
     return ltcosts_m.get_variable(line_instance.lt_costs)
@@ -180,24 +138,6 @@ def calculate_variable_costs(line_instance: Line_InstanceType) -> float64:
 
 @njit(fastmath=FASTMATH)
 def calculate_fixed_costs(line_instance: Line_InstanceType, years_float: float64, year_count: int64) -> float64:
-    """
-    Calculate the total fixed costs for a Line.
-
-    Parameters:
-    -------
-    line_instance (Line_InstanceType): An instance of the Line jitclass.
-    years_float (float64): Number of non-leap years. Leap days provide additional fractional value.
-    year_count (int64): Total number of years across modelling horizon.
-
-    Returns:
-    -------
-    float64: Total fixed costs ($), equal to sum of annualised build and FO&M costs.
-
-    Side-effects:
-    -------
-    Attributes modified for the Line instance: lt_costs.
-    Attributes modified for the referenced Line.lt_costs: annualised_build, fom.
-    """
     ltcosts_m.calculate_annualised_build(
         line_instance.lt_costs,
         0.0,
@@ -215,15 +155,4 @@ def calculate_fixed_costs(line_instance: Line_InstanceType, years_float: float64
 
 @njit(fastmath=FASTMATH)
 def get_lt_losses(line_instance: Line_InstanceType) -> float64:
-    """
-    Simplified linear energy loss function for estimating total line losses for a Line over the model horizon.
-
-    Parameters:
-    -------
-    line_instance (Line_InstanceType): A dynamic instance of the Line jitclass.
-
-    Returns:
-    -------
-    float64: Total line losses over the model horizon [GWh].
-    """
     return line_instance.lt_flows * line_instance.loss_factor * line_instance.length / 1000

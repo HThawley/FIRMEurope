@@ -1,2 +1,2 @@
-id,scenario_name,resolution,allowance,firstyear,finalyear,nodes,lines,networksteps_max,type,initial_pop_filename
-0,gas,1,0.00002,2020,2020,"QLD,NSW,SA,VIC,TAS","QLD-NSW,NSW-VIC,VIC-SA,VIC-TAS",4,single_time,
+id,scenario_name,resolution,allowance,firstyear,finalyear,nodes,lines,networksteps_max,type
+0,gas,1,0.00002,2020,2020,"QLD,NSW,SA,VIC,TAS","QLD-NSW,NSW-VIC,VIC-SA,VIC-TAS",4,single_time

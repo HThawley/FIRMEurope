@@ -114,25 +114,8 @@ class Statistics:
         )
 
     def generate_capacities_file(self) -> ResultFile:
-        col_count = (
-            len(self.solution.fleet.generators)
-            + 2 * len(self.solution.fleet.storages)
-            + len(self.solution.network.major_lines)
-            + len(self.solution.network.minor_lines)
-        )
-        header = np.empty((5, col_count + 1), dtype=object)
-        header[:, 0] = np.array(
-            [
-                "Asset Name",
-                "Asset Type",
-                "Asset ID",
-                "Column Name",
-                "Column Units",
-            ]
-        )
-
-        data_array = np.empty((4, col_count + 1), dtype=object)
-        data_array[:, 0] = np.array(
+        header = ["Asset Name"]
+        row_labels = np.array(
             [
                 "Total Capacity",
                 "New Build Capacity",
@@ -141,83 +124,72 @@ class Statistics:
             ],
             dtype=object,
         )
+        data_array = np.empty(
+            (4, self.get_asset_column_count(include_minor_lines=True, include_energy_limits=False)), dtype=np.float64
+        )
 
-        col = 1
+        column_counter = 0
         for generator in self.solution.fleet.generators.values():
-            header[:, col] = np.array(
-                [generator.name, "Generator", str(generator.id), "Power Capacity", "[GW]"], dtype=object
-            )
-            data_array[0, col] = round(generator.capacity, 3)
-            data_array[1, col] = round(generator.new_build, 3)
-            data_array[2, col] = round(generator.min_build, 3)
-            data_array[3, col] = round(generator.max_build, 3)
-            col += 1
+            header.append(generator.name + " [GW]")
+            data_array[0, column_counter] = round(generator.capacity, 3)
+            data_array[1, column_counter] = round(generator.new_build, 3)
+            data_array[2, column_counter] = round(generator.min_build, 3)
+            data_array[3, column_counter] = round(generator.max_build, 3)
+            column_counter += 1
 
         for storage in self.solution.fleet.storages.values():
-            header[:, col] = np.array(
-                [storage.name, "Storage", str(storage.id), "Power Capacity", "[GW]"], dtype=object
-            )
-            data_array[0, col] = round(storage.power_capacity, 3)
-            data_array[1, col] = round(storage.new_build_p, 3)
-            data_array[2, col] = round(storage.min_build_p, 3)
-            data_array[3, col] = round(storage.max_build_p, 3)
-            col += 1
+            header.append(storage.name + " [GW]")
+            data_array[0, column_counter] = round(storage.power_capacity, 3)
+            data_array[1, column_counter] = round(storage.new_build_p, 3)
+            data_array[2, column_counter] = round(storage.min_build_p, 3)
+            data_array[3, column_counter] = round(storage.max_build_p, 3)
+            column_counter += 1
 
         for storage in self.solution.fleet.storages.values():
-            header[:, col] = np.array(
-                [storage.name, "Storage", str(storage.id), "Energy Capacity", "[GWh]"], dtype=object
-            )
-            data_array[0, col] = round(storage.energy_capacity, 3)
-            data_array[1, col] = round(storage.new_build_e, 3)
-            data_array[2, col] = round(storage.min_build_e, 3)
-            data_array[3, col] = round(storage.max_build_e, 3)
-            col += 1
+            header.append(storage.name + " [GWh]")
+            data_array[0, column_counter] = round(storage.energy_capacity, 3)
+            data_array[1, column_counter] = round(storage.new_build_e, 3)
+            data_array[2, column_counter] = round(storage.min_build_e, 3)
+            data_array[3, column_counter] = round(storage.max_build_e, 3)
+            column_counter += 1
 
         for line in self.solution.network.major_lines.values():
-            header[:, col] = np.array([line.name, "Major Line", str(line.id), "Power Capacity", "[GW]"], dtype=object)
-            data_array[0, col] = round(line.capacity, 3)
-            data_array[1, col] = round(line.new_build, 3)
-            data_array[2, col] = round(line.min_build, 3)
-            data_array[3, col] = round(line.max_build, 3)
-            col += 1
+            header.append(line.name + " [GW]")
+            data_array[0, column_counter] = round(line.capacity, 3)
+            data_array[1, column_counter] = round(line.new_build, 3)
+            data_array[2, column_counter] = round(line.min_build, 3)
+            data_array[3, column_counter] = round(line.max_build, 3)
+            column_counter += 1
 
         for line in self.solution.network.minor_lines.values():
-            header[:, col] = np.array([line.name, "Minor Line", str(line.id), "Power Capacity", "[GW]"], dtype=object)
-            data_array[0, col] = round(line.capacity, 3)
-            data_array[1, col] = round(line.new_build, 3)
-            data_array[2, col] = round(line.min_build, 3)
-            data_array[3, col] = round(line.max_build, 3)
-            col += 1
+            header.append(line.name + " [GW]")
+            data_array[0, column_counter] = round(line.capacity, 3)
+            data_array[1, column_counter] = round(line.new_build, 3)
+            data_array[2, column_counter] = round(line.min_build, 3)
+            data_array[3, column_counter] = round(line.max_build, 3)
+            column_counter += 1
 
-        result_file = ResultFile("capacities", self.results_directory, header, data_array, decimals=None)
+        labelled_data_array = np.column_stack((row_labels, data_array))
+
+        result_file = ResultFile("capacities", self.results_directory, header, labelled_data_array, decimals=None)
         return result_file
 
     def generate_component_costs_file(self) -> ResultFile:
-        col_count = (
+        asset_count = (
             len(self.solution.fleet.generators)
             + len(self.solution.fleet.storages)
             + len(self.solution.network.major_lines)
             + len(self.solution.network.minor_lines)
         )
-        header = np.empty((5, col_count + 1), dtype=object)
-        header[:, 0] = np.array(
-            [
-                "Asset Name",
-                "Asset Type",
-                "Asset ID",
-                "Column Name",
-                "Column Units",
-            ]
+        header = ["Cost Type"]
+        row_labels = np.array(
+            ["Annualised Build Cost [$]", "Fixed O&M Cost [$]", "Variable O&M Cost [$]", "Fuel Cost [$]"], dtype=object
         )
+        data_array = np.zeros((4, asset_count))
 
-        data_array = np.zeros((4, col_count + 1), dtype=object)
-        data_array[:, 0] = np.array(["Annualised Build", "Fixed O&M", "Variable O&M", "Fuel"], dtype=object)
-
-        col = 1
+        col = 0
         for generator in self.solution.fleet.generators.values():
-            header[:, col] = np.array(
-                [generator.name, "Generator", str(generator.id), "Total Cost", "[$]"], dtype=object
-            )
+            header.append(generator.name)
             data_array[0, col] = generator.lt_costs.annualised_build
             data_array[1, col] = generator.lt_costs.fom
             data_array[2, col] = generator.lt_costs.vom
@@ -225,7 +197,7 @@ class Statistics:
             col += 1
 
         for storage in self.solution.fleet.storages.values():
-            header[:, col] = np.array([storage.name, "Storage", str(storage.id), "Total Cost", "[$]"], dtype=object)
+            header.append(storage.name)
             data_array[0, col] = storage.lt_costs.annualised_build
             data_array[1, col] = storage.lt_costs.fom
             data_array[2, col] = storage.lt_costs.vom
@@ -233,7 +205,7 @@ class Statistics:
             col += 1
 
         for line in self.solution.network.major_lines.values():
-            header[:, col] = np.array([line.name, "Major Line", str(line.id), "Total Cost", "[$]"], dtype=object)
+            header.append(line.name)
             data_array[0, col] = line.lt_costs.annualised_build
             data_array[1, col] = line.lt_costs.fom
             data_array[2, col] = line.lt_costs.vom
@@ -241,113 +213,99 @@ class Statistics:
             col += 1
 
         for line in self.solution.network.minor_lines.values():
-            header[:, col] = np.array([line.name, "Minor Line", str(line.id), "Total Cost", "[$]"], dtype=object)
+            header.append(line.name)
             data_array[0, col] = line.lt_costs.annualised_build
             data_array[1, col] = line.lt_costs.fom
             data_array[2, col] = line.lt_costs.vom
             data_array[3, col] = line.lt_costs.fuel
             col += 1
 
-        result_file = ResultFile("component_costs", self.results_directory, header, data_array, decimals=None)
+        labelled_data_array = np.column_stack((row_labels, data_array))
+
+        result_file = ResultFile("component_costs", self.results_directory, header, labelled_data_array, decimals=None)
         return result_file
 
     def generate_energy_balance_file(self, aggregation_type: str) -> ResultFile:
+        header = []
         match aggregation_type:
             case "assets":
-                col_count = 3 * len(self.solution.network.nodes) + self.get_asset_column_count(
+                column_count = 3 * len(self.solution.network.nodes) + self.get_asset_column_count(
                     include_minor_lines=False, include_energy_limits=True
                 )
             case "nodes":
-                col_count = 10 * len(self.solution.network.nodes) + len(self.solution.network.major_lines)
+                column_count = 10 * len(self.solution.network.nodes) + len(self.solution.network.major_lines)
             case "network":
-                col_count = 10
+                column_count = 10
+        data_array = np.zeros((self.full_intervals_count, column_count), dtype=np.float64)
 
-        header = np.empty((5, col_count), dtype=object)
-        header[:, 0] = np.array(
-            [
-                "Asset Name",
-                "Asset Type",
-                "Asset ID",
-                "Column Name",
-                "Column Units",
-            ]
-        )
-        data_array = np.zeros((self.full_intervals_count, col_count), dtype=np.float64)
-
-        col = 0
+        column_counter = 0
         match aggregation_type:
             case "assets":
                 for node in self.solution.network.nodes.values():
-                    header[:, col] = np.array([node.name, "Node", str(node.id), "Demand", "[MW]"], dtype=object)
-                    data_array[:, col] = self.expand_block_data(node.data * 1000)
-                    col += 1
+                    header.append(node.name + " Demand [MW]")
+                    data_array[:, column_counter] = self.expand_block_data(node.data * 1000)
+                    column_counter += 1
 
                 for generator in self.solution.fleet.generators.values():
-                    header[:, col] = np.array(
-                        [generator.name, "Generator", str(generator.id), "Dispatch", "[MW]"], dtype=object
-                    )
+                    header.append(generator.name + " [MW]")
                     match generator.unit_type:
                         case "flexible":
-                            data_array[:, col] = self.expand_block_data(generator.dispatch_power * 1000)
+                            data_array[:, column_counter] = self.expand_block_data(generator.dispatch_power * 1000)
                         case _:
-                            data_array[:, col] = self.expand_block_data(generator.data * generator.capacity * 1000)
-                    col += 1
+                            data_array[:, column_counter] = self.expand_block_data(
+                                generator.data * generator.capacity * 1000
+                            )
+                    column_counter += 1
 
                 for storage in self.solution.fleet.storages.values():
-                    header[:, col] = np.array(
-                        [storage.name, "Storage", str(storage.id), "Dispatch", "[MW]"], dtype=object
-                    )
-                    data_array[:, col] = self.expand_block_data(storage.dispatch_power * 1000)
-                    col += 1
+                    header.append(storage.name + " [MW]")
+                    data_array[:, column_counter] = self.expand_block_data(storage.dispatch_power * 1000)
+                    column_counter += 1
 
                 for generator in self.solution.fleet.generators.values():
                     if generator.unit_type == "flexible":
-                        header[:, col] = np.array(
-                            [generator.name, "Generator", str(generator.id), "Remaining Energy", "[MWh]"], dtype=object
-                        )
-                        data_array[:, col] = self.expand_block_data(generator.remaining_energy * 1000)
-                        col += 1
+                        header.append(generator.name + " Remaining Energy [MWh]")
+                        data_array[:, column_counter] = self.expand_block_data(generator.remaining_energy * 1000)
+                        column_counter += 1
 
                 for storage in self.solution.fleet.storages.values():
-                    header[:, col] = np.array(
-                        [storage.name, "Storage", str(storage.id), "Stored Energy", "[MWh]"], dtype=object
-                    )
-                    data_array[:, col] = self.expand_block_data(storage.stored_energy * 1000)
-                    col += 1
+                    header.append(storage.name + " Stored Energy [MWh]")
+                    data_array[:, column_counter] = self.expand_block_data(storage.stored_energy * 1000)
+                    column_counter += 1
 
                 for node in self.solution.network.nodes.values():
-                    header[:, col] = np.array([node.name, "Node", str(node.id), "Spillage", "[MW]"], dtype=object)
-                    data_array[:, col] = self.expand_block_data(node.spillage * 1000)
-                    col += 1
+                    header.append(node.name + " Spillage [MW]")
+                    data_array[:, column_counter] = self.expand_block_data(node.spillage * 1000)
+                    column_counter += 1
 
                 for node in self.solution.network.nodes.values():
-                    header[:, col] = np.array([node.name, "Node", str(node.id), "Deficit", "[MW]"], dtype=object)
-                    data_array[:, col] = self.expand_block_data(node.deficits * 1000)
-                    col += 1
+                    header.append(node.name + " Deficit [MW]")
+                    data_array[:, column_counter] = self.expand_block_data(node.deficits * 1000)
+                    column_counter += 1
 
                 for line in self.solution.network.major_lines.values():
-                    header[:, col] = np.array([line.name, "Major Line", str(line.id), "Flow", "[MW]"], dtype=object)
-                    data_array[:, col] = self.expand_block_data(line.flows * 1000)
-                    col += 1
+                    header.append(line.name + " [MW]")
+                    data_array[:, column_counter] = self.expand_block_data(line.flows * 1000)
+                    column_counter += 1
 
             case "nodes":
                 for node in self.solution.network.nodes.values():
-                    header[:, col] = np.array([node.name, "Node", str(node.id), "Demand", "[MW]"], dtype=object)
-                    data_array[:, col] = self.expand_block_data(node.data * 1000)
-                    col += 1
+                    header.append(node.name + " Demand [MW]")
+                    data_array[:, column_counter] = self.expand_block_data(node.data * 1000)
+                    column_counter += 1
 
-                for header_item, units in [
-                    ["Solar", "[MW]"],
-                    ["Wind", "[MW]"],
-                    ["Baseload", "[MW]"],
-                    ["Flexible Dispatch", "[MW]"],
-                    ["Storage Dispatch", "[MW]"],
-                    ["Flexible Remaining", "[MWh]"],
-                    ["Stored Energy", "[MWh]"],
+                for header_item in [
+                    "Solar [MW]",
+                    "Wind [MW]",
+                    "Baseload [MW]",
+                    "Flexible Dispatch [MW]",
+                    "Storage Dispatch [MW]",
+                    "Flexible Remaining [MWh]",
+                    "Stored Energy [MWh]",
                 ]:
                     for node in self.solution.network.nodes.values():
-                        header[:, col] = np.array([node.name, "Node", str(node.id), header_item, units], dtype=object)
-                        col += 1
+                        header.append(node.name + f" {header_item}")
+                        column_counter += 1
 
                 for generator in self.solution.fleet.generators.values():
                     match generator.unit_type:
@@ -383,35 +341,34 @@ class Statistics:
                     column_idx = 7 * len(self.solution.network.nodes) + storage.node.order
                     data_array[:, column_idx] += self.expand_block_data(storage.stored_energy * 1000)
                 for node in self.solution.network.nodes.values():
-                    header[:, col] = np.array([node.name, "Node", str(node.id), "Spillage", "[MW]"], dtype=object)
-                    data_array[:, col] += self.expand_block_data(node.spillage * 1000)
-                    col += 1
+                    header.append(node.name + " Spillage [MW]")
+                    data_array[:, column_counter] += self.expand_block_data(node.spillage * 1000)
+                    column_counter += 1
 
                 for node in self.solution.network.nodes.values():
-                    header[:, col] = np.array([node.name, "Node", str(node.id), "Deficit", "[MW]"], dtype=object)
-                    data_array[:, col] += self.expand_block_data(node.deficits * 1000)
-                    col += 1
+                    header.append(node.name + " Deficit [MW]")
+                    data_array[:, column_counter] += self.expand_block_data(node.deficits * 1000)
+                    column_counter += 1
 
                 for line in self.solution.network.major_lines.values():
-                    header[:, col] = np.array([line.name, "Major Line", str(line.id), "Flow", "[MW]"], dtype=object)
-                    data_array[:, col] += self.expand_block_data(line.flows * 1000)
-                    col += 1
+                    header.append(line.name + " Flows [MW]")
+                    data_array[:, column_counter] += self.expand_block_data(line.flows * 1000)
+                    column_counter += 1
 
             case "network":
-                for header_item, units in [
-                    ["Demand", "[MW]"],
-                    ["Solar", "[MW]"],
-                    ["Wind", "[MW]"],
-                    ["Baseload", "[MW]"],
-                    ["Flexible Dispatch", "[MW]"],
-                    ["Storage Dispatch", "[MW]"],
-                    ["Flexible Remaining", "[MWh]"],
-                    ["Stored Energy", "[MWh]"],
-                    ["Spillage", "[MW]"],
-                    ["Deficit", "[MW]"],
+                for header_item in [
+                    "Demand [MW]",
+                    "Solar [MW]",
+                    "Wind [MW]",
+                    "Baseload [MW]",
+                    "Flexible Dispatch [MW]",
+                    "Storage Dispatch [MW]",
+                    "Flexible Remaining [MWh]",
+                    "Stored Energy [MWh]",
+                    "Spillage [MW]",
+                    "Deficit [MW]",
                 ]:
-                    header[:, col] = np.array(["Network", "Network", 0, header_item, units], dtype=object)
-                    col += 1
+                    header.append(header_item)
                 for node in self.solution.network.nodes.values():
                     data_array[:, 0] += self.expand_block_data(node.data * 1000)
                     data_array[:, 8] += self.expand_block_data(node.spillage * 1000)
@@ -439,38 +396,15 @@ class Statistics:
         return result_file
 
     def generate_levelised_costs_file(self) -> ResultFile:
-        col_count = (
-            6
-            + 2 * len(self.solution.fleet.generators)
-            + 2 * len(self.solution.fleet.storages)
-            + 2 * len(self.solution.network.major_lines)
-            + 2 * len(self.solution.network.minor_lines)
-        )
-        header = np.empty((5, col_count + 1), dtype=object)
-        header[:, 0] = np.array(
-            [
-                "Asset Name",
-                "Asset Type",
-                "Asset ID",
-                "Column Name",
-                "Column Units",
-            ]
-        )
-        header[:, 1:7] = np.array(
-            [
-                ["Scenario Total", "", "", "LCOE", "[$/MWh]"],
-                ["Scenario Total", "", "", "LCOG", "[$/MWh]"],
-                ["Scenario Total", "", "", "LCOB", "[$/MWh]"],
-                ["Scenario Total", "", "", "LCOB_storage", "[$/MWh]"],
-                ["Scenario Total", "", "", "LCOB_transmission", "[$/MWh]"],
-                ["Scenario Total", "", "", "LCOB_losses_spillage", "[$/MWh]"],
-            ]
-        ).T
-
-        data_array = np.zeros((1, col_count + 1), dtype=object)
-        data_array[:, 0] = np.array(["Levelised Cost"], dtype=object)
-        data_array[:, 1:7] = 0.0
-
+        header = [
+            "LCOE [$/MWh]",
+            "LCOG [$/MWh]",
+            "LCOB [$/MWh]",
+            "LCOB_storage [$/MWh]",
+            "LCOB_transmission [$/MWh]",
+            "LCOB_losses_spillage [$/MWh]",
+        ]
+        data_array = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         total_energy = (
             np.abs(
                 sum(self.solution.static.year_energy_demand) - network_m.calculate_lt_line_losses(self.solution.network)
@@ -497,100 +431,86 @@ class Statistics:
         )
 
         # LCOE and Total Levelised Values
-        col = 7
         for generator in self.solution.fleet.generators.values():
-            header[:, col] = np.array([generator.name, "Generator", str(generator.id), "LCOE", "[$/MWh]"], dtype=object)
+            header.append(generator.name + " LCOE [$/MWh]")
             if generator_m.check_unit_type(generator, "flexible"):
-                data_array[0, col] = round(ltcosts_m.get_total(generator.lt_costs) / total_energy, 2)
+                data_array.append(ltcosts_m.get_total(generator.lt_costs) / total_energy)
             else:
-                data_array[0, col] = round(ltcosts_m.get_total(generator.lt_costs) / total_energy, 2)
-            data_array[0, 1] += ltcosts_m.get_total(generator.lt_costs)
-            data_array[0, 2] += ltcosts_m.get_total(generator.lt_costs)
-            col += 1
+                data_array.append(ltcosts_m.get_total(generator.lt_costs) / total_energy)
+            data_array[0] += ltcosts_m.get_total(generator.lt_costs)
+            data_array[1] += ltcosts_m.get_total(generator.lt_costs)
 
         for storage in self.solution.fleet.storages.values():
-            header[:, col] = np.array([storage.name, "Storage", str(storage.id), "LCOE", "[$/MWh]"], dtype=object)
-            data_array[0, col] = round(ltcosts_m.get_total(storage.lt_costs) / total_energy, 2)
-            data_array[0, 1] += ltcosts_m.get_total(storage.lt_costs)
-            data_array[0, 4] += ltcosts_m.get_total(storage.lt_costs)
-            col += 1
+            header.append(storage.name + " LCOE [$/MWh]")
+            data_array.append(ltcosts_m.get_total(storage.lt_costs) / total_energy)
+            data_array[0] += ltcosts_m.get_total(storage.lt_costs)
+            data_array[3] += ltcosts_m.get_total(storage.lt_costs)
 
         for line in self.solution.network.major_lines.values():
-            header[:, col] = np.array([line.name, "Major Line", str(line.id), "LCOE", "[$/MWh]"], dtype=object)
-            data_array[0, col] = round(ltcosts_m.get_total(line.lt_costs) / total_energy, 2)
-            data_array[0, 1] += ltcosts_m.get_total(line.lt_costs)
-            data_array[0, 5] += ltcosts_m.get_total(line.lt_costs)
-            col += 1
+            header.append(line.name + " LCOE [$/MWh]")
+            data_array.append(ltcosts_m.get_total(line.lt_costs) / total_energy)
+            data_array[0] += ltcosts_m.get_total(line.lt_costs)
+            data_array[4] += ltcosts_m.get_total(line.lt_costs)
 
         for line in self.solution.network.minor_lines.values():
-            header[:, col] = np.array([line.name, "Minor Line", str(line.id), "LCOE", "[$/MWh]"], dtype=object)
-            data_array[0, col] = (ltcosts_m.get_total(line.lt_costs) / total_energy, 2)
-            data_array[0, 1] += ltcosts_m.get_total(line.lt_costs)
-            data_array[0, 5] += ltcosts_m.get_total(line.lt_costs)
-            col += 1
+            header.append(line.name + " LCOE [$/MWh]")
+            data_array.append(ltcosts_m.get_total(line.lt_costs) / total_energy)
+            data_array[0] += ltcosts_m.get_total(line.lt_costs)
+            data_array[4] += ltcosts_m.get_total(line.lt_costs)
 
-        data_array[0, 1] = round(data_array[0, 1] / total_energy, 2)  # LCOE
-        data_array[0, 2] = round(data_array[0, 2] / total_generation, 2)  # LCOG
-        data_array[0, 3] = round(data_array[0, 1] - data_array[0, 2], 2)  # LCOB
-        data_array[0, 4] = round(data_array[0, 4] / total_energy, 2)  # LCOB_storage
-        data_array[0, 5] = round(data_array[0, 5] / total_energy, 2)  # LCOB_transmission
-        data_array[0, 6] = round(data_array[0, 3] - data_array[0, 4] - data_array[0, 5], 2)  # LCOB_spillage_losses
+        data_array[0] /= total_energy  # LCOE
+        data_array[1] /= total_generation  # LCOG
+        data_array[2] = data_array[0] - data_array[1]  # LCOB
+        data_array[3] /= total_energy  # LCOB_storage
+        data_array[4] /= total_energy  # LCOB_transmission
+        data_array[5] = data_array[2] - data_array[3] - data_array[4]  # LCOB_spillage_losses
 
         # LCOG, LCOS and LCOT
         for generator in self.solution.fleet.generators.values():
-            header[:, col] = np.array([generator.name, "Generator", str(generator.id), "LCOG", "[$/MWh]"], dtype=object)
+            header.append(generator.name + " LCOG [$/MWh]")
             if generator_m.check_unit_type(generator, "flexible"):
-                data_array[0, col] = round(
+                data_array.append(
                     safe_divide(
                         ltcosts_m.get_total(generator.lt_costs),
                         sum(generator.dispatch_power) * self.solution.static.resolution * 1000,
-                    ),
-                    2,
+                    )
                 )
             else:
-                data_array[0, col] = round(
+                data_array.append(
                     safe_divide(
                         ltcosts_m.get_total(generator.lt_costs),
                         sum(generator.data * generator.capacity) * self.solution.static.resolution * 1000,
-                    ),
-                    2,
+                    )
                 )
-            col += 1
 
         for storage in self.solution.fleet.storages.values():
-            header[:, col] = np.array(
-                [storage.name, "Storage", str(storage.id), "LCOS", "[$/MWh_discharged]"], dtype=object
-            )
-            data_array[0, col] = round(
+            header.append(storage.name + " LCOS [$/MWh_discharged]")
+            data_array.append(
                 safe_divide(
                     ltcosts_m.get_total(storage.lt_costs),
                     sum(np.maximum(storage.dispatch_power, 0)) * self.solution.static.resolution * 1000,
-                ),
-                2,
+                )
             )
-            col += 1
 
         for line in self.solution.network.major_lines.values():
-            header[:, col] = np.array([line.name, "Major Line", str(line.id), "LCOT", "[$/MWh_flow]"], dtype=object)
-            data_array[0, col] = round(
+            header.append(line.name + " LCOT [$/MWh_flow]")
+            data_array.append(
                 safe_divide(
                     ltcosts_m.get_total(line.lt_costs), sum(np.abs(line.flows)) * self.solution.static.resolution * 1000
-                ),
-                2,
+                )
             )
-            col += 1
 
         for line in self.solution.network.minor_lines.values():
-            header[:, col] = np.array([line.name, "Minor Line", str(line.id), "LCOT", "[$/MWh_flow]"], dtype=object)
-            data_array[0, col] = round(
+            header.append(line.name + " LCOT [$/MWh_flow]")
+            data_array.append(
                 safe_divide(
                     ltcosts_m.get_total(line.lt_costs), sum(np.abs(line.flows)) * self.solution.static.resolution * 1000
-                ),
-                2,
+                )
             )
-            col += 1
 
-        result_file = ResultFile("levelised_costs", self.results_directory, header, data_array, decimals=None)
+        result_file = ResultFile(
+            "levelised_costs", self.results_directory, header, [np.array(data_array, dtype=np.float64)], decimals=2
+        )
         return result_file
 
     def calculate_annual_energies(self, arr: NDArray[np.float64], decimals: int = 3) -> float:
@@ -605,41 +525,26 @@ class Statistics:
         return annual_energies_arr
 
     def generate_summary_file(self) -> ResultFile:
-        col_count = (
+        header = ["Year"]
+        row_labels = np.array(
+            list(range(self.solution.static.first_year, self.solution.static.final_year + 1)) + ["Total"], dtype=object
+        )
+        column_count = (
             3 * len(self.solution.network.nodes)
             + len(self.solution.fleet.generators)
             + len(self.solution.fleet.storages)
             + len(self.solution.network.major_lines)
         )
+        data_array = np.zeros((len(row_labels), column_count), dtype=np.float64)
+        col = 0
 
-        header = np.empty((5, col_count + 1), dtype=object)
-        header[:, 0] = np.array(
-            [
-                "Asset Name",
-                "Asset Type",
-                "Asset ID",
-                "Column Name",
-                "Column Units",
-            ]
-        )
-
-        row_labels = np.array(
-            list(range(self.solution.static.first_year, self.solution.static.final_year + 1)) + ["Total"], dtype=object
-        )
-
-        data_array = np.zeros((len(row_labels), col_count + 1), dtype=object)
-        data_array[:, 0] = row_labels
-
-        col = 1
         for node in self.solution.network.nodes.values():
-            header[:, col] = np.array([node.name, "Node", str(node.id), "Annual Demand", "[GWh]"], dtype=object)
+            header.append(node.name + " Annual Demand [GWh]")
             data_array[:, col] = self.calculate_annual_energies(node.data)
             col += 1
 
         for generator in self.solution.fleet.generators.values():
-            header[:, col] = np.array(
-                [generator.name, "Generator", str(generator.id), "Annual Generation", "[GWh]"], dtype=object
-            )
+            header.append(generator.name + " Annual Gen [GWh]")
             if generator_m.check_unit_type(generator, "flexible"):
                 data_array[:, col] = self.calculate_annual_energies(generator.dispatch_power)
             else:
@@ -647,28 +552,28 @@ class Statistics:
             col += 1
 
         for storage in self.solution.fleet.storages.values():
-            header[:, col] = np.array(
-                [storage.name, "Storage", str(storage.id), "Annual Discharge", "[GWh]"], dtype=object
-            )
+            header.append(storage.name + " Annual Discharge [GWh]")
             data_array[:, col] = self.calculate_annual_energies(np.maximum(storage.dispatch_power, 0))
             col += 1
 
         for node in self.solution.network.nodes.values():
-            header[:, col] = np.array([node.name, "Node", str(node.id), "Annual Spillage", "[GWh]"], dtype=object)
+            header.append(node.name + " Annual Spillage [GWh]")
             data_array[:, col] = self.calculate_annual_energies(node.spillage)
             col += 1
 
         for node in self.solution.network.nodes.values():
-            header[:, col] = np.array([node.name, "Node", str(node.id), "Annual Deficit", "[GWh]"], dtype=object)
+            header.append(node.name + " Annual Deficit [GWh]")
             data_array[:, col] = self.calculate_annual_energies(node.deficits)
             col += 1
 
         for line in self.solution.network.major_lines.values():
-            header[:, col] = np.array([line.name, "Major Line", str(line.id), "Annual Flows", "[GWh]"], dtype=object)
+            header.append(line.name + " Annual Flows [GWh]")
             data_array[:, col] = self.calculate_annual_energies(np.abs(line.flows))
             col += 1
 
-        result_file = ResultFile("summary", self.results_directory, header, data_array, decimals=None)
+        labelled_data_array = np.column_stack((row_labels, data_array))
+
+        result_file = ResultFile("summary", self.results_directory, header, labelled_data_array, decimals=None)
         return result_file
 
     def generate_x_file(self) -> ResultFile:
