@@ -1,5 +1,4 @@
 id,scenario_name,resolution,allowance,firstyear,finalyear,nodes,lines,networksteps_max,type,initial_pop_filename
-0,gas,1,0.00002,2020,2029,"QLD,NSW,SA,VIC,TAS","QLD-NSW,NSW-VIC,VIC-SA,VIC-TAS",4,single_time,
-1,nem,1,0.00002,2020,2029,"QLD,NSW,SA,VIC,TAS","QLD-NSW,NSW-VIC,VIC-SA,VIC-TAS",4,single_time,
-2,battery,1,0.00002,2020,2029,"QLD,NSW,SA,VIC,TAS","QLD-NSW,NSW-VIC,VIC-SA,VIC-TAS",4,single_time,
-3,gas_hr,1,0.00002,2020,2029,"QLD,NSW,SA,VIC,TAS","QLD-NSW,NSW-VIC,VIC-SA,VIC-TAS",4,single_time,
+0,Base,1,0.00002,2010,2018,"All","All",4,single_time,
+1,ZeroCarbon,1,0.00002,2010,2018,"All","All",4,single_time,
+2,Re100,1,0.00002,2010,2018,"All","All",4,single_time,

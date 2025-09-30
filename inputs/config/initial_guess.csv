@@ -1,5 +1,4 @@
 id,scenario,x_0
-0,gas,
-1,nem,
-2,battery,
-3,gas_hr,
+0,Base,
+1,ZeroCarbon,
+2,Re100,

@@ -1,4 +1,4 @@
-techs,0
+techs,kEUR2015/MWh
 ac_ohl_mountain_transmission,
 ac_ohl_transmission,
 battery,101.23820000000002
@@ -18,4 +18,3 @@ roof_mounted_pv,
 wind_offshore,
 wind_onshore_competing,
 wind_onshore_monopoly,
-unit,kEUR2015/MWh
