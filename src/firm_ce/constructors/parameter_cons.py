@@ -1,3 +1,4 @@
+# type: ignore
 import calendar
 from typing import Dict, Tuple
 

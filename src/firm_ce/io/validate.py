@@ -22,7 +22,9 @@ class ModelData:
 
         # Set all the relevant parameters
         self.scenarios = self.config_data.get("scenarios")
+        self.nodes = self.config_data.get("nodes")
         self.generators = self.config_data.get("generators")
+        self.reservoirs = self.config_data.get("reservoirs")
         self.fuels = self.config_data.get("fuels")
         self.lines = self.config_data.get("lines")
         self.storages = self.config_data.get("storages")
@@ -70,8 +72,8 @@ def validate_enum(val, options):
     return val in options
 
 
-def parse_list(val):
-    return parse_comma_separated(val) if not is_nan(val) else []
+def parse_list(val, lower=True):
+    return parse_comma_separated(val, lower) if not is_nan(val) else []
 
 
 def is_nan(val):
@@ -125,8 +127,6 @@ def validate_model_config(config_dict, model_logger):
 def validate_scenarios(scenarios_dict, model_logger):
     flag = True
     scenarios_list = []
-    scenario_nodes = {}
-    scenario_lines = {}
     firstyear = finalyear = None
 
     for item in scenarios_dict.values():
@@ -153,14 +153,38 @@ def validate_scenarios(scenarios_dict, model_logger):
             model_logger.error("'firstyear' and 'finalyear' must be integers")
             flag = False
 
-        scenario_nodes[name] = parse_list(item.get("nodes"))
-        scenario_lines[name] = parse_list(item.get("lines"))
-
     if firstyear is not None and finalyear is not None and firstyear > finalyear:
         model_logger.error("'firstyear' must be less than or equal to 'finalyear'")
         flag = False
 
-    return scenarios_list, scenario_nodes, scenario_lines, flag
+    return scenarios_list, flag
+
+
+def validate_nodes(nodes_dict, scenarios_list, model_logger):
+    flag = True
+    scenario_nodes = {s: [] for s in scenarios_list}
+
+    node_names = []
+    for item in nodes_dict.values():
+        name = item.get("name")
+        if name in node_names:
+            model_logger.error("Duplicate node name '%s'", name)
+            flag = False
+        node_names.append(name)
+
+        scenarios = parse_comma_separated(item.get("scenarios"))
+        if scenarios == ["all"]:
+            for scenario in scenario_nodes.keys():
+                scenario_nodes[scenario].append(name)
+        else:
+            for scenario in scenarios:
+                if scenario not in scenarios_list:
+                    model_logger.error("Scenario '%s' of node '%s' not in scenarios.csv", scenario, name)
+                    flag = False
+
+                scenario_nodes[scenario].append(name)
+
+    return scenario_nodes, flag
 
 
 def validate_fuels(fuels_dict, scenarios_list, model_logger):
@@ -176,11 +200,16 @@ def validate_fuels(fuels_dict, scenarios_list, model_logger):
             model_logger.error("'cost' must be float greater than or equal to 0")
             flag = False
 
-        for scenario in parse_list(item.get("scenarios")):
-            if scenario in scenarios_list:
+        scenarios = parse_list(item.get("scenarios"))
+        if scenarios == ["all"]:
+            for scenario in scenarios_list:
                 scenario_fuels[scenario].append(item["name"])
-            else:
-                model_logger.warning("'scenario' %s for fuel.id %s not defined in scenarios.csv", scenario, idx)
+        else:
+            for scenario in scenarios:
+                if scenario in scenarios_list:
+                    scenario_fuels[scenario].append(item["name"])
+                else:
+                    model_logger.warning("scenario '%s' for fuel.id %s not defined in scenarios.csv", scenario, idx)
 
     return scenario_fuels, flag
 
@@ -225,26 +254,36 @@ def validate_lines(lines_dict, scenarios_list, scenario_nodes, model_logger):
             model_logger.error("'min_build' must be less than or equal to 'max_build'")
             flag = False
 
-        for scenario in parse_list(item.get("scenarios")):
-            if scenario in scenarios_list:
-                scenario_lines[scenario].append(item["name"])
+        def _validate_line(flag):
+            scenario_lines[scenario].append(item["name"])
 
-                for endpoint in ["node_start", "node_end"]:
-                    node_val = item.get(endpoint)
-                    if (node_val not in scenario_nodes[scenario]) and not is_nan(node_val):
-                        model_logger.error(
-                            "'%s' %s for line %s is not defined in scenario %s",
-                            endpoint,
-                            node_val,
-                            item["name"],
-                            scenario,
-                        )
-                        flag = False
+            if any(is_nan(item.get(n)) for n in ["node_start", "node_end"]):
+                scenario_minor_lines[scenario].append(item["name"])
 
-                if any(is_nan(item.get(n)) for n in ["node_start", "node_end"]):
-                    scenario_minor_lines[scenario].append(item["name"])
-            else:
-                model_logger.warning("'scenario' %s for line.id %s not defined in scenarios.csv", scenario, idx)
+            for endpoint in ["node_start", "node_end"]:
+                node_val = item.get(endpoint)
+                if (node_val not in scenario_nodes[scenario]) and not is_nan(node_val):
+                    model_logger.error(
+                        "'%s' %s for line %s is not defined in scenario %s",
+                        endpoint,
+                        node_val,
+                        item["name"],
+                        scenario,
+                    )
+                    return False
+            return flag
+
+        scenarios = parse_list(item.get("scenarios"))
+        if scenarios == ["all"]:
+            for scenario in scenarios_list:
+                flag = _validate_line(flag)
+
+        else:
+            for scenario in scenarios:
+                if scenario in scenarios_list:
+                    flag = _validate_line(flag)
+                else:
+                    model_logger.warning("scenario '%s' for line.id %s not defined in scenarios.csv", scenario, idx)
 
     return scenario_lines, scenario_minor_lines, flag
 
@@ -281,38 +320,127 @@ def validate_generators(generators_dict, scenarios_list, scenario_fuels, scenari
             model_logger.error("'min_build' must be less than or equal to 'max_build'")
             flag = False
 
-        for scenario in parse_list(item.get("scenarios")):
-            if scenario in scenarios_list:
-                if item["name"] in scenario_generators[scenario]:
-                    model_logger.error("Duplicate generator name '%s' in scenario %s", item["name"], scenario)
-                    flag = False
-                else:
-                    scenario_generators[scenario].append(item["name"])
-
-                if item["unit_type"] == "baseload":
-                    scenario_baseload[scenario].append(item["name"])
-
-                if item["node"] not in scenario_nodes[scenario]:
-                    model_logger.error(
-                        "'node' %s for generator %s is not defined in scenario %s", item["node"], item["name"], scenario
-                    )
-                    flag = False
-
-                if item["fuel"] not in scenario_fuels[scenario]:
-                    model_logger.error(
-                        "'fuel' %s for generator %s is not defined in scenario %s", item["fuel"], item["name"], scenario
-                    )
-                    flag = False
-
-                if item["line"] not in scenario_lines[scenario]:
-                    model_logger.error(
-                        "'line' %s for generator %s is not defined in scenario %s", item["line"], item["name"], scenario
-                    )
-                    flag = False
+        def _validate_generator(flag):
+            if item["name"] in scenario_generators[scenario]:
+                model_logger.error("Duplicate generator name '%s' in scenario %s", item["name"], scenario)
+                flag = False
             else:
-                model_logger.warning("'scenario' %s for generator.id %s not defined in scenarios.csv", scenario, idx)
+                scenario_generators[scenario].append(item["name"])
+
+            if item["unit_type"] == "baseload":
+                scenario_baseload[scenario].append(item["name"])
+
+            if item["node"] not in scenario_nodes[scenario]:
+                model_logger.error(
+                    "'node' %s for generator %s is not defined in scenario %s", item["node"], item["name"], scenario
+                )
+                flag = False
+
+            if item["fuel"] not in scenario_fuels[scenario]:
+                model_logger.error(
+                    "'fuel' %s for generator %s is not defined in scenario %s", item["fuel"], item["name"], scenario
+                )
+                flag = False
+
+            if item["line"] not in scenario_lines[scenario]:
+                model_logger.error(
+                    "'line' %s for generator %s is not defined in scenario %s", item["line"], item["name"], scenario
+                )
+                flag = False
+            return flag
+
+        scenarios = parse_list(item.get("scenarios"))
+        if scenarios == ["all"]:
+            for scenario in scenarios_list:
+                flag = _validate_generator(flag)
+        else:
+            for scenario in scenarios:
+                if scenario in scenarios_list:
+                    flag = _validate_generator(flag)
+                else:
+                    model_logger.warning("scenario '%s' for generator.id %s not defined in scenarios.csv", scenario, idx)
 
     return scenario_generators, scenario_baseload, flag
+
+
+def validate_reservoirs(reservoirs_dict, scenarios_list, scenario_fuels, scenario_lines, scenario_nodes, model_logger):
+    flag = True
+    scenario_reservoirs = {s: [] for s in scenarios_list}
+
+    for idx, item in reservoirs_dict.items():
+        for field in [
+            "capex_p",
+            "capex_e",
+            "fom",
+            "vom",
+            "heat_rate_base",
+            "heat_rate_incr",
+            "initial_power_capacity",
+            "initial_energy_capacity",
+            "duration",
+            "max_build_p",
+            "max_build_e",
+            "min_build_p",
+            "min_build_e",
+        ]:
+            if not validate_range(item[field], 0):
+                model_logger.error("'%s' must be float greater than or equal to 0", field)
+                flag = False
+
+        if not validate_range(item["discount_rate"], 0, 1):
+            model_logger.error("'discount_rate' must be float in range [0,1]")
+            flag = False
+
+        if not validate_enum(item["unit_type"], ["hydro", "hybrid"]):
+            model_logger.error("'unit_type' must be one of ['hydro', 'hybrid']")
+            flag = False
+
+        if float(item["min_build_p"]) > float(item["max_build_p"]):
+            model_logger.error("'min_build_p' must be less than or equal to 'max_build_p'")
+            flag = False
+
+        if float(item["min_build_e"]) > float(item["max_build_e"]):
+            model_logger.error("'min_build_e' must be less than or equal to 'max_build_e'")
+            flag = False
+
+        def _validate_reservoir(flag):
+            if item["name"] in scenario_reservoirs[scenario]:
+                model_logger.error("Duplicate reservoir name '%s' in scenario %s", item["name"], scenario)
+                flag = False
+            else:
+                scenario_reservoirs[scenario].append(item["name"])
+
+            if item["node"] not in scenario_nodes[scenario]:
+                model_logger.error(
+                    "'node' %s for reservoir %s is not defined in scenario %s", item["node"], item["name"], scenario
+                )
+                flag = False
+
+            if item["fuel"] not in scenario_fuels[scenario]:
+                model_logger.error(
+                    "'fuel' %s for reservoir %s is not defined in scenario %s", item["fuel"], item["name"], scenario
+                )
+                flag = False
+
+            if item["line"] not in scenario_lines[scenario]:
+                model_logger.error(
+                    "'line' %s for reservoir %s is not defined in scenario %s", item["line"], item["name"], scenario
+                )
+                flag = False
+            return flag
+
+        scenarios = parse_list(item.get("scenarios"))
+        if scenarios == ["all"]:
+            for scenario in scenarios_list:
+                flag = _validate_reservoir(flag)
+        else:
+            for scenario in scenarios:
+                if scenario in scenarios_list:
+                    flag = _validate_reservoir(flag)
+                else:
+                    model_logger.warning("scenario '%s' for reservoir.id %s not defined in scenarios.csv", scenario, idx)
+
+    return scenario_reservoirs, flag
 
 
 def validate_storages(storages_dict, scenarios_list, scenario_nodes, scenario_lines, model_logger):
@@ -356,27 +484,36 @@ def validate_storages(storages_dict, scenarios_list, scenario_nodes, scenario_li
             model_logger.error("'discount_rate' must be float in [0,1]")
             flag = False
 
-        for scenario in parse_list(item.get("scenarios")):
-            if scenario in scenarios_list:
-                if item["name"] in scenario_storages[scenario]:
-                    model_logger.error("Duplicate storage name '%s' in scenario %s", item["name"], scenario)
-                    flag = False
-                else:
-                    scenario_storages[scenario].append(item["name"])
-
-                if item["node"] not in scenario_nodes[scenario]:
-                    model_logger.error(
-                        "'node' %s for storage %s is not defined in scenario %s", item["node"], item["name"], scenario
-                    )
-                    flag = False
-
-                if item["line"] not in scenario_lines[scenario]:
-                    model_logger.error(
-                        "'line' %s for storage %s is not defined in scenario %s", item["line"], item["name"], scenario
-                    )
-                    flag = False
+        def _validate_storage(flag):
+            if item["name"] in scenario_storages[scenario]:
+                model_logger.error("Duplicate storage name '%s' in scenario %s", item["name"], scenario)
+                flag = False
             else:
-                model_logger.warning("'scenario' %s for storage.id %s not defined in scenarios.csv", scenario, idx)
+                scenario_storages[scenario].append(item["name"])
+
+            if item["node"] not in scenario_nodes[scenario]:
+                model_logger.error(
+                    "'node' %s for storage %s is not defined in scenario %s", item["node"], item["name"], scenario
+                )
+                flag = False
+
+            if item["line"] not in scenario_lines[scenario]:
+                model_logger.error(
+                    "'line' %s for storage %s is not defined in scenario %s", item["line"], item["name"], scenario
+                )
+                flag = False
+            return flag
+
+        scenarios = parse_list(item.get("scenarios"))
+        if scenarios == ["all"]:
+            for scenario in scenarios_list:
+                flag = _validate_storage(flag)
+        else:
+            for scenario in scenarios:
+                if scenario in scenarios_list:
+                    flag = _validate_storage(flag)
+                else:
+                    model_logger.warning("scenario '%s' for storage.id %s not defined in scenarios.csv", scenario, idx)
 
     return scenario_storages, flag
 
@@ -385,6 +522,7 @@ def validate_initial_guess(
     x0s_dict,
     scenarios_list,
     scenario_generators,
+    scenario_reservoirs,
     scenario_storages,
     scenario_lines,
     scenario_baseload,
@@ -398,7 +536,7 @@ def validate_initial_guess(
         scenario = item["scenario"]
 
         if scenario not in scenarios_list:
-            model_logger.warning("'scenario' %s in initial_guess.csv not defined in scenarios.csv", scenario)
+            model_logger.warning("scenario '%s'in initial_guess.csv not defined in scenarios.csv", scenario)
 
         initial_guess_scenarios.append(scenario)
 
@@ -406,6 +544,8 @@ def validate_initial_guess(
 
         bound_length = len(
             scenario_generators[scenario]
+            + scenario_reservoirs[scenario]
+            + scenario_reservoirs[scenario]
             + scenario_storages[scenario]
             + scenario_storages[scenario]
             + scenario_lines[scenario]
@@ -419,7 +559,7 @@ def validate_initial_guess(
 
     for scenario in scenarios_list:
         if scenario not in initial_guess_scenarios:
-            model_logger.error("'scenario' %s is defined in scenarios.csv but missing from initial_guess.csv", scenario)
+            model_logger.error("scenario '%s'is defined in scenarios.csv but missing from initial_guess.csv", scenario)
             flag = False
 
     return flag
@@ -468,12 +608,19 @@ def validate_config(model_data: ModelData) -> bool:
     else:
         model_logger.info("config.csv validated!")
 
-    scenarios_list, scenario_nodes, scenario_lines, flag = validate_scenarios(model_data.scenarios, model_logger)
+    scenarios_list, flag = validate_scenarios(model_data.scenarios, model_logger)
     if not flag:
         model_logger.error("scenarios.csv contains errors.")
         config_flag = False
     else:
         model_logger.info("scenarios.csv validated!")
+
+    scenario_nodes, flag = validate_nodes(model_data.nodes, scenarios_list, model_logger)
+    if not flag:
+        model_logger.error("nodes.csv contains errors.")
+        config_flag = False
+    else:
+        model_logger.info("nodes.csv validated!")
 
     scenario_fuels, flag = validate_fuels(model_data.fuels, scenarios_list, model_logger)
     if not flag:
@@ -500,6 +647,15 @@ def validate_config(model_data: ModelData) -> bool:
     else:
         model_logger.info("generators.csv validated!")
 
+    scenario_reservoirs, flag = validate_reservoirs(
+        model_data.reservoirs, scenarios_list, scenario_fuels, scenario_lines, scenario_nodes, model_logger
+    )
+    if not flag:
+        model_logger.error("reservoirs.csv contains errors.")
+        config_flag = False
+    else:
+        model_logger.info("reservoirs.csv validated!")
+
     scenario_storages, flag = validate_storages(
         model_data.storages, scenarios_list, scenario_nodes, scenario_lines, model_logger
     )
@@ -513,6 +669,7 @@ def validate_config(model_data: ModelData) -> bool:
         model_data.x0s,
         scenarios_list,
         scenario_generators,
+        scenario_reservoirs,
         scenario_storages,
         scenario_lines,
         scenario_baseload,

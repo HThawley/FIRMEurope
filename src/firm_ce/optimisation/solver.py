@@ -1,8 +1,9 @@
+# type: ignore
 import csv
 import os
 from itertools import chain
 from logging import Logger
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple, Union, Callable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -20,7 +21,7 @@ from firm_ce.optimisation.broad_optimum import (
     write_broad_optimum_records,
 )
 from firm_ce.optimisation.single_time import Solution, evaluate_vectorised_xs
-from firm_ce.system.components import Fleet_InstanceType, Generator_InstanceType, Storage_InstanceType
+from firm_ce.system.components import Fleet_InstanceType, Generator_InstanceType, Reservoir_InstanceType, Storage_InstanceType
 from firm_ce.system.parameters import ModelConfig, ScenarioParameters_InstanceType
 from firm_ce.system.topology import Line_InstanceType, Network_InstanceType
 
@@ -58,15 +59,16 @@ class Solver:
 
     def get_bounds(self) -> NDArray[np.float64]:
         def power_capacity_bounds(
-            asset_list: Union[List[Generator_InstanceType], List[Storage_InstanceType], List[Line_InstanceType]],
+            asset_list: Union[List[Generator_InstanceType], List[Reservoir_InstanceType], List[Storage_InstanceType], List[Line_InstanceType]],
             build_cap_constraint: str,
         ) -> List[float]:
             return [getattr(asset, build_cap_constraint) for asset in asset_list]
 
-        def energy_capacity_bounds(storage_list: List[Storage_InstanceType], build_cap_constraint: str) -> List[float]:
-            return [getattr(s, build_cap_constraint) if s.duration == 0 else 0.0 for s in storage_list]
+        def energy_capacity_bounds(asset_list: Union[List[Storage_InstanceType], List[Reservoir_InstanceType]], build_cap_constraint: str) -> List[float]:
+            return [getattr(asset, build_cap_constraint) if asset.duration == 0 else 0.0 for asset in asset_list]
 
         generators = list(self.fleet_static.generators.values())
+        reservoirs = list(self.fleet_static.reservoirs.values())
         storages = list(self.fleet_static.storages.values())
         lines = list(self.network_static.major_lines.values())
 
@@ -74,6 +76,8 @@ class Solver:
             list(
                 chain(
                     power_capacity_bounds(generators, "min_build"),
+                    power_capacity_bounds(reservoirs, "min_build_p"),
+                    energy_capacity_bounds(reservoirs, "min_build_e"),
                     power_capacity_bounds(storages, "min_build_p"),
                     energy_capacity_bounds(storages, "min_build_e"),
                     power_capacity_bounds(lines, "min_build"),
@@ -85,6 +89,8 @@ class Solver:
             list(
                 chain(
                     power_capacity_bounds(generators, "max_build"),
+                    power_capacity_bounds(reservoirs, "max_build_p"),
+                    energy_capacity_bounds(reservoirs, "max_build_e"),
                     power_capacity_bounds(storages, "max_build_p"),
                     energy_capacity_bounds(storages, "max_build_e"),
                     power_capacity_bounds(lines, "max_build"),
@@ -116,14 +122,12 @@ class Solver:
         )
         return args
 
-    def single_time(self) -> None:
-        self.initialise_callback()
-
-        self.result = differential_evolution(
+    def run_differential_evolution(self, objective_function: Callable, args: Tuple) -> OptimizeResult:
+        result = differential_evolution(
             x0=self.decision_x0,
-            func=evaluate_vectorised_xs,
+            func=objective_function,
             bounds=list(zip(self.lower_bounds, self.upper_bounds)),
-            args=self.get_differential_evolution_args(),
+            args=args,
             tol=0,
             maxiter=self.iterations,
             popsize=self.config.population,
@@ -136,6 +140,11 @@ class Solver:
             workers=1,
             vectorized=True,
         )
+        return result
+
+    def single_time(self) -> None:
+        self.initialise_callback()
+        self.result = self.run_differential_evolution(evaluate_vectorised_xs, self.get_differential_evolution_args())
 
     def get_band_lcoe_max(self) -> float:
         solution = Solution(self.decision_x0, *self.get_differential_evolution_args())
@@ -177,22 +186,7 @@ class Solver:
                     band_type,
                 )
 
-                result = differential_evolution(
-                    broad_optimum_objective,
-                    bounds=list(zip(self.lower_bounds, self.upper_bounds)),
-                    args=args,
-                    tol=0,
-                    maxiter=self.iterations,
-                    popsize=self.config.population,
-                    mutation=(0.2, self.config.mutation),
-                    recombination=self.config.recombination,
-                    disp=True,
-                    polish=False,
-                    updating="deferred",
-                    callback=callback,
-                    workers=1,
-                    vectorized=True,
-                )
+                result = self.run_differential_evolution(broad_optimum_objective, args)
 
                 bands_record.append(result.x.copy())
 
@@ -245,22 +239,7 @@ class Solver:
                     midpoint,
                 )
 
-                differential_evolution(
-                    broad_optimum_objective,
-                    bounds=list(zip(self.lower_bounds, self.upper_bounds)),
-                    args=args,
-                    tol=0,
-                    maxiter=self.iterations,
-                    popsize=self.config.population,
-                    mutation=(0.2, self.config.mutation),
-                    recombination=self.config.recombination,
-                    disp=True,
-                    polish=False,
-                    updating="deferred",
-                    callback=callback,
-                    workers=1,
-                    vectorized=True,
-                )
+                self.run_differential_evolution(broad_optimum_objective, args)
 
                 append_to_midpoint_csv(self.scenario_name, evaluation_records)
 

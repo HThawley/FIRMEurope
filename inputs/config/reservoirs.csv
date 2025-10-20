@@ -1,0 +1,5 @@
+id,name,fuel,capex_p,capex_e,fom,vom,lifetime,discount_rate,heat_rate_base,heat_rate_incr,discharge_efficiency,unit_size,node,max_build_p,max_build_e,min_build_p,min_build_e,initial_power_capacity,initial_energy_capacity,duration,line,unit_type,scenarios,near_optimum,range_group
+0,hydro_qld,water,0,0,69.51,8.5503,0,0.05,0,0,0.85,0.5,QLD,0,0,0,0,0.5,0,8,other_connections,hydro,all,FALSE,
+1,hydro_nsw,water,0,0,69.51,8.5503,0,0.05,0,0,0.85,0.5,NSW,0,0,0,0,0.5,0,8,other_connections,hydro,all,FALSE,
+2,hydro_vic,water,0,0,69.51,8.5503,0,0.05,0,0,0.85,0.5,VIC,0,0,0,0,0.5,0,8,other_connections,hydro,all,FALSE,
+3,hydro_tas,water,0,0,69.51,8.5503,0,0.05,0,0,0.85,0.5,TAS,0,0,0,0,0.5,0,8,other_connections,hydro,all,FALSE,
