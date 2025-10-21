@@ -134,7 +134,7 @@ def validate_scenarios(scenarios_dict, model_logger):
         if name in scenarios_list:
             model_logger.error("Duplicate scenario name '%s'", name)
             flag = False
-        scenarios_list.append(name)
+        scenarios_list.append(name.lower())
 
         if not validate_range(item["resolution"], 0):
             model_logger.error("'resolution' must be float greater than 0")
@@ -312,8 +312,8 @@ def validate_generators(generators_dict, scenarios_list, scenario_fuels, scenari
             model_logger.error("'discount_rate' must be float in range [0,1]")
             flag = False
 
-        if not validate_enum(item["unit_type"], ["solar", "wind", "flexible", "baseload"]):
-            model_logger.error("'unit_type' must be one of ['solar', 'wind', 'flexible', 'baseload']")
+        if not validate_enum(item["unit_type"], ["solar", "wind", "flexible", "baseload", "ror"]):
+            model_logger.error("'unit_type' must be one of ['solar', 'wind', 'flexible', 'baseload', 'ror']")
             flag = False
 
         if float(item["min_build"]) > float(item["max_build"]):
@@ -533,7 +533,7 @@ def validate_initial_guess(
     initial_guess_scenarios = []
 
     for item in x0s_dict.values():
-        scenario = item["scenario"]
+        scenario = item["scenario"].lower()
 
         if scenario not in scenarios_list:
             model_logger.warning("scenario '%s'in initial_guess.csv not defined in scenarios.csv", scenario)
@@ -550,7 +550,7 @@ def validate_initial_guess(
             + scenario_storages[scenario]
             + scenario_lines[scenario]
         ) - len(scenario_minor_lines[scenario])
-
+        print(scenario, bound_length)
         if x0 and not (len(x0) == bound_length):
             model_logger.error(
                 "Initial guess 'x_0' for scenario %s contains %d elements, expected %d", scenario, len(x0), bound_length
@@ -566,7 +566,7 @@ def validate_initial_guess(
 
 
 def validate_datafiles_config(scenario_filenames, scenario_datafile_types, model_logger, datafiles_directory: str):
-    valid_types = {"demand", "generation", "flexible_annual_limit"}
+    valid_types = {"demand", "generation", "reservoir_inflow", "flexible_annual_limit"}
     all_filenames = set(os.listdir(datafiles_directory))
     flag = True
 

@@ -3,6 +3,7 @@ from typing import Tuple
 
 import numpy as np
 from numpy.typing import NDArray
+from numba.core.types import UniTuple
 
 from firm_ce.common.constants import FASTMATH
 from firm_ce.common.jit_overload import njit

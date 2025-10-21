@@ -85,7 +85,7 @@ class Scenario:
         self.static = construct_ScenarioParameters_object(self.scenario_data, len(self.network.nodes))
         return None
 
-    def _get_scenario_dicts(self, imported_dict: Dict[str, Dict[str, str]]) -> Dict[str, str]:
+    def get_scenario_dicts(self, imported_dict: Dict[str, Dict[str, str]]) -> Dict[str, str]:
         """Extract scenario dict from model dict."""
         return {
             idx: imported_dict[idx]
@@ -99,7 +99,7 @@ class Scenario:
         return {
             idx: DataFile(all_datafiles[idx]["filename"], all_datafiles[idx]["datafile_type"], data_directory)
             for idx in all_datafiles
-            if self.name in parse_comma_separated(all_datafiles[idx]["scenarios"])
+            if self.name.lower() in parse_comma_separated(all_datafiles[idx]["scenarios"])
             or parse_comma_separated(all_datafiles[idx]["scenarios"]) == ["all"]
         }
 

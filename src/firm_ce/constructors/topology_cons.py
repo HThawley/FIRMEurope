@@ -70,7 +70,7 @@ def construct_Line_object(
     capacity = float(line_dict["initial_capacity"])
     unit_type = str(line_dict["unit_type"])
     near_opt = str(line_dict.get("near_optimum", "")).lower() in ("true", "1", "yes")
-    minor_node = construct_Node_object(-1, -1, {"name": "MINOR_NODE"})
+    minor_node = construct_Node_object(-1, {"name": "MINOR_NODE", "id": -1})
 
     raw_group = line_dict.get("range_group", "")
     group = (

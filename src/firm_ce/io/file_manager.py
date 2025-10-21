@@ -222,7 +222,7 @@ class ResultFile:
         """
         default_kwargs = {
             "header": False,
-            "index": True, 
+            "index": True,
             "float_format": self.float_format_string,
             "mode": "x",
         }
@@ -254,7 +254,7 @@ class ResultFile:
         """
         default_kwargs = {
             "header": False,
-            "index": True, 
+            "index": True,
             "float_format": self.float_format_string,
             "mode": "x",
             "sheet_name": self.report,

@@ -1,7 +1,7 @@
 id,name,emissions,cost,scenarios
-0,solar,0,0,"Base,ZeroCarbon,Re100"
-1,wind,0,0,"Base,ZeroCarbon,Re100"
-2,water,0,0,"Base,ZeroCarbon,Re100"
+0,solar,0,0,"all"
+1,wind,0,0,"all"
+2,water,0,0,"all"
 3,gas,1,13.5,"Base"
 4,biogas,0,0,"Base,Re100"
 5,black coal,1,4.6,"Base"

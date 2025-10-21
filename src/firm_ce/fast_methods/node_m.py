@@ -1,9 +1,4 @@
-<<<<<<< HEAD
-from typing import Union
-
-=======
 # type: ignore
->>>>>>> upstream/feature/inflows
 import numpy as np
 
 from firm_ce.common.constants import FASTMATH, TOLERANCE
@@ -28,9 +23,6 @@ def create_dynamic_copy(node_instance: Node_InstanceType) -> Node_InstanceType:
 
 
 @njit(fastmath=FASTMATH)
-<<<<<<< HEAD
-def load_data(node_instance: Node_InstanceType, trace: float64[:]) -> None:
-=======
 def load_data(
     node_instance: Node_InstanceType,
     trace: float64[:],
@@ -52,7 +44,6 @@ def load_data(
     -------
     Attributes modified for the Node instance: data_status, data, residual_load.
     """
->>>>>>> upstream/feature/inflows
     node_instance.data_status = "loaded"
     node_instance.data = trace
     node_instance.residual_load = trace.copy()
@@ -60,9 +51,6 @@ def load_data(
 
 
 @njit(fastmath=FASTMATH)
-<<<<<<< HEAD
-def unload_data(node_instance: Node_InstanceType) -> None:
-=======
 def unload_data(
     node_instance: Node_InstanceType,
 ) -> None:
@@ -82,7 +70,6 @@ def unload_data(
     -------
     Attributes modified for the Node instance: data_status, data, residual_load.
     """
->>>>>>> upstream/feature/inflows
     node_instance.data_status = "unloaded"
     node_instance.data = np.empty((0,), dtype=np.float64)
     node_instance.residual_load = np.empty((0,), dtype=np.float64)
@@ -90,9 +77,6 @@ def unload_data(
 
 
 @njit(fastmath=FASTMATH)
-<<<<<<< HEAD
-def get_data(node_instance: Node_InstanceType, data_type: unicode_type) -> Union[float64, None]:
-=======
 def get_data(
     node_instance: Node_InstanceType,
     data_type: unicode_type,
@@ -114,7 +98,6 @@ def get_data(
     RuntimeError: Raised if data_status is "unloaded" or if data_type does not correspond
         to any data arrays for the Node jitclass.
     """
->>>>>>> upstream/feature/inflows
     if node_instance.data_status == "unloaded":
         raise_getting_unloaded_data_error()
 
@@ -128,9 +111,6 @@ def get_data(
 
 
 @njit(fastmath=FASTMATH)
-<<<<<<< HEAD
-def allocate_memory(node_instance: Node_InstanceType, intervals_count: int64) -> None:
-=======
 def allocate_memory(
     node_instance: Node_InstanceType,
     intervals_count: int64,
@@ -157,7 +137,6 @@ def allocate_memory(
     -------
     RuntimeError: Raised if static_instance is True. Only dynamic instances can be modified by this pseudo-method.
     """
->>>>>>> upstream/feature/inflows
     if node_instance.static_instance:
         raise_static_modification_error()
     node_instance.imports_exports = np.zeros(intervals_count, dtype=np.float64)
@@ -171,9 +150,6 @@ def allocate_memory(
 
 
 @njit(fastmath=FASTMATH)
-<<<<<<< HEAD
-def initialise_netload_t(node_instance: Node_InstanceType, interval: int64) -> None:
-=======
 def initialise_netload_t(
     node_instance: Node_InstanceType,
     interval: int64,
@@ -197,15 +173,11 @@ def initialise_netload_t(
     -------
     Attributes modified for the Node instance: netload_t.
     """
->>>>>>> upstream/feature/inflows
     node_instance.netload_t = get_data(node_instance, "residual_load")[interval]
     return None
 
 
 @njit(fastmath=FASTMATH)
-<<<<<<< HEAD
-def update_netload_t(node_instance: Node_InstanceType, interval: int64, precharging_flag: boolean) -> None:
-=======
 def update_netload_t(
     node_instance: Node_InstanceType,
     interval: int64,
@@ -232,7 +204,6 @@ def update_netload_t(
     -------
     Attributes modified for the Node instance: netload_t.
     """
->>>>>>> upstream/feature/inflows
     # Note: exports are negative, so they add to load
     node_instance.netload_t = (
         get_data(node_instance, "residual_load")[interval] - node_instance.imports_exports[interval]
@@ -248,9 +219,6 @@ def update_netload_t(
 
 
 @njit(fastmath=FASTMATH)
-<<<<<<< HEAD
-def fill_required(node_instance: Node_InstanceType) -> boolean:
-=======
 def fill_required(
     node_instance: Node_InstanceType,
 ) -> boolean:
@@ -265,14 +233,10 @@ def fill_required(
     -------
     boolean: True if there is fill energy that the Node is attempting to balance, otherwise False.
     """
->>>>>>> upstream/feature/inflows
     return node_instance.fill > TOLERANCE
 
 
 @njit(fastmath=FASTMATH)
-<<<<<<< HEAD
-def surplus_available(node_instance) -> bool:
-=======
 def surplus_available(
     node_instance: Node_InstanceType,
 ) -> boolean:
@@ -287,7 +251,6 @@ def surplus_available(
     -------
     boolean: True if there is surplus energy at the Node available for transmission, otherwise False.
     """
->>>>>>> upstream/feature/inflows
     return node_instance.surplus > TOLERANCE
 
 
@@ -404,9 +367,6 @@ def assign_flexible_merit_order(
 
 
 @njit(fastmath=FASTMATH)
-<<<<<<< HEAD
-def check_remaining_netload(node_instance: Node_InstanceType, interval: int64, check_case: unicode_type) -> boolean:
-=======
 def check_remaining_netload(
     node_instance: Node_InstanceType,
     interval: int64,
@@ -429,7 +389,6 @@ def check_remaining_netload(
     boolean: True if the Node has unbalanced netload according to the check case, otherwise False.
     """
     _imbalance = node_instance.netload_t - node_instance.storage_power[interval] - node_instance.reservoir_power[interval] - node_instance.flexible_power[interval]
->>>>>>> upstream/feature/inflows
     if check_case == "deficit":
         return _imbalance > TOLERANCE
     elif check_case == "spillage":
@@ -440,9 +399,6 @@ def check_remaining_netload(
 
 
 @njit(fastmath=FASTMATH)
-<<<<<<< HEAD
-def set_imports_exports_temp(node_instance: Node_InstanceType, interval: int64) -> None:
-=======
 def set_imports_exports_temp(
     node_instance: Node_InstanceType,
     interval: int64,
@@ -466,15 +422,11 @@ def set_imports_exports_temp(
     -------
     Attributes modified for each Node in Network.nodes: imports_exports_temp.
     """
->>>>>>> upstream/feature/inflows
     node_instance.imports_exports_temp = node_instance.imports_exports[interval]
     return None
 
 
 @njit(fastmath=FASTMATH)
-<<<<<<< HEAD
-def reset_dispatch_max_t(node_instance: Node_InstanceType) -> None:
-=======
 def reset_dispatch_max_t(
     node_instance: Node_InstanceType,
 ) -> None:
@@ -498,7 +450,6 @@ def reset_dispatch_max_t(
     Attributes modified for each Node in Network.nodes: discharge_max_t, charge_max_t, reservoir_max_t,
         flexible_max_t.
     """
->>>>>>> upstream/feature/inflows
     if len(node_instance.storage_merit_order) > 0:
         node_instance.discharge_max_t = np.zeros(len(node_instance.storage_merit_order), dtype=np.float64)
         node_instance.charge_max_t = np.zeros(len(node_instance.storage_merit_order), dtype=np.float64)
