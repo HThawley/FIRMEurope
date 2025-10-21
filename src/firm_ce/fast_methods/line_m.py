@@ -1,3 +1,4 @@
+# type: ignore
 import numpy as np
 
 from firm_ce.common.constants import FASTMATH

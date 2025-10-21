@@ -11,8 +11,10 @@ from firm_ce.constructors.parameter_cons import construct_ScenarioParameters_obj
 from firm_ce.constructors.topology_cons import construct_Network_object
 from firm_ce.constructors.traces_cons import (
     load_datafiles_to_generators,
+    load_datafiles_to_reservoirs,
     load_datafiles_to_network,
     unload_data_from_generators,
+    unload_data_from_reservoirs,
     unload_data_from_network,
 )
 from firm_ce.fast_methods import static_m
@@ -34,18 +36,20 @@ class Scenario:
         self.x0 = self._get_x0(model_data.x0s)
 
         self.network = construct_Network_object(
-            self.scenario_data.get("nodes", "").split(","),
-            self._get_scenario_dicts(model_data.lines),
+            self.get_scenario_dicts(model_data.nodes),
+            self.get_scenario_dicts(model_data.lines),
             self.scenario_data.get("networksteps_max", 0),
         )
         self.static = construct_ScenarioParameters_object(self.scenario_data, len(self.network.nodes))
         self.fleet = construct_Fleet_object(
-            self._get_scenario_dicts(model_data.generators),
-            self._get_scenario_dicts(model_data.storages),
-            self._get_scenario_dicts(model_data.fuels),
+            self.get_scenario_dicts(model_data.generators),
+            self.get_scenario_dicts(model_data.reservoirs),
+            self.get_scenario_dicts(model_data.storages),
+            self.get_scenario_dicts(model_data.fuels),
             self.network.minor_lines,
             self.network.nodes,
         )
+
         self.statistics = None
 
         self.assign_x_indices()
@@ -59,6 +63,7 @@ class Scenario:
         load_datafiles_to_network(self.network, datafiles)
 
         load_datafiles_to_generators(self.fleet, datafiles, self.static.resolution)
+        load_datafiles_to_reservoirs(self.fleet, datafiles)
 
         static_m.set_year_energy_demand(self.static, self.network.nodes)
 
@@ -68,6 +73,7 @@ class Scenario:
         unload_data_from_network(self.network)
 
         unload_data_from_generators(self.fleet)
+        unload_data_from_reservoirs(self.fleet)
 
         static_m.unset_year_energy_demand(self.static)
 
@@ -79,12 +85,13 @@ class Scenario:
         self.static = construct_ScenarioParameters_object(self.scenario_data, len(self.network.nodes))
         return None
 
-    def _get_scenario_dicts(self, imported_dict: Dict[str, Dict[str, str]]) -> Dict[str, str]:
+    def get_scenario_dicts(self, imported_dict: Dict[str, Dict[str, str]]) -> Dict[str, str]:
         """Extract scenario dict from model dict."""
         return {
             idx: imported_dict[idx]
             for idx in imported_dict
             if self.name in parse_comma_separated(imported_dict[idx]["scenarios"])
+            or parse_comma_separated(imported_dict[idx]["scenarios"]) == ["all"]
         }
 
     def _get_datafiles(self, all_datafiles: Dict[str, Dict[str, str]], data_directory: str) -> Dict[str, DataFile]:
@@ -92,7 +99,8 @@ class Scenario:
         return {
             idx: DataFile(all_datafiles[idx]["filename"], all_datafiles[idx]["datafile_type"], data_directory)
             for idx in all_datafiles
-            if self.name in parse_comma_separated(all_datafiles[idx]["scenarios"])
+            if self.name.lower() in parse_comma_separated(all_datafiles[idx]["scenarios"])
+            or parse_comma_separated(all_datafiles[idx]["scenarios"]) == ["all"]
         }
 
     def _get_x0(self, all_x0s: Dict[str, Dict[str, str]]) -> NDArray[np.float64]:
@@ -111,6 +119,12 @@ class Scenario:
         x_index = 0
         for generator in self.fleet.generators.values():
             generator.candidate_x_idx = x_index
+            x_index += 1
+        for reservoir in self.fleet.reservoirs.values():
+            reservoir.candidate_p_x_idx = x_index
+            x_index += 1
+        for reservoir in self.fleet.reservoirs.values():
+            reservoir.candidate_e_x_idx = x_index
             x_index += 1
         for storage in self.fleet.storages.values():
             storage.candidate_p_x_idx = x_index

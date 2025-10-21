@@ -1,3 +1,4 @@
+# type: ignore
 from firm_ce.common.constants import JIT_ENABLED
 from firm_ce.common.jit_overload import jitclass
 from firm_ce.common.typing import float64, int64

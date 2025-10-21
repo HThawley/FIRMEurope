@@ -1,9 +1,9 @@
 id,scenarios,filename,datafile_type
-0,"Base,ZeroCarbon,Re100",electricity-demand.csv,demand
-1,"Base,ZeroCarbon,Re100",open-field-pv.csv,generation
-2,"Base,ZeroCarbon,Re100",rooftop-pv.csv,generation
-3,"Base,ZeroCarbon,Re100",wind-offshore.csv,generation
-4,"Base,ZeroCarbon,Re100",wind-onshore.csv,generation
-5,"Base,ZeroCarbon,Re100",hydro-ror.csv,generation
-6,"Base,ZeroCarbon,Re100",hydro-reservoir-inflow.csv,flexible
-7,"Base,ZeroCarbon,Re100",flexible_annual_biogas.csv,flexible_annual_limit
+0,all,electricity-demand.csv,demand
+1,all,open-field-pv.csv,generation
+2,all,rooftop-pv.csv,generation
+3,all,wind-offshore.csv,generation
+4,all,wind-onshore.csv,generation
+5,sll,hydro-ror.csv,generation
+6,all,hydro-reservoir-inflow.csv,reservoir_inflow
+7,"Base,Re100",flexible_annual_biogas.csv,flexible_annual_limit

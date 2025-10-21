@@ -17,7 +17,7 @@
     - node.netload_t failing to be updated when resetting transmission for an interval
     - flexible generation not being reset prior to "precharging_adjust_storage" transmission_case
 - Added `examples` folder
-- Started adding docstrings
+- Added docstrings
 - Replaced TOLERANCE magic numbers with constant
 - Fixed transmission bug when multiple routes on same leg end in the same node
 - Fixed bug where minor_linor.new_build was not updated when Generator and Storage capacity was built
@@ -29,6 +29,9 @@
 - Moved data and config folders to `inputs/config` and `inputs/data`
 - Uncommented the debug lines for the broad optimum module
 - NUM_THREADS can now be set as an environment variable by the user and defaults to os.cpu_count()
+- Added functionality to provide CSV input for initial population of each scenario
+- Built initial simple result viewer.
+- Removed some duplicate code behaviour.
 
 ## Releases
 
