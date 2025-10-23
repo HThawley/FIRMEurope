@@ -114,7 +114,7 @@ def load_datafiles_to_reservoirs(
     for reservoir in fleet.reservoirs.values():
         reservoir_m.load_data(
             reservoir,
-            select_datafile("flexible_inflows", reservoir.name, datafiles_imported_dict) / 1000,  # MWh to GWh
+            select_datafile("reservoir_inflow", reservoir.name, datafiles_imported_dict) / 1000,  # MWh to GWh
         )
     return None
 

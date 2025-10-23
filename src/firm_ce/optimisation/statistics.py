@@ -467,10 +467,10 @@ class Statistics:
             """get time series of total generation at the node of an asset (including the asset's contribution)"""
             node_generation = sum((get_inflexible_power(_asset)
                                    for _asset in self.solution.fleet.generators.values()
-                                   if (_asset.node.id == asset.node.id) and (_asset.unit_type != "flexible")))
+                                   if (_asset.node.id == asset.node.id) and is_not_flexible(asset)))
             node_generation += sum((get_flexible_power(_asset)
                                     for _asset in self.solution.fleet.generators.values()
-                                    if (_asset.node.id == asset.node.id) and asset.unit_type == "flexible"))
+                                    if (_asset.node.id == asset.node.id) and is_flexible(asset)))
             node_generation += sum((get_flexible_power(_asset)
                                     for _asset in self.solution.fleet.reservoirs.values()
                                     if _asset.node.id == asset.node.id))
@@ -572,9 +572,6 @@ class Statistics:
                 "LCOB spillage & loss",
             ],
             dtype=object,
-        )
-        data_array = np.empty(
-            (4, self.get_asset_column_count(include_minor_lines=True, include_energy_limits=False)), dtype=np.float64
         )
 
         total_energy = 1000 * abs(
