@@ -105,6 +105,8 @@ class Solver:
         os.makedirs(temp_dir, exist_ok=True)
         with open(os.path.join(temp_dir, "callback.csv"), "w", newline="") as csvfile:
             csv.writer(csvfile)
+        with open(os.path.join(temp_dir, "latest_population.csv"), "w", newline="") as csvfile:
+            csv.writer(csvfile)
         with open(os.path.join(temp_dir, "population.csv"), "w", newline="") as csvfile:
             csv.writer(csvfile)
         with open(os.path.join(temp_dir, "population_energies.csv"), "w", newline="") as csvfile:
@@ -279,6 +281,11 @@ def callback(intermediate_result: OptimizeResult) -> None:
         # Save population from last iteration
         if hasattr(intermediate_result, "population"):
             with open(os.path.join(results_dir, "population.csv"), "a", newline="") as f:
+                writer = csv.writer(f)
+                for individual in intermediate_result.population:
+                    writer.writerow(list(individual))
+
+            with open(os.path.join(results_dir, "latest_population.csv"), "w", newline="") as f:
                 writer = csv.writer(f)
                 for individual in intermediate_result.population:
                     writer.writerow(list(individual))
