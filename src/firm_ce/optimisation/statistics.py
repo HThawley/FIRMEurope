@@ -38,6 +38,10 @@ def is_solar(asset: Any) -> bool:
     return asset.unit_type == "solar"
 
 
+def is_ror(asset: Any) -> bool:
+    return asset.unit_type == "ror"
+
+
 def is_wind(asset: Any) -> bool:
     return asset.unit_type == "wind"
 
@@ -375,6 +379,7 @@ class Statistics:
                 df = append_asset(df, "nodes", "Demand", "[MW]", get_data_power)
                 df = append_node(df, "generators", "Solar", "[MW]", get_inflexible_power, condition=is_solar)
                 df = append_node(df, "generators", "Wind", "[MW]", get_inflexible_power, condition=is_wind)
+                df = append_node(df, "generators", "Run-of-river", "[MW]", get_inflexible_power, condition=is_ror)
                 df = append_node(df, "generators", "Baseload", "[MW]", get_inflexible_power, condition=is_baseload)
                 df = append_node(df, "generators", "Flexible Dispatch", "[MW]", get_dispatched_power, condition=is_flexible)
                 df = append_node(df, "reservoirs", "Reservoir Dispatch", "[MW]", get_dispatched_power)
@@ -391,6 +396,7 @@ class Statistics:
                 df = append_network(df, "nodes", "Demand", "[MW]", get_data_power)
                 df = append_network(df, "generators", "Solar", "[MW]", get_inflexible_power, condition=is_solar)
                 df = append_network(df, "generators", "Wind", "[MW]", get_inflexible_power, condition=is_wind)
+                df = append_network(df, "generators", "Ror", "[MW]", get_inflexible_power, condition=is_ror)
                 df = append_network(df, "generators", "Baseload", "[MW]", get_inflexible_power, condition=is_baseload)
                 df = append_network(df, "generators", "Flexible Dispatch", "[MW]", get_dispatched_power, condition=is_flexible)
                 df = append_network(df, "reservoirs", "Reservoir Dispatch", "[MW]", get_dispatched_power)
