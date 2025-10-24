@@ -350,7 +350,7 @@ class Statistics:
             return asset.stored_energy * 1000.0  # MWh
 
         def get_remaining_energy(asset) -> NDArray[np.float64]:
-            return asset.stored_energy * 1000.0  # MWh
+            return asset.remaining_energy * 1000.0  # MWh
 
         df = pd.concat((
             pd.DataFrame(index=["Asset Name", "Asset Type", "Asset ID", "Column Name", "Column Units"]),
@@ -359,17 +359,8 @@ class Statistics:
         match aggregation_type:
             case "assets":
                 df = append_asset(df, "nodes", "Demand", "[MW]", get_data_power)
-                df = append_asset(
-                    df, "generators", "Dispatch", "[MW]", get_inflexible_power, condition=is_not_flexible
-                )
-                df = append_asset(
-                    df,
-                    "generators",
-                    "Flexible Dispatch",
-                    "[MW]",
-                    get_dispatched_power,
-                    condition=is_flexible,
-                )
+                df = append_asset(df, "generators", "Dispatch", "[MW]", get_inflexible_power, condition=is_not_flexible)
+                df = append_asset(df, "generators", "Flexible Dispatch", "[MW]", get_dispatched_power, condition=is_flexible)
                 df = append_asset(df, "reservoirs", "Reservoir Dispatch", "[MW]", get_dispatched_power)
                 df = append_asset(df, "storages", "Storage Dispatch", "[MW]", get_dispatched_power)
                 df = append_asset(df, "generators", "Flexible Remaining", "[MWh]", get_remaining_energy, condition=is_flexible)
@@ -385,14 +376,10 @@ class Statistics:
                 df = append_node(df, "generators", "Solar", "[MW]", get_inflexible_power, condition=is_solar)
                 df = append_node(df, "generators", "Wind", "[MW]", get_inflexible_power, condition=is_wind)
                 df = append_node(df, "generators", "Baseload", "[MW]", get_inflexible_power, condition=is_baseload)
-                df = append_node(
-                    df, "generators", "Flexible Dispatch", "[MW]", get_dispatched_power, condition=is_flexible
-                )
+                df = append_node(df, "generators", "Flexible Dispatch", "[MW]", get_dispatched_power, condition=is_flexible)
                 df = append_node(df, "reservoirs", "Reservoir Dispatch", "[MW]", get_dispatched_power)
                 df = append_node(df, "storages", "Storage Dispatch", "[MW]", get_dispatched_power)
-                df = append_node(
-                    df, "generators", "Flexible Remaining", "[MWh]", get_remaining_energy, condition=is_flexible
-                )
+                df = append_node(df, "generators", "Flexible Remaining", "[MWh]", get_remaining_energy, condition=is_flexible)
                 df = append_node(df, "reservoirs", "Stored Energy", "[MWh]", get_stored_energy)
                 df = append_node(df, "storages", "Stored Energy", "[MWh]", get_stored_energy)
                 df = append_node(df, "reservoirs", "Reservoir Inflow", "[MWh]", get_data_power)
@@ -405,14 +392,10 @@ class Statistics:
                 df = append_network(df, "generators", "Solar", "[MW]", get_inflexible_power, condition=is_solar)
                 df = append_network(df, "generators", "Wind", "[MW]", get_inflexible_power, condition=is_wind)
                 df = append_network(df, "generators", "Baseload", "[MW]", get_inflexible_power, condition=is_baseload)
-                df = append_network(
-                    df, "generators", "Flexible Dispatch", "[MW]", get_dispatched_power, condition=is_flexible
-                )
+                df = append_network(df, "generators", "Flexible Dispatch", "[MW]", get_dispatched_power, condition=is_flexible)
                 df = append_network(df, "reservoirs", "Reservoir Dispatch", "[MW]", get_dispatched_power)
                 df = append_network(df, "storages", "Storage Dispatch", "[MW]", get_dispatched_power)
-                df = append_network(
-                    df, "generators", "Flexible Remaining", "[MWh]", get_remaining_energy, condition=is_flexible
-                )
+                df = append_network(df, "generators", "Flexible Remaining", "[MWh]", get_remaining_energy, condition=is_flexible)
                 df = append_network(df, "reservoirs", "Stored Energy", "[MWh]", get_stored_energy)
                 df = append_network(df, "storages", "Stored Energy", "[MWh]", get_stored_energy)
                 df = append_network(df, "reservoirs", "Reservoir Inflow", "[MWh]", get_data_power)
