@@ -131,7 +131,7 @@ class Model:
                 results_time = time.time()
                 results_time_str = datetime.fromtimestamp(results_time).strftime("%d/%m/%Y %H:%M:%S")
                 scenario.logger.info(f"Results saved at {results_time_str} ({results_time - solve_time:.4f} seconds).")
-
+                
             scenario.unload_datafiles()
 
             end_time = time.time()
@@ -139,5 +139,5 @@ class Model:
             scenario.logger.info(
                 f"Scenario completed at {end_time_str} (Total time taken: {(end_time - start_time)/(60*60):.4f} hours)."
             )
-
+            break
         return None

@@ -53,7 +53,11 @@ class ImportCSV:
         filepath = self.repository.joinpath(filename)
         if not filepath.is_file():
             raise FileNotFoundError(f"File {filepath} does not exist.")
-        imported_dict = pd.read_csv(filepath, index_col="id").to_dict(orient="index")
+        imported_dict = pd.read_csv(filepath, index_col="id")
+        for col in imported_dict.columns:
+            if hasattr(imported_dict[col], "str"):
+                imported_dict[col] = imported_dict[col].str.lower()
+        imported_dict = imported_dict.to_dict(orient="index")
         for idx in imported_dict:
             imported_dict[idx]["id"] = idx
         return imported_dict
