@@ -55,6 +55,8 @@ class ImportCSV:
             raise FileNotFoundError(f"File {filepath} does not exist.")
         imported_dict = pd.read_csv(filepath, index_col="id")
         for col in imported_dict.columns:
+            if col == "filename":
+                continue
             if hasattr(imported_dict[col], "str"):
                 imported_dict[col] = imported_dict[col].str.lower()
         imported_dict = imported_dict.to_dict(orient="index")
@@ -103,6 +105,7 @@ class ImportDatafile:
             raise FileNotFoundError(f"File {filepath} does not exist.")
 
         df = pd.read_csv(filepath)
+        df.columns = [str(col).lower() for col in df.columns]
         return {col: df[col].to_numpy() for col in df.columns}
 
 
