@@ -247,7 +247,7 @@ def read_broad_optimum_bands(
         for row in reader:
             group = row["Group"]
             band_type = row["Band_Type"]
-            values = [float(row[variable_name]) for variable_name in group_names.get(group, [])]
+            values = [float(row[variable_name]) for variable_name in group_names[group]]
             s = sum(values)
             group_bands.setdefault(group, {"min": None, "max": None})[band_type] = s
     return group_bands

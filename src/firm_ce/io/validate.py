@@ -21,16 +21,16 @@ class ModelData:
         self.logger, self.results_dir = init_model_logger(model_name, logging_flag)
 
         # Set all the relevant parameters
-        self.scenarios = self.config_data.get("scenarios")
-        self.nodes = self.config_data.get("nodes")
-        self.generators = self.config_data.get("generators")
-        self.reservoirs = self.config_data.get("reservoirs")
-        self.fuels = self.config_data.get("fuels")
-        self.lines = self.config_data.get("lines")
-        self.storages = self.config_data.get("storages")
-        self.config = self.config_data.get("config")
-        self.x0s = self.config_data.get("initial_guess")
-        self.datafiles = self.config_data.get("datafiles")
+        self.scenarios = self.config_data["scenarios"]
+        self.nodes = self.config_data["nodes"]
+        self.generators = self.config_data["generators"]
+        self.reservoirs = self.config_data["reservoirs"]
+        self.fuels = self.config_data["fuels"]
+        self.lines = self.config_data["lines"]
+        self.storages = self.config_data["storages"]
+        self.config = self.config_data["config"]
+        self.x0s = self.config_data["initial_guess"]
+        self.datafiles = self.config_data["datafiles"]
 
     def validate(self):
         return validate_config(self)
@@ -40,8 +40,8 @@ class ModelData:
 
         if "config" in self.config_data:
             for record in self.config_data["config"].values():
-                if record.get("name") == "model_name":
-                    model_name = record.get("value")
+                if record["name"] == "model_name":
+                    model_name = record["value"]
                     break
 
         if model_name is None:
@@ -103,8 +103,8 @@ def validate_model_config(config_dict, model_logger):
     }
 
     for item in config_dict.values():
-        name = item.get("name")
-        value = item.get("value")
+        name = item["name"]
+        value = item["value"]
 
         if name not in validators:
             model_logger.warning(f"Unknown configuration name {name}")
@@ -166,13 +166,13 @@ def validate_nodes(nodes_dict, scenarios_list, model_logger):
 
     node_names = []
     for item in nodes_dict.values():
-        name = item.get("name")
+        name = item["name"]
         if name in node_names:
             model_logger.error("Duplicate node name '%s'", name)
             flag = False
         node_names.append(name)
 
-        scenarios = parse_comma_separated(item.get("scenarios"))
+        scenarios = parse_comma_separated(item["scenarios"])
         if scenarios == ["all"]:
             for scenario in scenario_nodes.keys():
                 scenario_nodes[scenario].append(name)
@@ -200,7 +200,7 @@ def validate_fuels(fuels_dict, scenarios_list, model_logger):
             model_logger.error("'cost' must be float greater than or equal to 0")
             flag = False
 
-        scenarios = parse_list(item.get("scenarios"))
+        scenarios = parse_list(item["scenarios"])
         if scenarios == ["all"]:
             for scenario in scenarios_list:
                 scenario_fuels[scenario].append(item["name"])
@@ -257,11 +257,11 @@ def validate_lines(lines_dict, scenarios_list, scenario_nodes, model_logger):
         def _validate_line(flag):
             scenario_lines[scenario].append(item["name"])
 
-            if any(is_nan(item.get(n)) for n in ["node_start", "node_end"]):
+            if any(is_nan(item[n]) for n in ["node_start", "node_end"]):
                 scenario_minor_lines[scenario].append(item["name"])
 
             for endpoint in ["node_start", "node_end"]:
-                node_val = item.get(endpoint)
+                node_val = item[endpoint]
                 if (node_val not in scenario_nodes[scenario]) and not is_nan(node_val):
                     model_logger.error(
                         "'%s' %s for line %s is not defined in scenario %s",
@@ -273,7 +273,7 @@ def validate_lines(lines_dict, scenarios_list, scenario_nodes, model_logger):
                     return False
             return flag
 
-        scenarios = parse_list(item.get("scenarios"))
+        scenarios = parse_list(item["scenarios"])
         if scenarios == ["all"]:
             for scenario in scenarios_list:
                 flag = _validate_line(flag)
@@ -349,7 +349,7 @@ def validate_generators(generators_dict, scenarios_list, scenario_fuels, scenari
                 flag = False
             return flag
 
-        scenarios = parse_list(item.get("scenarios"))
+        scenarios = parse_list(item["scenarios"])
         if scenarios == ["all"]:
             for scenario in scenarios_list:
                 flag = _validate_generator(flag)
@@ -429,7 +429,7 @@ def validate_reservoirs(reservoirs_dict, scenarios_list, scenario_fuels, scenari
                 flag = False
             return flag
 
-        scenarios = parse_list(item.get("scenarios"))
+        scenarios = parse_list(item["scenarios"])
         if scenarios == ["all"]:
             for scenario in scenarios_list:
                 flag = _validate_reservoir(flag)
@@ -504,7 +504,7 @@ def validate_storages(storages_dict, scenarios_list, scenario_nodes, scenario_li
                 flag = False
             return flag
 
-        scenarios = parse_list(item.get("scenarios"))
+        scenarios = parse_list(item["scenarios"])
         if scenarios == ["all"]:
             for scenario in scenarios_list:
                 flag = _validate_storage(flag)

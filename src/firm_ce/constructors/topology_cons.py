@@ -36,7 +36,7 @@ def construct_Node_object(order: int, node_dict: dict) -> Node_InstanceType:
     -------
     Node_InstanceType: A static instance of the Node jitclass.
     """
-    return Node(True, node_dict.get("id"), order, node_dict.get("name"))
+    return Node(True, node_dict["id"], order, node_dict["name"])
 
 
 def construct_Line_object(
@@ -69,10 +69,10 @@ def construct_Line_object(
     min_build = float(line_dict["min_build"])
     capacity = float(line_dict["initial_capacity"])
     unit_type = str(line_dict["unit_type"])
-    near_opt = str(line_dict.get("near_optimum", "")).lower() in ("true", "1", "yes")
+    near_opt = str(line_dict["near_optimum"]).lower() in ("true", "1", "yes")
     minor_node = construct_Node_object(-1, {"name": "MINOR_NODE", "id": -1})
 
-    raw_group = line_dict.get("range_group", "")
+    raw_group = line_dict["range_group"]
     group = (
         name
         if raw_group is None or (isinstance(raw_group, float) and np.isnan(raw_group)) or str(raw_group).strip() == ""

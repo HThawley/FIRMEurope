@@ -66,7 +66,7 @@ class Model:
         self.config = ModelConfig(model_data.config)
         self.datafile_filenames_dict = model_data.datafiles
         self.scenarios = {
-            model_data.scenarios[scenario_idx].get("scenario_name"): Scenario(model_data, scenario_idx)
+            model_data.scenarios[scenario_idx]["scenario_name"]: Scenario(model_data, scenario_idx)
             for scenario_idx in model_data.scenarios
         }
 

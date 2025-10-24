@@ -28,17 +28,17 @@ class Scenario:
     def __init__(self, model_data: ModelData, scenario_id: int) -> None:
         self.logger, self.results_dir = model_data.logger, model_data.results_dir
 
-        self.scenario_data = model_data.scenarios.get(scenario_id)
+        self.scenario_data = model_data.scenarios[scenario_id]
 
         self.id = scenario_id
-        self.name = self.scenario_data.get("scenario_name", "")
-        self.type = self.scenario_data.get("type", "")
+        self.name = self.scenario_data["scenario_name"].lower()
+        self.type = self.scenario_data["type"]
         self.x0 = self._get_x0(model_data.x0s)
 
         self.network = construct_Network_object(
             self.get_scenario_dicts(model_data.nodes),
             self.get_scenario_dicts(model_data.lines),
-            self.scenario_data.get("networksteps_max", 0),
+            self.scenario_data["networksteps_max"],
         )
         self.static = construct_ScenarioParameters_object(self.scenario_data, len(self.network.nodes))
         self.fleet = construct_Fleet_object(
@@ -106,11 +106,11 @@ class Scenario:
     def _get_x0(self, all_x0s: Dict[str, Dict[str, str]]) -> NDArray[np.float64]:
         """Get the initial guess corresponding to this scenario."""
         for entry in all_x0s.values():
-            if entry.get("scenario") == self.name:
-                if isinstance(entry.get("x_0", ""), float) and np.isnan(entry.get("x_0", "")):
+            if entry["scenario"] == self.name:
+                if isinstance(entry["x_0"], float) and np.isnan(entry["x_0"]):
                     x0_list = []
                 else:
-                    x0_str = entry.get("x_0", "").strip()
+                    x0_str = entry["x_0"].strip()
                     x0_list = [float(x) for x in x0_str.split(",") if x.strip()]
                 return np.array(x0_list, dtype=np.float64)
         return None

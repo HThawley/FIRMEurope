@@ -78,7 +78,7 @@ def construct_Generator_object(
     min_build = float(generator_dict["min_build"])
     capacity = float(generator_dict["initial_capacity"])
     unit_type = str(generator_dict["unit_type"])
-    near_optimum_check = str(generator_dict.get("near_optimum", "")).lower() in ("true", "1", "yes")
+    near_optimum_check = str(generator_dict["near_optimum"]).lower() in ("true", "1", "yes")
 
     node = next(node for node in nodes_object_dict.values() if node.name == str(generator_dict["node"]))
 
@@ -89,7 +89,7 @@ def construct_Generator_object(
 
     line = next(line for line in lines_object_dict.values() if line.name == str(generator_dict["line"]))
 
-    raw_group = generator_dict.get("range_group", "")
+    raw_group = generator_dict["range_group"]
     if raw_group is None or (isinstance(raw_group, float) and np.isnan(raw_group)) or str(raw_group).strip() == "":
         group = name
     else:
@@ -171,7 +171,7 @@ def construct_Reservoir_object(
     min_build_p = float(reservoir_dict["min_build_p"])
     min_build_e = float(reservoir_dict["min_build_e"])
     unit_type = str(reservoir_dict["unit_type"])
-    near_optimum_check = str(reservoir_dict.get("near_optimum", "")).lower() in ("true", "1", "yes")
+    near_optimum_check = str(reservoir_dict["near_optimum"]).lower() in ("true", "1", "yes")
 
     node = next(node for node in nodes_object_dict.values() if node.name == str(reservoir_dict["node"]))
 
@@ -182,7 +182,7 @@ def construct_Reservoir_object(
 
     line = next(line for line in lines_object_dict.values() if line.name == str(reservoir_dict["line"]))
 
-    raw_group = reservoir_dict.get("range_group", "")
+    raw_group = reservoir_dict["range_group"]
     if raw_group is None or (isinstance(raw_group, float) and np.isnan(raw_group)) or str(raw_group).strip() == "":
         group = name
     else:
@@ -264,13 +264,13 @@ def construct_Storage_object(
     min_build_p = float(storage_dict["min_build_p"])
     min_build_e = float(storage_dict["min_build_e"])
     unit_type = str(storage_dict["unit_type"])
-    near_optimum_check = str(storage_dict.get("near_optimum", "")).lower() in ("true", "1", "yes")
+    near_optimum_check = str(storage_dict["near_optimum"]).lower() in ("true", "1", "yes")
 
     node = next(node for node in nodes_object_dict.values() if node.name == str(storage_dict["node"]))
 
     line = next(line for line in lines_object_dict.values() if line.name == str(storage_dict["line"]))
 
-    raw_group = storage_dict.get("range_group", "")
+    raw_group = storage_dict["range_group"]
     if raw_group is None or (isinstance(raw_group, float) and np.isnan(raw_group)) or str(raw_group).strip() == "":
         group = name
     else:

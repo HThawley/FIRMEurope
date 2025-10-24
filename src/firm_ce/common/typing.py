@@ -56,7 +56,7 @@ else:
             bool: bool,
             str: str,
         }
-        base = _map.get(ty, ty)
+        base = _map[ty]
         return Tuple[tuple([base] * n)]
 
     def DictType(key_ty, val_ty):
