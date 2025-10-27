@@ -456,10 +456,10 @@ class Statistics:
             """get time series of total generation at the node of an asset (including the asset's contribution)"""
             node_generation = sum((get_inflexible_power(_asset)
                                    for _asset in self.solution.fleet.generators.values()
-                                   if (_asset.node.id == asset.node.id) and is_not_flexible(asset)))
+                                   if (_asset.node.id == asset.node.id) and is_not_flexible(_asset)))
             node_generation += sum((get_flexible_power(_asset)
                                     for _asset in self.solution.fleet.generators.values()
-                                    if (_asset.node.id == asset.node.id) and is_flexible(asset)))
+                                    if (_asset.node.id == asset.node.id) and is_flexible(_asset)))
             node_generation += sum((get_flexible_power(_asset)
                                     for _asset in self.solution.fleet.reservoirs.values()
                                     if _asset.node.id == asset.node.id))
