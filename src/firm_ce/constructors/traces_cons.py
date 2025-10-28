@@ -26,6 +26,7 @@ def select_datafile(
     datafile_type: str,
     object_name: str,
     datafiles_imported_dict: Dict[str, DataFile],
+    error_on_fail=True,
 ) -> NDArray[np.float64]:
     """
     Locates and returns the a data trace of a specified datafile_type associated with
@@ -55,7 +56,10 @@ def select_datafile(
             trace *= unit_multiples[datafile.units[0]]
             return trace
 
-    raise ValidationError(f"No matching datafiles: {datafile_type=}, {object_name=}")
+    if error_on_fail:
+        raise ValidationError(f"No matching datafiles: {datafile_type=}, {object_name=}")
+
+    return trace
 
 
 def load_datafiles_to_generators(
@@ -91,12 +95,18 @@ def load_datafiles_to_generators(
     means that load_datafiles_to_network must be run before load_datafiles_to_generators.
     """
     for generator in fleet.generators.values():
+        if generator.unit_type == "flexible":
+            generation, flexible = False, True
+        else:
+            generation, flexible = True, False
+
         generator_m.load_data(
             generator,
-            select_datafile("generation", generator.name, datafiles_imported_dict),
-            select_datafile("flexible_annual_limit", generator.name, datafiles_imported_dict),
+            select_datafile("generation", generator.name, datafiles_imported_dict, generation),
+            select_datafile("flexible_annual_limit", generator.name, datafiles_imported_dict, flexible),
             resolution,
         )
+
     return None
 
 
