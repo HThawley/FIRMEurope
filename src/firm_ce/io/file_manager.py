@@ -55,7 +55,7 @@ class ImportCSV:
             raise FileNotFoundError(f"File {filepath} does not exist.")
         imported_dict = pd.read_csv(filepath, index_col="id")
         for col in imported_dict.columns:
-            if col == "filename":
+            if col in ("filename", "units"):
                 continue
             if hasattr(imported_dict[col], "str"):
                 imported_dict[col] = imported_dict[col].str.lower()
@@ -114,22 +114,23 @@ class DataFile:
     Container for a named datafile and its content.
     """
 
-    def __init__(self, filename: str, datafile_type: str, file_directory: str) -> None:
+    def __init__(self, datafile_filenames_dict: Dict, file_directory: str) -> None:
         """
         Initialize the DataFile with a filename and its type.
 
         Parameters:
         -------
-        filename (str): Name of the datafile.
+        datafile_filenames_dict (dict): datafiles.csv object read in as a dict
         datafile_type (str): Descriptive type of the datafile (e.g., 'time series').
         """
-        self.name = filename
-        self.type = datafile_type
+        self.name = datafile_filenames_dict["filename"]
+        self.type = datafile_filenames_dict["datafile_type"]
+        self.units = datafile_filenames_dict["units"]
         self.file_directory = file_directory
-        self.data = ImportDatafile(file_directory, filename).get_data()
+        self.data = ImportDatafile(self.file_directory, self.name).get_data()
 
     def __repr__(self) -> str:
-        return f"DataFile ({self.name!r}, {self.type!r}, {self.data!r})"
+        return f"DataFile ({self.name!r}, {self.type!r}"  # , {self.data!r})"
 
 
 class ResultFile:

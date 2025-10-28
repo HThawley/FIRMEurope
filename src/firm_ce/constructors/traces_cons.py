@@ -4,10 +4,22 @@ from typing import Dict
 import numpy as np
 from numpy.typing import NDArray
 
+from firm_ce.common.exceptions import ValidationError
 from firm_ce.fast_methods import generator_m, reservoir_m, node_m
 from firm_ce.io.file_manager import DataFile
 from firm_ce.system.components import Fleet_InstanceType
 from firm_ce.system.topology import Network_InstanceType
+
+
+unit_multiples = {
+    "C": 1.0,  # CF - capacity factor
+    "c": 1.0,  # CF - capacity factor
+    "-": 1.0,  # unitless (capacity factor)
+    "G": 1.0,  # maths will be done in GW|GWh
+    "M": 0.001,
+    "k": 0.000_001,
+    "T": 1000.0,
+}
 
 
 def select_datafile(
@@ -22,7 +34,7 @@ def select_datafile(
     Parameters:
     -------
     datafile_type (str): The type of datafile. Either 'generation', 'flexible_annual_limit',
-        or 'demand'.
+        'demand', 'reservoir_inflow'
     object_name (str): The name attribute of the Generator or Node instance.
     datafiles_imported_dict (Dict[str, DataFile]): A dictionary of DataFile instances, where
         the key is a str of the id in `config/datafiles.csv`.
@@ -40,7 +52,9 @@ def select_datafile(
     for datafile in matching_datafiles:
         if object_name in datafile.data.keys():
             trace = np.array(datafile.data[object_name], dtype=np.float64)
+            trace *= unit_multiples[datafile.units[0]]
             break
+        raise ValidationError(f"No matching datafiles: {datafile_type=}, {object_name=}")
 
     return trace
 
@@ -114,7 +128,7 @@ def load_datafiles_to_reservoirs(
     for reservoir in fleet.reservoirs.values():
         reservoir_m.load_data(
             reservoir,
-            select_datafile("reservoir_inflow", reservoir.name, datafiles_imported_dict) / 1000,  # MWh to GWh
+            select_datafile("reservoir_inflow", reservoir.name, datafiles_imported_dict),
         )
     return None
 
@@ -147,8 +161,7 @@ def load_datafiles_to_network(
     for node in network.nodes.values():
         node_m.load_data(
             node,
-            select_datafile("demand", node.name, datafiles_imported_dict)
-            / 1000,  # Convert MW to GW - allow custom unit selection in future
+            select_datafile("demand", node.name, datafiles_imported_dict),
         )
     return None
 

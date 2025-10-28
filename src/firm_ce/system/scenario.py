@@ -57,8 +57,8 @@ class Scenario:
     def __repr__(self):
         return f"Scenario({self.id!r} {self.name!r})"
 
-    def load_datafiles(self, all_datafiles: Dict[str, DataFile], data_directory: str) -> None:
-        datafiles = self._get_datafiles(all_datafiles, data_directory)
+    def load_datafiles(self, datafile_filenames_dict: Dict[str, DataFile], data_directory: str) -> None:
+        datafiles = self._get_datafiles(datafile_filenames_dict, data_directory)
 
         load_datafiles_to_network(self.network, datafiles)
 
@@ -94,13 +94,13 @@ class Scenario:
             or parse_comma_separated(imported_dict[idx]["scenarios"]) == ["all"]
         }
 
-    def _get_datafiles(self, all_datafiles: Dict[str, Dict[str, str]], data_directory: str) -> Dict[str, DataFile]:
+    def _get_datafiles(self, datafile_filenames_dict: Dict[str, Dict[str, str]], data_directory: str) -> Dict[str, DataFile]:
         """Filter or prepare datafiles specific to this scenario."""
         return {
-            idx: DataFile(all_datafiles[idx]["filename"], all_datafiles[idx]["datafile_type"], data_directory)
-            for idx in all_datafiles
-            if self.name.lower() in parse_comma_separated(all_datafiles[idx]["scenarios"])
-            or parse_comma_separated(all_datafiles[idx]["scenarios"]) == ["all"]
+            idx: DataFile(datafile_filenames_dict[idx], data_directory)
+            for idx in datafile_filenames_dict
+            if self.name.lower() in parse_comma_separated(datafile_filenames_dict[idx]["scenarios"])
+            or parse_comma_separated(datafile_filenames_dict[idx]["scenarios"]) == ["all"]
         }
 
     def _get_x0(self, all_x0s: Dict[str, Dict[str, str]]) -> NDArray[np.float64]:
