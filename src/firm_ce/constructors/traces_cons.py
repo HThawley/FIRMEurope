@@ -53,10 +53,9 @@ def select_datafile(
         if object_name in datafile.data.keys():
             trace = np.array(datafile.data[object_name], dtype=np.float64)
             trace *= unit_multiples[datafile.units[0]]
-            break
-        raise ValidationError(f"No matching datafiles: {datafile_type=}, {object_name=}")
+            return trace
 
-    return trace
+    raise ValidationError(f"No matching datafiles: {datafile_type=}, {object_name=}")
 
 
 def load_datafiles_to_generators(
