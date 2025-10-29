@@ -1,9 +1,9 @@
 # type: ignore
 import os
-import re
 import shutil
 import time
 
+from re import sub
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
@@ -107,9 +107,10 @@ class Statistics:
         self.block_first_intervals, self.block_last_intervals = static_m.get_block_intervals(
             self.solution.static.block_lengths
         )
+        self.statistics_generated = False
 
     def create_solution_directory(self, result_directory: str, solution_name: str) -> str:
-        safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", solution_name)
+        safe_name = sub(r"[^a-zA-Z0-9_\-]", "_", solution_name)
         solution_dir = os.path.join(result_directory, safe_name)
         os.makedirs(solution_dir, exist_ok=True)
         return solution_dir
@@ -134,6 +135,9 @@ class Statistics:
         return None
 
     def generate_result_files(self) -> None:
+        if not self.solution.evaluated:
+            raise RuntimeError("Solution must be evaluated before generating statistics.")
+
         self.result_files = {
             "capacities": self.generate_capacities_file(),
             "component_costs": self.generate_component_costs_file(),
@@ -144,13 +148,18 @@ class Statistics:
             "summary": self.generate_summary_file(),
             "x": self.generate_x_file(),
         }
+
+        self.statistics_generated = True
+
         return None
 
     def write_results(self) -> None:
-        if not self.solution.evaluated:
-            print("WARNING: Solution must be evaluated before writing statistics.")
+        if not self.statistics_generated:
+            raise RuntimeError("Statistics must be generated before writing results.")
+
         for result_file in self.result_files.values():
             result_file.write()
+
         return None
 
     def generate_capacities_file(self) -> ResultFile:
@@ -299,7 +308,7 @@ class Statistics:
                 if len(assets) > 0:
                     df_to_join = pd.concat(
                         (
-                            pd.Series([node.name, "Node", node.id, column_name, column_units]),
+                            pd.Series([node.name, asset_class_to_display[asset_class], node.id, column_name, column_units]),
                             pd.Series(sum((time_series_getter(asset) for asset in assets))),
                         ),
                         ignore_index=True,

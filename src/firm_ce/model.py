@@ -3,8 +3,9 @@ from datetime import datetime
 
 from firm_ce.common.constants import DEBUG
 from firm_ce.common.exceptions import ValidationError
-from firm_ce.io.validate import ModelData
+from firm_ce.io.data_model import ModelData
 from firm_ce.optimisation.statistics import Statistics
+from firm_ce.optimisation.validation import Validation
 from firm_ce.system.parameters import ModelConfig
 from firm_ce.system.scenario import Scenario
 
@@ -126,6 +127,11 @@ class Model:
                 )
                 scenario.statistics.generate_result_files()
                 scenario.statistics.write_results()
+
+                scenario.validation = Validation(scenario)
+                scenario.validation.validate()
+                scenario.validation.write_results()
+
                 if DEBUG:
                     scenario.statistics.dump()
                 results_time = time.time()

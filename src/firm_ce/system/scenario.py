@@ -19,7 +19,7 @@ from firm_ce.constructors.traces_cons import (
 )
 from firm_ce.fast_methods import static_m
 from firm_ce.io.file_manager import DataFile
-from firm_ce.io.validate import ModelData
+from firm_ce.io.data_model import ModelData
 from firm_ce.optimisation.solver import Solver
 from firm_ce.system.parameters import ModelConfig
 
