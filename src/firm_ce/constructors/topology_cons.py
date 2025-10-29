@@ -6,7 +6,7 @@ import numpy as np
 from firm_ce.common.typing import DictType, ListType, TypedDict, TypedList, UniTuple, int64
 from firm_ce.constructors.cost_cons import construct_UnitCost_object
 from firm_ce.fast_methods import route_m
-from firm_ce.io.validate import is_nan
+from firm_ce.io.data_model import is_nan
 from firm_ce.system.topology import (
     Line,
     Line_InstanceType,
