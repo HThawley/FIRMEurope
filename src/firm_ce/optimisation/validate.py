@@ -30,7 +30,7 @@ class Validation:
         self.solution = self.statistics.solution
 
         self.validation_directory = self.create_validation_directory(
-            os.path.dirname(self.statistics.results_directory)
+            self.statistics.results_directory
         )
 
         self.full_intervals_count = self.solution.static.block_lengths.sum()
@@ -38,7 +38,7 @@ class Validation:
         self.validation_generated = False
 
     def create_validation_directory(self, statistics_directory: str) -> str:
-        validation_dir = os.path.join(statistics_directory, "_validation")
+        validation_dir = os.path.join(statistics_directory, "validation")
         os.makedirs(validation_dir, exist_ok=True)
         return validation_dir
 
@@ -47,9 +47,9 @@ class Validation:
             raise RuntimeError("Solution must be evaluated before validation")
 
         self.result_files = {
-            "energy_balance_ASSETS": self.generate_energy_balance_file("assets"),
-            "energy_balance_NODES": self.generate_energy_balance_file("nodes"),
-            "energy_balance_NETWORK": self.generate_energy_balance_file("network"),
+            "energy_balance_ASSETS": self.validate_energy_balance("assets"),
+            "energy_balance_NODES": self.validate_energy_balance("nodes"),
+            "energy_balance_NETWORK": self.validate_energy_balance("network"),
             "capacities": self.validate_capacities_internal(),
             "operational_capacities": self.validate_capacities_operational(),
         }
@@ -67,7 +67,7 @@ class Validation:
 
         return None
 
-    def generate_energy_balance_file(self, aggregation_type: str) -> ResultFile:
+    def validate_energy_balance(self, aggregation_type: str) -> ResultFile:
         def get_import_columns(balance: pd.DataFrame, node: str) -> pd.MultiIndex:
             major_lines = balance.columns[balance.columns.get_level_values("Asset Type") == "Major Line"]
             imports = major_lines[major_lines.get_level_values("Asset Name").str.split("-").str.get(-1) == node]
@@ -117,12 +117,17 @@ class Validation:
                     df[n] -= balance[exports].sum(axis=1)
 
                 check_pass = (df.abs() <= TOLERANCE).all()
+
+                for check, node in zip(check_pass, nodes):
+                    if not check:
+                        warn(f"Warning: Node '{node}' failed check: 'energy balance'.", ValidationWarning)
+
                 total_row = pd.DataFrame(df.abs().sum(axis=0).to_list(), columns=["Total"], index=nodes).T
                 df = pd.concat((total_row, df))
 
             case "network":
                 balance = pd.read_csv(
-                    fr"{self.statistics.results_directory}/energy_balance_{aggregation_type.upper()}",
+                    fr"{self.statistics.results_directory}/energy_balance_{aggregation_type.upper()}.csv",
                     header=[0],
                     skiprows=[0, 1, 2, 4],
                     index_col=0,
@@ -138,13 +143,12 @@ class Validation:
                 ]
                 df["Network"] += balance[cols].sum(axis=1)
 
-                check_pass = (df.abs() <= TOLERANCE).all(axis=0)
+                check = (df.abs() <= TOLERANCE).all().all()
+                if not check:
+                    warn("Warning: 'Network' failed check: 'energy balance'.", ValidationWarning)
+
                 total_row = pd.DataFrame(df.abs().sum(axis=0).to_list(), columns=["Total"], index=["Network"]).T
                 df = pd.concat((total_row, df))
-
-        for check, node in zip(check_pass, nodes):
-            if not check:
-                warn(f"Warning: Node '{node}' failed check: 'energy balance'.", ValidationWarning)
 
         result_file = ResultFile(f"energy_balance_{aggregation_type.upper()}", self.validation_directory, df)
 
@@ -192,9 +196,9 @@ class Validation:
                                                  & (capacities.columns.get_level_values("Asset ID") == asset.id)
                                                  & (capacities.columns.get_level_values("Column Name") == "Power Capacity")]
                         expected += capacities.loc["Total Capacity", col]
-                df.append_check(df, item, "Minor Line Capacity", abs(expected - capacities.loc["Total Capacity", item]) <= TOLERANCE)
+                df = append_check(df, item, "Minor Line Capacity", abs(expected - capacities.loc["Total Capacity", item]) <= TOLERANCE)
 
-        result_file = ResultFile("capacities.csv", self.validation_directory, df)
+        result_file = ResultFile("val_capacities", self.validation_directory, df)
 
         return result_file
 
@@ -221,6 +225,7 @@ class Validation:
             return abs(theoretic) - abs(observed) >= -TOLERANCE
 
         def append_check(df: pd.DataFrame, item: Tuple, name: str, check: bool) -> pd.DataFrame:
+            # TODO: add magnitude
             if not check:
                 warn(f"Warning: Asset '{item[0]}' failed check: '{name}'.", ValidationWarning)
             res = pd.DataFrame([[*item, name, check]], columns=df.columns)
@@ -248,13 +253,14 @@ class Validation:
             return match_column(balance, "Energy", *item)
 
         def check_max_dispatch(df: pd.DataFrame, balance: pd.DataFrame, capacities: pd.DataFrame, item: Tuple) -> pd.DataFrame:
-            observed_max = balance[match_dispatch_column(balance, *item)].max() / 1000.  # MW to GW
+            observed_max = balance[match_dispatch_column(balance, item)].max() / 1000.  # MW to GW
             theoretic_max = capacities.loc["Total Capacity", item]
             df = append_check(df, item, "Max Dispatch", is_within(observed_max, theoretic_max))
             return df
 
         def check_min_dispatch(df: pd.DataFrame, balance: pd.DataFrame, capacities: pd.DataFrame, item: Tuple, zero: bool) -> pd.DataFrame:
-            observed_min = balance[match_dispatch_column(balance, *item)].min() / 1000.  # MW to GW
+            # TODO: fix
+            observed_min = balance[match_dispatch_column(balance, item)].min() / 1000.  # MW to GW
             if zero:
                 theoretic_min = 0
                 df = append_check(df, item, "Min Dispatch", is_within(observed_min, theoretic_min))
@@ -264,7 +270,7 @@ class Validation:
             return df
 
         def check_storage_limits(df: pd.DataFrame, balance: pd.DataFrame, capacities: pd.DataFrame, item: Tuple) -> pd.DataFrame:
-            column = match_energy_column(balance, *item)
+            column = match_energy_column(balance, item)
             observed_max = balance[column].max() / 1000.  # MWh -> GWh
             theoretic_max = capacities.loc["Total Capacity", item]
             df = append_check(df, item, "Max Storage", is_within(observed_max, theoretic_max))
@@ -273,12 +279,12 @@ class Validation:
             return df
 
         def check_transm_limits(df: pd.DataFrame, balance: pd.DataFrame, capacties: pd.DataFrame, item: Tuple) -> pd.DataFrame:
-            column = match_transm_column(balance, *item)
+            column = match_transm_column(balance, item)
             observed_max = balance[column].max() / 1000.  # MW -> GW
             theoretic_max = capacities.loc["Total Capacity", item]
             df = append_check(df, item, "Max Transm", is_within(observed_max, theoretic_max))
             observed_min = balance[column].min() / 1000.  # MW -> GW
-            df.append_check(df, item, "Min Transm", is_within(observed_min, theoretic_max))
+            df = append_check(df, item, "Min Transm", is_within(observed_min, theoretic_max))
             return df
 
         df = pd.DataFrame(columns=["Asset Name", "Asset Type", "Asset ID", "Column Name", "Check", "Pass"])
@@ -336,9 +342,13 @@ class Validation:
                 balance[get_import_columns(balance, node)],
                 -balance[get_export_columns(balance, node)]
             ), axis=1)
-            ports = ports.applymap(get_sign)
+            ports = ports.map(get_sign)
             consistency = ports.apply(is_consistent_sign, axis=1)
             df = append_check(df, (f"{node=}", "Major Line", "-", "Flow"), "Simultaneous import/export", consistency.all())
 
         # TODO: inflows
         # TODO: charge/discharge -> storage level
+
+        result_file = ResultFile("operational_capacities.csv", self.validation_directory, df)
+
+        return result_file
