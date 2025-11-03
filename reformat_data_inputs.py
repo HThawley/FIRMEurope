@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import os
 from numba import njit
 
@@ -607,6 +608,26 @@ def build_lines_csv(write=True):
             line["techs"],
         )
         lines = pd.concat((lines, pd.DataFrame(row, index=[0]))).reset_index(drop=True)
+
+    nodes = lines[["node_start", "node_end"]]
+    nodes = np.sort(nodes.values, axis=1)
+    lines_copy = lines.copy()
+    lines_copy["canonical_start"] = nodes[:, 0]
+    lines_copy["canonical_end"] = nodes[:, 1]
+
+    grouped = lines_copy.groupby(["canonical_start", "canonical_end", "unit_type"])
+    for name, group in grouped:
+        for j, col in enumerate(lines.columns):
+            if col in ("name", "node_start", "node_end"):
+                continue
+            is_equal = group.iloc[0, j] == group.iloc[1, j]
+            is_nan = pd.isna(group.iloc[0, j]) and pd.isna(group.iloc[1, j])
+            assert is_equal or is_nan, f"Duplicate lines are asymmetric: {name=}, {col=}"
+    lines = lines_copy.drop_duplicates(
+        subset=["canonical_start", "canonical_end", "unit_type"],
+        keep="first",
+    )
+    lines = lines.drop(columns=["canonical_start", "canonical_end"])
 
     for name in (
         "other_connections",
