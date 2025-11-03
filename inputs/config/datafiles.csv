@@ -6,5 +6,5 @@ id,scenarios,filename,datafile_type,units
 4,all,wind-onshore.csv,generation,CF
 5,all,hydro-ror.csv,generation,CF
 6,all,hydro-reservoir-inflow.csv,reservoir_inflow,MWh
-7,"Base,ZeroCarbon",nuclear.csv,generation,CF
-8,"Base,Re100",flexible_annual_biogas.csv,flexible_annual_limit,GWh
+7,"Test,Base,ZeroCarbon",nuclear.csv,generation,CF
+8,"Test,Base,HydroExpansion",flexible_annual_biogas.csv,flexible_annual_limit,GWh

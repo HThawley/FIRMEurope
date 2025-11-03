@@ -1,5 +1,6 @@
 import time
 from datetime import datetime
+from typing import List
 
 from firm_ce.common.constants import DEBUG
 from firm_ce.common.exceptions import ValidationError
@@ -71,7 +72,7 @@ class Model:
             for scenario_idx in model_data.scenarios
         }
 
-    def solve(self) -> None:
+    def solve(self, *, scenarios: str | List[str] = "all") -> None:
         """
         Execute an optimisation for each Scenario: load datafiles, run the optimisation, generate and write results,
         then unload data before moving to the next Scenario.
@@ -93,7 +94,19 @@ class Model:
         processes for the optimisation to create dynamic instances that are safe to modify during the optimisation. The dynamic
         instances are not actually contained in the Model instance.
         """
+        if isinstance(scenarios, list):
+            scenarios = [s.lower() for s in scenarios]
+
         for scenario in self.scenarios.values():
+            scenario = scenario.lower()
+            if isinstance(scenarios, str):
+                if scenarios != "all" and scenario != scenarios:
+                    continue
+            elif isinstance(scenarios, list):
+                # These are split out because "in" has a different meaning for strings
+                if scenario not in scenarios:
+                    continue
+
             start_time = time.time()
             start_time_str = datetime.fromtimestamp(start_time).strftime("%d/%m/%Y %H:%M:%S")
             scenario.logger.info(f"Started scenario {scenario.name} at {start_time_str}.")

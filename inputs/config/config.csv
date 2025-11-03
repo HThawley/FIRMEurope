@@ -7,5 +7,5 @@ id,name,value
 5,model_name,FIRMeur
 6,near_optimal_tol,0.1
 7,midpoint_count,3
-8,balancing_type,full
+8,balancing_type,simple
 9,fixed_costs_threshold,400

@@ -1,4 +1,6 @@
 id,scenario,x_0
+-1,Test,
 0,Base,
 1,ZeroCarbon,
-2,Re100,
+2,HydroExpansion,
+3,Hydrogen,
