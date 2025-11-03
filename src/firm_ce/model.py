@@ -98,13 +98,13 @@ class Model:
             scenarios = [s.lower() for s in scenarios]
 
         for scenario in self.scenarios.values():
-            scenario = scenario.lower()
+            scenario_name = scenario.name.lower()
             if isinstance(scenarios, str):
-                if scenarios != "all" and scenario != scenarios:
+                if scenarios != "all" and scenario_name != scenarios:
                     continue
             elif isinstance(scenarios, list):
                 # These are split out because "in" has a different meaning for strings
-                if scenario not in scenarios:
+                if scenario_name not in scenarios:
                     continue
 
             start_time = time.time()

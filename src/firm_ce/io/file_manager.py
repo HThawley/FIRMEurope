@@ -172,7 +172,7 @@ class ResultFile:
                 raise ValueError(f"implied file type ({implied_type}) does not match the declared file type ({file_ext})")
 
         self.file_ext = file_ext.lower()
-        self.report = report
+        self.report = report.split(".")[0]
         self.target_directory = target_directory
         self.file_path = f"{target_directory}/{report}.{self.file_ext}"
         if decimals is not None:

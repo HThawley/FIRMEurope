@@ -219,10 +219,15 @@ class Validation:
         )
         capacities = capacities[capacities.columns[capacities.columns.get_level_values("Asset Type") != "Minor Line"]]
 
-        def is_within(observed, theoretic):
+        def is_within_max(observed, theoretic):
             # theoretic >= observed
             # theoretic + TOLERANCE >= observed
             return abs(theoretic) - abs(observed) >= -TOLERANCE
+
+        def is_within_min(observed, theoretic):
+            # observed >= theoretic
+            # observed >= theoretic - TOLERANCE
+            return abs(observed) - abs(theoretic) >= -TOLERANCE
 
         def append_check(df: pd.DataFrame, item: Tuple, name: str, check: bool) -> pd.DataFrame:
             # TODO: add magnitude
@@ -255,7 +260,7 @@ class Validation:
         def check_max_dispatch(df: pd.DataFrame, balance: pd.DataFrame, capacities: pd.DataFrame, item: Tuple) -> pd.DataFrame:
             observed_max = balance[match_dispatch_column(balance, item)].max() / 1000.  # MW to GW
             theoretic_max = capacities.loc["Total Capacity", item]
-            df = append_check(df, item, "Max Dispatch", is_within(observed_max, theoretic_max))
+            df = append_check(df, item, "Max Dispatch", is_within_max(observed_max, theoretic_max))
             return df
 
         def check_min_dispatch(df: pd.DataFrame, balance: pd.DataFrame, capacities: pd.DataFrame, item: Tuple, zero: bool) -> pd.DataFrame:
@@ -263,28 +268,28 @@ class Validation:
             observed_min = balance[match_dispatch_column(balance, item)].min() / 1000.  # MW to GW
             if zero:
                 theoretic_min = 0
-                df = append_check(df, item, "Min Dispatch", is_within(observed_min, theoretic_min))
+                df = append_check(df, item, "Min Dispatch", is_within_min(observed_min, theoretic_min))
             else:
                 theoretic_min = - capacities.loc["Total Capacity", item]
-                df = append_check(df, item, "Max Charge", is_within(observed_min, theoretic_min))
+                df = append_check(df, item, "Max Charge", is_within_min(observed_min, theoretic_min))
             return df
 
         def check_storage_limits(df: pd.DataFrame, balance: pd.DataFrame, capacities: pd.DataFrame, item: Tuple) -> pd.DataFrame:
             column = match_energy_column(balance, item)
             observed_max = balance[column].max() / 1000.  # MWh -> GWh
             theoretic_max = capacities.loc["Total Capacity", item]
-            df = append_check(df, item, "Max Storage", is_within(observed_max, theoretic_max))
+            df = append_check(df, item, "Max Storage", is_within_max(observed_max, theoretic_max))
             observed_min = balance[column].min() / 1000.  # MWh -> GWh
-            df = append_check(df, item, "Min Storage", is_within(observed_min, 0))
+            df = append_check(df, item, "Min Storage", is_within_min(observed_min, 0))
             return df
 
         def check_transm_limits(df: pd.DataFrame, balance: pd.DataFrame, capacties: pd.DataFrame, item: Tuple) -> pd.DataFrame:
             column = match_transm_column(balance, item)
             observed_max = balance[column].max() / 1000.  # MW -> GW
             theoretic_max = capacities.loc["Total Capacity", item]
-            df = append_check(df, item, "Max Transm", is_within(observed_max, theoretic_max))
+            df = append_check(df, item, "Max Transm", is_within_max(observed_max, theoretic_max))
             observed_min = balance[column].min() / 1000.  # MW -> GW
-            df = append_check(df, item, "Min Transm", is_within(observed_min, theoretic_max))
+            df = append_check(df, item, "Min Transm", is_within_min(observed_min, theoretic_max))
             return df
 
         df = pd.DataFrame(columns=["Asset Name", "Asset Type", "Asset ID", "Column Name", "Check", "Pass"])
@@ -349,6 +354,6 @@ class Validation:
         # TODO: inflows
         # TODO: charge/discharge -> storage level
 
-        result_file = ResultFile("operational_capacities.csv", self.validation_directory, df)
+        result_file = ResultFile("operational_capacities", self.validation_directory, df)
 
         return result_file
