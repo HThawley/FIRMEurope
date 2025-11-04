@@ -219,7 +219,7 @@ class Statistics:
         df = append_asset(df, "major_lines", "power", False)
         df = append_asset(df, "minor_lines", "power", False)
 
-        result_file = ResultFile("capacities", self.results_directory, df)
+        result_file = ResultFile("capacities", self.results_directory, df, decimals=3)
         return result_file
 
     def generate_component_costs_file(self) -> ResultFile:
@@ -258,7 +258,7 @@ class Statistics:
         df = append_asset(df, "major_lines")
         df = append_asset(df, "minor_lines")
 
-        result_file = ResultFile("component_costs", self.results_directory, df)
+        result_file = ResultFile("component_costs", self.results_directory, df, decimals=2)
         return result_file
 
     def generate_energy_balance_file(self, aggregation_type: str) -> List[ResultFile]:
@@ -417,7 +417,7 @@ class Statistics:
                 df = append_network(df, "nodes", "Spillage", "[MW]", get_spillage_power)
                 df = append_network(df, "nodes", "Deficit", "[MW]", get_deficit_power)
 
-        result_file = ResultFile(f"energy_balance_{aggregation_type.upper()}", self.results_directory, df)
+        result_file = ResultFile(f"energy_balance_{aggregation_type.upper()}", self.results_directory, df, decimals=3)
 
         return result_file
 
@@ -652,7 +652,7 @@ class Statistics:
                                              - df.loc["LCOB storage", 0]
                                              - df.loc["LCOB transmission", 0])
 
-        result_file = ResultFile("levelised_costs", self.results_directory, df)
+        result_file = ResultFile("levelised_costs", self.results_directory, df, decimals=2)
         return result_file
 
     def calculate_annual_energies(self, arr: NDArray[np.float64], decimals: int = 3) -> float:
@@ -750,12 +750,12 @@ class Statistics:
         df = append_asset(df, "nodes", "Node", "Deficit", get_deficit_power)
         df = append_asset(df, "major_lines", "Major Line", "Flow", get_flow_power)
 
-        result_file = ResultFile("summary", self.results_directory, df)
+        result_file = ResultFile("summary", self.results_directory, df, decimals=3)
         return result_file
 
     def generate_x_file(self) -> ResultFile:
         result_file = ResultFile(
-            "x", self.results_directory, pd.DataFrame(self.solution.x).T, write_kwargs={"index": False}
+            "x", self.results_directory, pd.DataFrame(self.solution.x).T, write_kwargs={"index": False}, decimals=3
         )
         return result_file
 

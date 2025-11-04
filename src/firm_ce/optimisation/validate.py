@@ -222,12 +222,12 @@ class Validation:
         def is_within_max(observed, theoretic):
             # theoretic >= observed
             # theoretic + TOLERANCE >= observed
-            return abs(theoretic) - abs(observed) >= -TOLERANCE
+            return theoretic - observed >= -TOLERANCE
 
         def is_within_min(observed, theoretic):
             # observed >= theoretic
             # observed >= theoretic - TOLERANCE
-            return abs(observed) - abs(theoretic) >= -TOLERANCE
+            return observed - theoretic >= -TOLERANCE
 
         def append_check(df: pd.DataFrame, item: Tuple, name: str, check: bool) -> pd.DataFrame:
             # TODO: add magnitude
