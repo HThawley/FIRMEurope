@@ -1,7 +1,7 @@
 id,name,value
 0,mutation,0.5
-1,iterations,10
-2,population,10
+1,iterations,1000
+2,population,50
 3,recombination,0.3
 4,type,single_time
 5,model_name,FIRMeur
