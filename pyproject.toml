@@ -11,7 +11,8 @@ dependencies = [
     "pathlib==1.0.1",
     "numba==0.60.0",
     "scipy==1.14.1",
-    "icc-rt"#==2020.0.133",
+    "icc-rt",#==2020.0.133",
+    "mga @ git+https://github.com/HThawley/MH-MGA.git",
 ]
 authors = [
     {name = "Timothy Webster", email = "Timothy.Weber@anu.edu.au"},
