@@ -2,7 +2,7 @@
 import numpy as np
 
 from firm_ce.common.typing import float64, unicode_type
-from firm_ce.single_time import evaluate_vectorised_xs
+from firm_ce.optimisation.single_time import evaluate_vectorised_xs
 from firm_ce.system.components import Fleet_InstanceType
 from firm_ce.system.parameters import ScenarioParameters_InstanceType
 from firm_ce.system.topology import Network_InstanceType

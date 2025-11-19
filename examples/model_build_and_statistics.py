@@ -1,9 +1,10 @@
 """
-An example is given for building a FIRM Model instance, generating the Statistics associated with the initial guess for each scenario, and
-saving those results. All of the result files are saved to the `results` folder.
+An example is given for building a FIRM Model instance, generating the Statistics associated with the
+initial guess for each scenario, and saving those results. All of the result files are saved to the
+`results` folder.
 
-The Model object is built using the default `inputs/config` and `inputs/data` files. Statistics are only generated for scenarios with an
-initial guess provided in `initial_guess.csv`.
+The Model object is built using the default `inputs/config` and `inputs/data` files. Statistics are
+only generated for scenarios with an initial guess provided in `initial_guess.csv`.
 
 Alternative filepaths for the config and data folders can be provided as arguments to the Model instantiation.
 """
