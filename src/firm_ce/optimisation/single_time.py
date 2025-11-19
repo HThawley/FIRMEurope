@@ -49,8 +49,8 @@ class Solution:
     an instance of this class. Most attributes of dynamic jitclass instances are safe to modify within an
     optimisation. Refer to the class definitions for specific jitclasses for information on which attributes
     remain unsafe to modify.
-    - Reliability and fixed-cost constraints may terminate evaluation early, accumulating penalties scaled by
-    PENALTY_MULTIPLIER. If the fixed cost threshold is set too low, it is very likely that the optimisation will
+    - Reliability and fixed-cost constraints may terminate evaluation early, accumulating penalties. If the fixed cost
+    threshold is set too low, it is very likely that the optimisation will
     get stuck in a local minimum (fixed costs just below threshold, reliability constraint still breached). This
     issue can be mitigated by increasing the mutation factor, raising the fixed cost threshold, or increasing the build
     limit of flexible Generator capacity.
@@ -172,7 +172,7 @@ class Solution:
 
             # End early if reliability constraint breached for any year
             if not static_m.check_reliability_constraint(self.static, year, annual_unserved_energy):
-                self.penalties += (self.static.year_count - year) * annual_unserved_energy * PENALTY_MULTIPLIER
+                self.penalties += (self.static.year_count - year) * annual_unserved_energy
                 return False
         return True
 
@@ -325,7 +325,7 @@ class Solution:
 
         total_costs = self.calculate_fixed_costs()
         if not self.check_fixed_costs(total_costs):
-            return self.lcoe, total_costs * PENALTY_MULTIPLIER  # End early if fixed cost constraint breached
+            return self.lcoe, total_costs  # End early if fixed cost constraint breached
         reliability_check = self.balance_residual_load()
         if not reliability_check:
             return self.lcoe, self.penalties  # End early if reliability constraint breached
@@ -399,7 +399,7 @@ def parallel_wrapper(
         xj = xs[:, j]
         sol = Solution(xj, static, fleet, network, balancing_type, fixed_costs_threshold)
         sol.evaluate()
-        result[0, j] = sol.lcoe + sol.penalties
+        result[0, j] = sol.lcoe + sol.penalties * PENALTY_MULTIPLIER
         result[1, j] = sol.lcoe
         result[2, j] = sol.penalties
     return result
@@ -442,4 +442,4 @@ def evaluate_vectorised_xs(
     end_time = time.time()
     print(f"Average objective time: {NUM_THREADS*(end_time-start_time)/xs.shape[1]:.4f} seconds.")
     print(f"Iteration time: {(end_time-start_time):.4f} seconds for {NUM_THREADS} workers.")
-    return result[0, :]
+    return result

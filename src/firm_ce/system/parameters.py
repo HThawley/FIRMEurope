@@ -80,3 +80,15 @@ class ModelConfig:
         self.midpoint_count = int(config_dict.get("midpoint_count", 0))
         self.balancing_type = str(config_dict["balancing_type"])
         self.fixed_costs_threshold = float(config_dict.get("fixed_costs_threshold", 500.0))
+
+        # TODO: should accept Tuple[float] with len 2
+        self.mutation_prob = float(config_dict["mutation_prob"])
+        self.mutation_sigma = float(config_dict["mutation_sigma"])
+        self.crossover_prob = float(config_dict["crossover_prob"])
+
+        self.tourn_size = int(config_dict["tourn_size"])
+        self.tourn_count = int(config_dict["tourn_count"])
+        self.elite_count = int(config_dict["elite_count"])
+        self.niche_elitism = str(config_dict["niche_elitism"])
+        self.mga_log_freq = int(config_dict["mga_log_freq"])
+        self.mga_niches = int(config_dict["mga_niches"])

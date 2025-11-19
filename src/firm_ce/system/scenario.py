@@ -107,11 +107,7 @@ class Scenario:
         """Get the initial guess corresponding to this scenario."""
         for entry in all_x0s.values():
             if entry["scenario"] == self.name:
-                if np.isnan(entry["x_0"]):
-                    x0_list = []
-                else:
-                    x0_str = entry["x_0"].strip()
-                    x0_list = [float(x) for x in x0_str.split(",") if x.strip()]
+                x0_list = [float(x) for x in entry["x_0"].strip().split(",") if x.strip()]
                 return np.array(x0_list, dtype=np.float64)
         return None
 

@@ -9,6 +9,9 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult, differential_evolution
 
+from mga.problem_definition import OptimizationProblem
+from mga.mhmga import MGAProblem
+
 from firm_ce.common.constants import SAVE_POPULATION
 from firm_ce.optimisation.broad_optimum import (
     append_to_midpoint_csv,
@@ -24,6 +27,7 @@ from firm_ce.optimisation.single_time import Solution, evaluate_vectorised_xs
 from firm_ce.system.components import Fleet_InstanceType, Generator_InstanceType, Reservoir_InstanceType, Storage_InstanceType
 from firm_ce.system.parameters import ModelConfig, ScenarioParameters_InstanceType
 from firm_ce.system.topology import Line_InstanceType, Network_InstanceType
+from firm_ce.optimisation.generate_alternatives import MGAObjective
 
 
 class Solver:
@@ -59,12 +63,16 @@ class Solver:
 
     def get_bounds(self) -> NDArray[np.float64]:
         def power_capacity_bounds(
-            asset_list: Union[List[Generator_InstanceType], List[Reservoir_InstanceType], List[Storage_InstanceType], List[Line_InstanceType]],
+            asset_list: Union[List[Generator_InstanceType], List[Reservoir_InstanceType],
+                              List[Storage_InstanceType], List[Line_InstanceType]],
             build_cap_constraint: str,
         ) -> List[float]:
             return [getattr(asset, build_cap_constraint) for asset in asset_list]
 
-        def energy_capacity_bounds(asset_list: Union[List[Storage_InstanceType], List[Reservoir_InstanceType]], build_cap_constraint: str) -> List[float]:
+        def energy_capacity_bounds(
+                asset_list: Union[List[Storage_InstanceType], List[Reservoir_InstanceType]],
+                build_cap_constraint: str
+        ) -> List[float]:
             return [getattr(asset, build_cap_constraint) if asset.duration == 0 else 0.0 for asset in asset_list]
 
         generators = list(self.fleet_static.generators.values())
@@ -146,7 +154,86 @@ class Solver:
 
     def single_time(self) -> None:
         self.initialise_callback()
-        self.result = self.run_differential_evolution(evaluate_vectorised_xs, self.get_differential_evolution_args())
+        self.result = self.run_differential_evolution(
+            evaluate_vectorised_xs, self.get_differential_evolution_args()
+        )[0, :]  # just cost + penalties * penalty_multiplier
+
+    def generate_alternatives(self) -> None:
+        self.logger.info("[generate_alternatives] Initializing MGA algorithm...")
+
+        args = self.get_differential_evolution_args()
+        objective_wrapper = MGAObjective(*args)
+
+        # 2. Define the optimization problem
+        # maximize=False because we are minimizing LCOE/Costs
+        problem = OptimizationProblem(
+            objective=objective_wrapper,
+            bounds=(self.lower_bounds, self.upper_bounds),
+            maximize=False,
+            vectorized=True,
+            constraints=True,
+        )
+
+        # 3. Configure the MGA algorithm
+        log_dir = os.path.join("results", self.scenario_name, "mga_logs")
+
+        # Note: We pass None for x0 to let MGA initialize, or we could pass self.decision_x0
+        # if we want to seed it with a known solution. Given MGA explores niches, random init
+        # or population based init is standard.
+        algorithm = MGAProblem(
+            problem=problem,
+            x0=self.decision_x0,
+            log_dir=log_dir,
+            log_freq=self.config.mga_log_freq,
+            random_seed=None,
+        )
+
+        self.logger.info(f"[generate_alternatives] Adding {self.config.mga_niches} niches.")
+        algorithm.add_niches(num_niches=self.config.mga_niches)
+
+        algorithm.update_hyperparameters(
+            max_iter=self.config.iterations,
+            pop_size=self.config.population,
+            elite_count=self.config.elite_count,
+            tourn_count=self.config.tourn_count,
+            tourn_size=self.config.tourn_size,
+            mutation_prob=self.config.mutation_prob,
+            mutation_sigma=self.config.mutation_sigma,
+            crossover_prob=self.config.crossover_prob,
+            niche_elitism=self.config.niche_elitism,
+            noptimal_slack=self.config.near_optimal_tol,
+        )
+
+        self.logger.info("[generate_alternatives] Starting evolution step...")
+        algorithm.step(disp_rate=1)
+
+        # 4. Terminate and get results
+        results = algorithm.get_results()
+        self.save_mga_results(results)
+
+        self.logger.info("[generate_alternatives] MGA complete. Results saved.")
+
+    def save_mga_results(self, results: Dict) -> None:
+        results_dir = os.path.join("results", self.scenario_name)
+        os.makedirs(results_dir, exist_ok=True)
+
+        filepath = os.path.join(results_dir, "mga_alternatives.csv")
+
+        optima = results['optima']
+        fitness = results['fitness']
+        objective = results['objective']
+        noptimality = results['noptimality']
+
+        # Create header: meta-data columns first, then decision variables
+        header = ["fitness", "objective", "is_noptimal"] + [f"x{i}" for i in range(optima.shape[1])]
+
+        with open(filepath, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
+            for i in range(optima.shape[0]):
+                # Row structure: fitness, objective, is_noptimal, x0, x1...
+                row = [fitness[i], objective[i], noptimality[i]] + list(optima[i])
+                writer.writerow(row)
 
     def get_band_lcoe_max(self) -> float:
         solution = Solution(self.decision_x0, *self.get_differential_evolution_args())
