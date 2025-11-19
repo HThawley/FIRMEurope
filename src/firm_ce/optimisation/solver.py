@@ -348,6 +348,8 @@ class Solver:
             self.explore_midpoints()
         elif self.config.type == "capacity_expansion":
             self.capacity_expansion()
+        elif self.config.type == "mhmga":
+            self.generate_alternatives()
         else:
             raise Exception(
                 "Model type in config must be 'single_time' or 'capacity_expansion' or 'near_optimum' or"

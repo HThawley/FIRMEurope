@@ -74,21 +74,26 @@ class ModelConfig:
         self.model_name = config_dict["model_name"]
         self.iterations = int(config_dict["iterations"])
         self.population = int(config_dict["population"])
-        self.mutation = float(config_dict["mutation"])
-        self.recombination = float(config_dict["recombination"])
+        # self.mutation = float(config_dict.get("mutation", 0.5))
+        # self.recombination = float(config_dict["recombination"])
         self.near_optimal_tol = float(config_dict.get("near_optimal_tol", 0.0))
         self.midpoint_count = int(config_dict.get("midpoint_count", 0))
         self.balancing_type = str(config_dict["balancing_type"])
         self.fixed_costs_threshold = float(config_dict.get("fixed_costs_threshold", 500.0))
 
         # TODO: should accept Tuple[float] with len 2
-        self.mutation_prob = float(config_dict["mutation_prob"])
-        self.mutation_sigma = float(config_dict["mutation_sigma"])
-        self.crossover_prob = float(config_dict["crossover_prob"])
+        self.mutation_prob = float(config_dict.get("mutation_prob"))
+        self.mutation_sigma = float(config_dict.get("mutation_sigma"))
+        self.crossover_prob = float(config_dict.get("crossover_prob"))
 
-        self.tourn_size = int(config_dict["tourn_size"])
-        self.tourn_count = int(config_dict["tourn_count"])
-        self.elite_count = int(config_dict["elite_count"])
-        self.niche_elitism = str(config_dict["niche_elitism"])
-        self.mga_log_freq = int(config_dict["mga_log_freq"])
-        self.mga_niches = int(config_dict["mga_niches"])
+        self.tourn_size = int(config_dict.get("tourn_size"))
+        self.tourn_count = float(config_dict.get("tourn_count"))
+        if self.tourn_count % 1 == 0:
+            self.tourn_count = int(self.tourn_count)
+        self.elite_count = float(config_dict.get("elite_count"))
+        if self.elite_count % 1 == 0:
+            self.elite_count = int(self.elite_count)
+
+        self.niche_elitism = str(config_dict.get("niche_elitism"))
+        self.mga_log_freq = int(config_dict.get("mga_log_freq"))
+        self.mga_niches = int(config_dict.get("mga_niches"))

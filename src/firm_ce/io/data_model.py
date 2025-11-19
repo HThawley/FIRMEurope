@@ -89,7 +89,7 @@ def validate_model_config(config_dict, model_logger):
         "recombination": lambda v: validate_range(v, 0, 1),
         "type": lambda v: validate_enum(
             v,
-            ["single_time", "capacity_expansion", "near_optimum", "midpoint_explore"],
+            ["single_time", "capacity_expansion", "near_optimum", "midpoint_explore", "mhmga"],
         ),
         "model_name": None,
         "near_optimal_tol": lambda v: validate_range(v, 0, 1),
@@ -552,6 +552,7 @@ def validate_initial_guess(
         ) - len(scenario_minor_lines[scenario])
         print(scenario, bound_length)
         if x0 and not (len(x0) == bound_length):
+            print(x0)
             model_logger.error(
                 "Initial guess 'x_0' for scenario %s contains %d elements, expected %d", scenario, len(x0), bound_length
             )
