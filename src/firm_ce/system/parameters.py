@@ -162,7 +162,7 @@ expected_mga_hyperparameters = {
         "broadcastable": True,
         "types": ((int, 1, np.inf),),
     },
-        "mga_pop_size": {
+    "mga_pop_size": {
         "default": 100,
         "ditherable": False,
         "broadcastable": True,
