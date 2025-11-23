@@ -119,7 +119,7 @@ class ModelConfig:
                     setattr(self, param_name, value)
 
                 else:
-                    assert param_name == "mga_log_freq"
+                    assert param_name in ("mga_log_freq", "mga_disp_rate")
                     string = config_dict.get(param_name, param_dict["default"])
                     valid_type = check_type(param_name, param_dict, string)
                     value = valid_type(string)
@@ -143,8 +143,9 @@ def check_type(param_name, param_dict, item):
             if item > typer[2]:
                 continue
         typepass = typer[0]
+        break
     if not typepass:
-        raise TypeError(f"dtype of {param_name} was not of acceptable type or out of bounds ")
+        raise TypeError(f"dtype of {param_name} was not of acceptable type or out of bounds (got: {type(item)})")
     return typepass
 
 
@@ -152,7 +153,7 @@ def coercive_type_cast(item, target):
     try:
         return target(item)
     except ValueError:
-        return np.nan
+        return None
 
 
 expected_mga_hyperparameters = {
@@ -167,6 +168,12 @@ expected_mga_hyperparameters = {
         "ditherable": False,
         "broadcastable": True,
         "types": ((int, 2, np.inf),),
+    },
+    "mga_noptimal_slack": {
+        "default": 0.3,
+        "ditherable": False,
+        "broadcastable": True,
+        "types": ((float, 0, np.inf),),
     },
     "mga_mutation_prob": {
         "default": 0.2,
@@ -223,6 +230,12 @@ expected_mga_hyperparameters = {
         "types": ((str, ("none", "selfish", "unselfish")),),
     },
     "mga_log_freq": {
+        "default": 1,
+        "ditherable": False,
+        "broadcastable": False,
+        "types": ((int, -1, np.inf),),
+    },
+    "mga_disp_rate": {
         "default": 1,
         "ditherable": False,
         "broadcastable": False,

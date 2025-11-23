@@ -55,10 +55,11 @@ class Solver:
         self.optimal_lcoe = None
         self.initial_population = initial_population
 
-        if polish_flag:
-            self.iterations = int(config.iterations // 2)
-        else:
-            self.iterations = config.iterations
+        if config.type != "mhmga":
+            if polish_flag:
+                self.iterations = int(config.iterations // 2)
+            else:
+                self.iterations = config.iterations
 
     def get_bounds(self) -> NDArray[np.float64]:
         def power_capacity_bounds(
@@ -158,63 +159,61 @@ class Solver:
         )[0, :]  # just cost + penalties * penalty_multiplier
 
     def generate_alternatives(self) -> None:
-        self.logger.info("[generate_alternatives] Initializing MGA algorithm...")
+        self.logger.info("[MHMGA] Initialising MGA algorithm...")
 
         args = self.get_differential_evolution_args()
-        objective_wrapper = MGAObjective(*args)
+        objective_wrapper = MGAObjective(*args, x0=self.decision_x0)
 
-        # 2. Define the optimization problem
-        # maximize=False because we are minimizing LCOE/Costs
         problem = OptimizationProblem(
             objective=objective_wrapper,
             bounds=(self.lower_bounds, self.upper_bounds),
             maximize=False,
             vectorized=True,
             constraints=True,
+            known_optimum=self.decision_x0,
         )
 
-        # 3. Configure the MGA algorithm
         log_dir = os.path.join(self.log_dir, "mga_logs")
         os.makedirs(log_dir, exist_ok=True)
 
-        # Note: We pass None for x0 to let MGA initialize, or we could pass self.decision_x0
-        # if we want to seed it with a known solution. Given MGA explores niches, random init
-        # or population based init is standard.
         algorithm = MGAProblem(
             problem=problem,
-            x0=self.decision_x0,
             log_dir=log_dir,
             log_freq=self.config.mga_log_freq,
             random_seed=None,
         )
+        self.logger.info("[MHMGA] MGA algorithm initialised.")
 
-        for step in enumerate(range(self.config.mga_steps)):
-            self.logger.info(f"[generate_alternatives] Starting step {step+1}/{self.config.mga_steps}")
+        for step in range(self.config.mga_steps):
+            self.logger.info(f"[MHMGA] Starting step {step+1}/{self.config.mga_steps}")
             if self.config.mga_niches[step] > 0:
-                self.logger.info(f"[generate_alternatives] Adding {self.config.mga_niches} niches.")
+                self.logger.info(f"[MHMGA] Adding {self.config.mga_niches[step]} niches.")
                 algorithm.add_niches(num_niches=self.config.mga_niches[step])
 
             algorithm.update_hyperparameters(
                 max_iter=self.config.mga_iter[step],
-                pop_size=self.config.mga_pop[step],
-                elite_count=self.config.elite_count[step],
-                tourn_count=self.config.tourn_count[step],
-                tourn_size=self.config.tourn_size[step],
-                mutation_prob=self.config.mutation_prob[step],
-                mutation_sigma=self.config.mutation_sigma[step],
-                crossover_prob=self.config.crossover_prob[step],
-                niche_elitism=self.config.niche_elitism[step],
-                noptimal_slack=self.config.near_optimal_tol[step],
+                pop_size=self.config.mga_pop_size[step],
+                elite_count=self.config.mga_elite_count[step],
+                tourn_count=self.config.mga_tourn_count[step],
+                tourn_size=self.config.mga_tourn_size[step],
+                mutation_prob=self.config.mga_mutation_prob[step],
+                mutation_sigma=self.config.mga_mutation_sigma[step],
+                crossover_prob=self.config.mga_crossover_prob[step],
+                niche_elitism=self.config.mga_niche_elitism[step],
+                noptimal_slack=self.config.mga_noptimal_slack[step],
             )
 
-            self.logger.info("[generate_alternatives] Starting evolution step...")
-            algorithm.step(disp_rate=1)
+            self.logger.info("[MHMGA] Starting evolution step...")
+            print(f"mhmga {self.config.disp_rate=}")
+            algorithm.step(disp_rate=self.config.mga_disp_rate)
 
             # 4. Terminate and get results
             results = algorithm.get_results()
             self.save_mga_results(results)
 
-            self.logger.info("[generate_alternatives] MGA complete. Results saved.")
+            self.logger.info("[MHMGA] MGA complete. Results saved.")
+
+        self.result = algorithm.population.current_optima[0]
 
     def save_mga_results(self, results: Dict) -> None:
         log_dir = os.path.join(self.log_dir, "mga_logs")

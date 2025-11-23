@@ -66,11 +66,121 @@ class Model:
             )
 
         self.config = ModelConfig(model_data.config)
+        if self.config.type == "mhmga" and not logging_flag:
+            print(f"WARNING: [MHMGA] Most results will be lost if logging is disabled ({logging_flag=})")
         self.datafile_filenames_dict = model_data.datafiles
         self.scenarios = {
             model_data.scenarios[scenario_id]["scenario_name"]: Scenario(model_data, scenario_id)
             for scenario_id in model_data.scenarios
         }
+
+    def single_time(self, scenario):
+        start_time = time.time()
+        start_time_str = datetime.fromtimestamp(start_time).strftime("%d/%m/%Y %H:%M:%S")
+        scenario.logger.info(f"[Single Time] Started scenario {scenario.name} at {start_time_str}.")
+
+        scenario.load_datafiles(self.datafile_filenames_dict, self.data_directory)
+        datafile_loadtime = time.time()
+        datafile_loadtime_str = datetime.fromtimestamp(datafile_loadtime).strftime("%d/%m/%Y %H:%M:%S")
+        scenario.logger.info(
+            f"[Single Time] Datafiles loaded at {datafile_loadtime_str} ({datafile_loadtime - start_time:.4f} seconds)."
+        )
+
+        de_result = scenario.solve(self.config)
+
+        solve_time = time.time()
+        solve_time_str = datetime.fromtimestamp(solve_time).strftime("%d/%m/%Y %H:%M:%S")
+        scenario.logger.info(
+            f"[Single Time] Optimisation completed at {solve_time_str} ({(solve_time - datafile_loadtime)/(60*60):.4f} hours)."
+        )
+
+        scenario.statistics = Statistics(
+            de_result.x,
+            scenario.static,
+            scenario.fleet,
+            scenario.network,
+            scenario.results_dir,
+            scenario.name,
+            self.config.balancing_type,
+            self.config.fixed_costs_threshold,
+            True,
+        )
+        scenario.statistics.generate_result_files()
+        scenario.statistics.write_results()
+
+        scenario.validation = Validation(scenario)
+        scenario.validation.validate()
+        scenario.validation.write_results()
+
+        if DEBUG:
+            scenario.statistics.dump()
+        results_time = time.time()
+        results_time_str = datetime.fromtimestamp(results_time).strftime("%d/%m/%Y %H:%M:%S")
+        scenario.logger.info(f"[Single Time] Results saved at {results_time_str} ({results_time - solve_time:.4f} seconds).")
+
+        scenario.unload_datafiles()
+
+        end_time = time.time()
+        end_time_str = datetime.fromtimestamp(end_time).strftime("%d/%m/%Y %H:%M:%S")
+        scenario.logger.info(
+            f"[Single Time] Scenario completed at {end_time_str} (Total time taken: {(end_time - start_time)/(60*60):.4f} hours)."
+        )
+
+        return None
+
+    def mhmga(self, scenario):
+        start_time = time.time()
+        start_time_str = datetime.fromtimestamp(start_time).strftime("%d/%m/%Y %H:%M:%S")
+        scenario.logger.info(f"[MHMGA] Started scenario {scenario.name} at {start_time_str}.")
+
+        scenario.load_datafiles(self.datafile_filenames_dict, self.data_directory)
+        datafile_loadtime = time.time()
+        datafile_loadtime_str = datetime.fromtimestamp(datafile_loadtime).strftime("%d/%m/%Y %H:%M:%S")
+        scenario.logger.info(
+            f"[MHMGA] Datafiles loaded at {datafile_loadtime_str} ({datafile_loadtime - start_time:.4f} seconds)."
+        )
+
+        result = scenario.solve(self.config)
+
+        solve_time = time.time()
+        solve_time_str = datetime.fromtimestamp(solve_time).strftime("%d/%m/%Y %H:%M:%S")
+        scenario.logger.info(
+            f"[MHMGA] Optimisation completed at {solve_time_str} ({(solve_time - datafile_loadtime)/(60*60):.4f} hours)."
+        )
+
+        scenario.statistics = Statistics(
+            result,
+            scenario.static,
+            scenario.fleet,
+            scenario.network,
+            scenario.results_dir,
+            scenario.name,
+            self.config.balancing_type,
+            self.config.fixed_costs_threshold,
+            True,
+        )
+        scenario.statistics.generate_result_files()
+        scenario.statistics.write_results()
+
+        scenario.validation = Validation(scenario)
+        scenario.validation.validate()
+        scenario.validation.write_results()
+
+        if DEBUG:
+            scenario.statistics.dump()
+        results_time = time.time()
+        results_time_str = datetime.fromtimestamp(results_time).strftime("%d/%m/%Y %H:%M:%S")
+        scenario.logger.info(f"[MHMGA] Results saved at {results_time_str} ({results_time - solve_time:.4f} seconds).")
+
+        scenario.unload_datafiles()
+
+        end_time = time.time()
+        end_time_str = datetime.fromtimestamp(end_time).strftime("%d/%m/%Y %H:%M:%S")
+        scenario.logger.info(
+            f"[MHMGA] Scenario completed at {end_time_str} (Total time taken: {(end_time - start_time)/(60*60):.4f} hours)."
+        )
+
+        return None
 
     def solve(self, *, scenarios: str | List[str] = "all") -> None:
         """
@@ -107,56 +217,10 @@ class Model:
                 if scenario_name not in scenarios:
                     continue
 
-            start_time = time.time()
-            start_time_str = datetime.fromtimestamp(start_time).strftime("%d/%m/%Y %H:%M:%S")
-            scenario.logger.info(f"Started scenario {scenario.name} at {start_time_str}.")
-
-            scenario.load_datafiles(self.datafile_filenames_dict, self.data_directory)
-            datafile_loadtime = time.time()
-            datafile_loadtime_str = datetime.fromtimestamp(datafile_loadtime).strftime("%d/%m/%Y %H:%M:%S")
-            scenario.logger.info(
-                f"Datafiles loaded at {datafile_loadtime_str} ({datafile_loadtime - start_time:.4f} seconds)."
-            )
-
-            de_result = scenario.solve(self.config)
-
-            solve_time = time.time()
-            solve_time_str = datetime.fromtimestamp(solve_time).strftime("%d/%m/%Y %H:%M:%S")
-            scenario.logger.info(
-                f"Optimisation completed at {solve_time_str} ({(solve_time - datafile_loadtime)/(60*60):.4f} hours)."
-            )
-
             if self.config.type == "single_time":
-                scenario.statistics = Statistics(
-                    de_result.x,
-                    scenario.static,
-                    scenario.fleet,
-                    scenario.network,
-                    scenario.results_dir,
-                    scenario.name,
-                    self.config.balancing_type,
-                    self.config.fixed_costs_threshold,
-                    True,
-                )
-                scenario.statistics.generate_result_files()
-                scenario.statistics.write_results()
+                self.single_time(scenario)
 
-                scenario.validation = Validation(scenario)
-                scenario.validation.validate()
-                scenario.validation.write_results()
-
-                if DEBUG:
-                    scenario.statistics.dump()
-                results_time = time.time()
-                results_time_str = datetime.fromtimestamp(results_time).strftime("%d/%m/%Y %H:%M:%S")
-                scenario.logger.info(f"Results saved at {results_time_str} ({results_time - solve_time:.4f} seconds).")
-
-            scenario.unload_datafiles()
-
-            end_time = time.time()
-            end_time_str = datetime.fromtimestamp(end_time).strftime("%d/%m/%Y %H:%M:%S")
-            scenario.logger.info(
-                f"Scenario completed at {end_time_str} (Total time taken: {(end_time - start_time)/(60*60):.4f} hours)."
-            )
+            elif self.config.type == "mhmga":
+                self.mhmga(scenario)
 
         return None

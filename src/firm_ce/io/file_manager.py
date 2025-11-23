@@ -148,7 +148,7 @@ class ResultFile:
         data: pd.DataFrame,
         decimals: Union[int, None] = None,
         file_ext: str = "csv",
-        write_kwargs: dict = {},
+        write_kwargs: dict = None,
     ):
         """
         Initialise a result file object.
@@ -180,7 +180,7 @@ class ResultFile:
         else:
             self.float_format_string = None
         self.data = data
-        self.write_kwargs = write_kwargs
+        self.write_kwargs = write_kwargs if self.write_kwargs is not None else {}
 
     def __repr__(self) -> str:
         return f"ResultFile ({self.report!r})"

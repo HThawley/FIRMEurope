@@ -5,7 +5,7 @@ id,name,value
 3,fixed_costs_threshold,400
 4,mga_mutation_prob,0.1
 5,mga_mutation_sigma,"0.1,0.01"
-6,mga_niches,50
+6,mga_niches,10
 7,mga_crossover_prob,0.1
 8,mga_tourn_size,3
 9,mga_tourn_count,0.8
@@ -14,5 +14,5 @@ id,name,value
 12,mga_noptimal_slack,0.2
 13,mga_log_freq,25
 14,mga_niche_elitism,selfish
-15,mga_iter,"100,100"
-16,mga_pop_size,50
+15,mga_iter,"2,2"
+16,mga_pop_size,10
