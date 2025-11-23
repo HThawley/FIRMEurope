@@ -2,8 +2,11 @@
 import csv
 import os
 from itertools import chain
-from logging import Logger
-from typing import Dict, List, Tuple, Union, Callable
+from typing import Dict, List, Tuple, Union, Callable, TYPE_CHECKING
+
+# Avoid circular import issues
+if TYPE_CHECKING:
+    from firm_ce.system import Scenario
 
 import numpy as np
 from numpy.typing import NDArray
@@ -33,25 +36,21 @@ from firm_ce.optimisation.generate_alternatives import MGAObjective
 class Solver:
     def __init__(
         self,
+        scenario: "Scenario",
         config: ModelConfig,
-        initial_x_candidate: NDArray[np.float64],
-        parameters_static: ScenarioParameters_InstanceType,
-        fleet_static: Fleet_InstanceType,
-        network_static: Network_InstanceType,
-        scenario_logger: Logger,
-        scenario_name: str,
         polish_flag: bool = False,
         initial_population: Union[NDArray[np.float64], None] = None,
     ) -> None:
         self.config = config
-        self.decision_x0 = initial_x_candidate if len(initial_x_candidate) > 0 else None
-        self.parameters_static = parameters_static
-        self.fleet_static = fleet_static
-        self.network_static = network_static
-        self.logger = scenario_logger
+        self.decision_x0 = scenario.x0 if len(scenario.x0) > 0 else None
+        self.parameters_static = scenario.static
+        self.fleet_static = scenario.fleet
+        self.network_static = scenario.network
+        self.logger = scenario.logger
+        self.log_dir = scenario.results_dir
         self.lower_bounds, self.upper_bounds = self.get_bounds()
-        self.broad_optimum_var_info = build_broad_optimum_var_info(fleet_static, network_static)
-        self.scenario_name = scenario_name
+        self.broad_optimum_var_info = build_broad_optimum_var_info(self.fleet_static, self.network_static)
+        self.scenario_name = scenario.name
         self.result = None
         self.optimal_lcoe = None
         self.initial_population = initial_population
@@ -175,7 +174,8 @@ class Solver:
         )
 
         # 3. Configure the MGA algorithm
-        log_dir = os.path.join("results", self.scenario_name, "mga_logs")
+        log_dir = os.path.join(self.log_dir, "mga_logs")
+        os.makedirs(log_dir, exist_ok=True)
 
         # Note: We pass None for x0 to let MGA initialize, or we could pass self.decision_x0
         # if we want to seed it with a known solution. Given MGA explores niches, random init
@@ -188,36 +188,37 @@ class Solver:
             random_seed=None,
         )
 
-        self.logger.info(f"[generate_alternatives] Adding {self.config.mga_niches} niches.")
-        algorithm.add_niches(num_niches=self.config.mga_niches)
+        for step in enumerate(range(self.config.mga_steps)):
+            self.logger.info(f"[generate_alternatives] Starting step {step+1}/{self.config.mga_steps}")
+            if self.config.mga_niches[step] > 0:
+                self.logger.info(f"[generate_alternatives] Adding {self.config.mga_niches} niches.")
+                algorithm.add_niches(num_niches=self.config.mga_niches[step])
 
-        algorithm.update_hyperparameters(
-            max_iter=self.config.iterations,
-            pop_size=self.config.population,
-            elite_count=self.config.elite_count,
-            tourn_count=self.config.tourn_count,
-            tourn_size=self.config.tourn_size,
-            mutation_prob=self.config.mutation_prob,
-            mutation_sigma=self.config.mutation_sigma,
-            crossover_prob=self.config.crossover_prob,
-            niche_elitism=self.config.niche_elitism,
-            noptimal_slack=self.config.near_optimal_tol,
-        )
+            algorithm.update_hyperparameters(
+                max_iter=self.config.mga_iter[step],
+                pop_size=self.config.mga_pop[step],
+                elite_count=self.config.elite_count[step],
+                tourn_count=self.config.tourn_count[step],
+                tourn_size=self.config.tourn_size[step],
+                mutation_prob=self.config.mutation_prob[step],
+                mutation_sigma=self.config.mutation_sigma[step],
+                crossover_prob=self.config.crossover_prob[step],
+                niche_elitism=self.config.niche_elitism[step],
+                noptimal_slack=self.config.near_optimal_tol[step],
+            )
 
-        self.logger.info("[generate_alternatives] Starting evolution step...")
-        algorithm.step(disp_rate=1)
+            self.logger.info("[generate_alternatives] Starting evolution step...")
+            algorithm.step(disp_rate=1)
 
-        # 4. Terminate and get results
-        results = algorithm.get_results()
-        self.save_mga_results(results)
+            # 4. Terminate and get results
+            results = algorithm.get_results()
+            self.save_mga_results(results)
 
-        self.logger.info("[generate_alternatives] MGA complete. Results saved.")
+            self.logger.info("[generate_alternatives] MGA complete. Results saved.")
 
     def save_mga_results(self, results: Dict) -> None:
-        results_dir = os.path.join("results", self.scenario_name)
-        os.makedirs(results_dir, exist_ok=True)
-
-        filepath = os.path.join(results_dir, "mga_alternatives.csv")
+        log_dir = os.path.join(self.log_dir, "mga_logs")
+        filepath = os.path.join(log_dir, "mga_alternatives.csv")
 
         optima = results['optima']
         fitness = results['fitness']
@@ -231,7 +232,6 @@ class Solver:
             writer = csv.writer(f)
             writer.writerow(header)
             for i in range(optima.shape[0]):
-                # Row structure: fitness, objective, is_noptimal, x0, x1...
                 row = [fitness[i], objective[i], noptimality[i]] + list(optima[i])
                 writer.writerow(row)
 

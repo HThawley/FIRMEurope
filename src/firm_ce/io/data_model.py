@@ -50,6 +50,30 @@ class ModelData:
         return model_name
 
 
+def validate_ditherable(val, min_val, max_val=None, length=2, inclusive=True):
+    """ item should be scalar float or length 2 collection of floats"""
+    try:
+        val = float(val)
+        return validate_range(val, min_val, max_val, inclusive)
+
+    except TypeError:
+        # val should be a length 2 collection
+        pass
+
+    try:
+        val = tuple(val)
+        if len(val) != length:
+            return False
+        for v in val:
+            if not validate_range(v, min_val, max_val, inclusive):
+                return False
+        if not val[0] <= val[-1]:
+            return False
+    except TypeError:
+        return False
+    return True
+
+
 def validate_range(val, min_val, max_val=None, inclusive=True):
     try:
         val = float(val)
@@ -100,6 +124,13 @@ def validate_model_config(config_dict, model_logger):
         ),
         "simple_blocks_per_day": validate_positive_int,
         "fixed_costs_threshold": lambda v: validate_range(v, 0),
+
+        "mga_mutation_prob": lambda v: validate_ditherable(v, 0, 1),
+        "mga_mutation_sigma": lambda v: validate_ditherable(v, 0),
+        "mga_crossover_prob": lambda v: validate_ditherable(v, 0, 1),
+        "mga_steps": validate_positive_int,
+        "mga_niches": validate_positive_int,
+        "mga_tourn_size": validate_positive_int,
     }
 
     for item in config_dict.values():
@@ -358,7 +389,9 @@ def validate_generators(generators_dict, scenarios_list, scenario_fuels, scenari
                 if scenario in scenarios_list:
                     flag = _validate_generator(flag)
                 else:
-                    model_logger.warning("scenario '%s' for generator.id %s not defined in scenarios.csv", scenario, idx)
+                    model_logger.warning(
+                        "scenario '%s' for generator.id %s not defined in scenarios.csv", scenario, idx
+                    )
 
     return scenario_generators, scenario_baseload, flag
 
@@ -438,7 +471,9 @@ def validate_reservoirs(reservoirs_dict, scenarios_list, scenario_fuels, scenari
                 if scenario in scenarios_list:
                     flag = _validate_reservoir(flag)
                 else:
-                    model_logger.warning("scenario '%s' for reservoir.id %s not defined in scenarios.csv", scenario, idx)
+                    model_logger.warning(
+                        "scenario '%s' for reservoir.id %s not defined in scenarios.csv", scenario, idx
+                    )
 
     return scenario_reservoirs, flag
 

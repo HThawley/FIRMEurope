@@ -1,6 +1,6 @@
 from typing import List, Any
 
-
+import re
 from numba import njit
 import numpy as np
 from numpy.typing import NDArray
@@ -23,6 +23,35 @@ def parse_comma_separated(value: str, lower: bool = True) -> List[str]:
     if lower:
         return [item.strip().lower() for item in value.split(",") if item.strip()]
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def parse_ditherable_hyperparameter(value) -> List[List[float]]:
+    """
+    Parse stepped values of ditherable hyperparameters from config strings
+
+    '(0.1,1.0)' -> [[0.1, 1.0]]
+    '(0.1,1.0),(0.2,2.0)' -> [[0.1, 1.0], [0.2, 2.0]]
+    '(0.1,1.0),0.2' -> [[0.1, 1.0], [0.2, 0.2]]
+    '1.0,0.2' -> [[1.0, 1.0], [0.2, 0.2]]
+    """
+    matches = re.finditer(
+        r"(?P<dither_match>[\[\(](?P<dither_lower>\d+.?\d+),(?P<dither_upper>\d+.?\d+)[\]\)])|"
+        r"(?P<scalar_match>(?P<scalar>\d+.?\d+))",
+        value
+    )
+    ret_list = []
+    for m in matches:
+        if m["scalar_match"] is not None:
+            scalar = float(m["scalar"])
+            ret_list.append([scalar, scalar])
+        elif m["dither_match"] is not None:
+            lower, upper = float(m["dither_lower"]), float(m["dither_upper"])
+            ret_list.append([lower, upper])
+    return ret_list
+
+
+def flatten_list(values):
+    return [xss for xs in values for xss in (xs if isinstance(xs, (list, tuple)) else [xs])]
 
 
 def safe_divide(num: float, denom: float, fail: float = 0.0) -> float:

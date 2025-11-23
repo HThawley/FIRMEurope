@@ -173,8 +173,10 @@ class Validation:
 
         df = pd.DataFrame(columns=["Asset Name", "Asset Type", "Asset ID", "Column Name", "Check", "Pass"])
         for item in capacities.columns:
-            df = append_check(df, item, "Upper Build Limit", capacities.loc["New Build Capacity", item] - capacities.loc["Max Build", item] <= TOLERANCE)
-            df = append_check(df, item, "Lower Build Limit", capacities.loc["New Build Capacity", item] - capacities.loc["Min Build", item] >= -TOLERANCE)
+            df = append_check(df, item, "Upper Build Limit",
+                              capacities.loc["New Build Capacity", item] - capacities.loc["Max Build", item] <= TOLERANCE)
+            df = append_check(df, item, "Lower Build Limit",
+                              capacities.loc["New Build Capacity", item] - capacities.loc["Min Build", item] >= -TOLERANCE)
 
             if item[1] == "Minor Line":
                 expected = 0
@@ -196,7 +198,8 @@ class Validation:
                                                  & (capacities.columns.get_level_values("Asset ID") == asset.id)
                                                  & (capacities.columns.get_level_values("Column Name") == "Power Capacity")]
                         expected += capacities.loc["Total Capacity", col]
-                df = append_check(df, item, "Minor Line Capacity", abs(expected - capacities.loc["Total Capacity", item]) <= TOLERANCE)
+                df = append_check(df, item, "Minor Line Capacity",
+                                  abs(expected - capacities.loc["Total Capacity", item]) <= TOLERANCE)
 
         result_file = ResultFile("val_capacities", self.validation_directory, df)
 
@@ -209,7 +212,8 @@ class Validation:
             skiprows=[4],
             index_col=0,
         )
-        nodes = balance.columns[balance.columns.get_level_values("Asset Type") == "Node"].get_level_values("Asset Name").unique().to_list()
+        nodes = balance.columns[
+            balance.columns.get_level_values("Asset Type") == "Node"].get_level_values("Asset Name").unique().to_list()
         balance = balance[balance.columns[balance.columns.get_level_values("Asset Type") != "Node"]]
         capacities = pd.read_csv(
             fr"{self.statistics.results_directory}/capacities.csv",
@@ -263,7 +267,9 @@ class Validation:
             df = append_check(df, item, "Max Dispatch", is_within_max(observed_max, theoretic_max))
             return df
 
-        def check_min_dispatch(df: pd.DataFrame, balance: pd.DataFrame, capacities: pd.DataFrame, item: Tuple, zero: bool) -> pd.DataFrame:
+        def check_min_dispatch(
+                df: pd.DataFrame, balance: pd.DataFrame, capacities: pd.DataFrame, item: Tuple, zero: bool
+        ) -> pd.DataFrame:
             # TODO: fix
             observed_min = balance[match_dispatch_column(balance, item)].min() / 1000.  # MW to GW
             if zero:

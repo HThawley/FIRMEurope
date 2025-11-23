@@ -137,13 +137,13 @@ class Scenario:
         return None
 
     def solve(self, config: ModelConfig) -> OptimizeResult:
-        solver = Solver(config, self.x0, self.static, self.fleet, self.network, self.logger, self.name)
+        solver = Solver(self, config)
         solver.evaluate()
         return solver.result
 
     def polish(self, config: ModelConfig, initial_population: NDArray[np.float64]) -> OptimizeResult:
         solver = Solver(
-            config, self.x0, self.static, self.fleet, self.network, self.logger, self.name, True, initial_population
+            self, config, True, initial_population
         )
         solver.evaluate()
         return solver.result

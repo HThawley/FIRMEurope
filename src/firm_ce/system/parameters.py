@@ -6,6 +6,8 @@ import numpy as np
 from firm_ce.common.constants import JIT_ENABLED
 from firm_ce.common.jit_overload import jitclass
 from firm_ce.common.typing import float64, int64
+from firm_ce.common.helpers import parse_comma_separated, parse_ditherable_hyperparameter
+
 
 if JIT_ENABLED:
     scenario_parameters_spec = [
@@ -72,28 +74,158 @@ class ModelConfig:
         config_dict = {item["name"]: item["value"] for item in config_dict.values()}
         self.type = config_dict["type"]
         self.model_name = config_dict["model_name"]
-        self.iterations = int(config_dict["iterations"])
-        self.population = int(config_dict["population"])
-        # self.mutation = float(config_dict.get("mutation", 0.5))
-        # self.recombination = float(config_dict["recombination"])
-        self.near_optimal_tol = float(config_dict.get("near_optimal_tol", 0.0))
-        self.midpoint_count = int(config_dict.get("midpoint_count", 0))
         self.balancing_type = str(config_dict["balancing_type"])
         self.fixed_costs_threshold = float(config_dict.get("fixed_costs_threshold", 500.0))
 
-        # TODO: should accept Tuple[float] with len 2
-        self.mutation_prob = float(config_dict.get("mutation_prob"))
-        self.mutation_sigma = float(config_dict.get("mutation_sigma"))
-        self.crossover_prob = float(config_dict.get("crossover_prob"))
+        if self.type == "single_time":
+            self.iterations = int(config_dict["iterations"])
+            self.population = int(config_dict["population"])
+            self.mutation = float(config_dict["mutation"])
+            self.recombination = float(config_dict["recombination"])
 
-        self.tourn_size = int(config_dict.get("tourn_size"))
-        self.tourn_count = float(config_dict.get("tourn_count"))
-        if self.tourn_count % 1 == 0:
-            self.tourn_count = int(self.tourn_count)
-        self.elite_count = float(config_dict.get("elite_count"))
-        if self.elite_count % 1 == 0:
-            self.elite_count = int(self.elite_count)
+        if self.type in ("near_optimum", "midpoint_explore"):
+            self.near_optimal_tol = float(config_dict["near_optimal_tol"])
+            self.midpoint_count = int(config_dict["midpoint_count"])
 
-        self.niche_elitism = str(config_dict.get("niche_elitism"))
-        self.mga_log_freq = int(config_dict.get("mga_log_freq"))
-        self.mga_niches = int(config_dict.get("mga_niches"))
+        if self.type == "mhmga":
+            self.mga_steps = int(config_dict.get("mga_steps", 1))  # default: 1
+
+            for param_name, param_dict in expected_mga_hyperparameters.items():
+                string = config_dict.get(param_name, param_dict["default"])
+
+                if param_dict["ditherable"]:
+                    value = np.array(parse_ditherable_hyperparameter(string))
+                    if value.shape[0] == 1:
+                        value = np.stack((value[0],) * self.mga_steps)
+                    elif value.shape[0] == self.mga_steps:
+                        pass
+                    else:
+                        raise ValueError(f"{param_name} not broadcastable to mga_steps")
+                    for item in value.flatten():
+                        check_type(param_name, param_dict, item)
+                    setattr(self, param_name, value)
+
+                elif param_dict["broadcastable"]:
+                    value = parse_comma_separated(string)
+                    if len(value) == 1:
+                        value = value * self.mga_steps
+                    elif len(value) == self.mga_steps:
+                        pass
+                    else:
+                        raise ValueError(f"{param_name} not broadcastable to mga_steps")
+                    for i, item in enumerate(value):
+                        valid_type = check_type(param_name, param_dict, item)
+                        value[i] = valid_type(item)
+                    setattr(self, param_name, value)
+
+                else:
+                    assert param_name == "mga_log_freq"
+                    string = config_dict.get(param_name, param_dict["default"])
+                    valid_type = check_type(param_name, param_dict, string)
+                    value = valid_type(string)
+                    setattr(self, param_name, value)
+
+
+def check_type(param_name, param_dict, item):
+    typepass = False
+    for typer in param_dict["types"]:
+        if typer[0] == str:
+            if not isinstance(item, typer[0]):
+                continue
+            if item not in typer[1]:
+                continue
+        else:  # numeric
+            item = coercive_type_cast(item, typer[0])
+            if not isinstance(item, typer[0]):
+                continue
+            if item < typer[1]:
+                continue
+            if item > typer[2]:
+                continue
+        typepass = typer[0]
+    if not typepass:
+        raise TypeError(f"dtype of {param_name} was not of acceptable type or out of bounds ")
+    return typepass
+
+
+def coercive_type_cast(item, target):
+    try:
+        return target(item)
+    except ValueError:
+        return np.nan
+
+
+expected_mga_hyperparameters = {
+    "mga_iter": {
+        "default": 100,
+        "ditherable": False,
+        "broadcastable": True,
+        "types": ((int, 1, np.inf),),
+    },
+        "mga_pop_size": {
+        "default": 100,
+        "ditherable": False,
+        "broadcastable": True,
+        "types": ((int, 2, np.inf),),
+    },
+    "mga_mutation_prob": {
+        "default": 0.2,
+        "ditherable": True,
+        "broadcastable": True,
+        "types": ((float, 0, 1),),  # (type, lower, upper)
+    },
+    "mga_mutation_sigma": {
+        "default": 0.1,
+        "ditherable": True,
+        "broadcastable": True,
+        "types": ((float, 0, np.inf),),
+    },
+    "mga_crossover_prob": {
+        "default": 0.2,
+        "ditherable": True,
+        "broadcastable": True,
+        "types": ((float, 0, 1),),
+    },
+    "mga_tourn_size": {
+        "default": 2,
+        "ditherable": False,
+        "broadcastable": True,
+        "types": ((int, 2, np.inf),)
+    },
+    "mga_tourn_count": {
+        "default": 0.8,
+        "ditherable": False,
+        "broadcastable": True,
+        "types": (
+            (float, 0, 1),
+            (int, -1, np.inf),
+        ),
+    },
+    "mga_elite_count": {
+        "default": 0.2,
+        "ditherable": False,
+        "broadcastable": True,
+        "types": (
+            (float, 0, 1),
+            (int, -1, np.inf),
+        ),
+    },
+    "mga_niches": {
+        "default": 10,
+        "ditherable": False,
+        "broadcastable": True,
+        "types": ((int, 2, np.inf),),
+    },
+    "mga_niche_elitism": {
+        "default": "selfish",
+        "ditherable": False,
+        "broadcastable": True,
+        "types": ((str, ("none", "selfish", "unselfish")),),
+    },
+    "mga_log_freq": {
+        "default": 1,
+        "ditherable": False,
+        "broadcastable": False,
+        "types": ((int, -1, np.inf),),
+    },
+}
