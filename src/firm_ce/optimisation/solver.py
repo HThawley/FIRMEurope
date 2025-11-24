@@ -162,7 +162,7 @@ class Solver:
         self.logger.info("[MHMGA] Initialising MGA algorithm...")
 
         args = self.get_differential_evolution_args()
-        objective_wrapper = MGAObjective(*args, x0=self.decision_x0)
+        objective_wrapper = MGAObjective(*args)
 
         problem = OptimizationProblem(
             objective=objective_wrapper,
