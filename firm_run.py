@@ -1,28 +1,17 @@
-import numpy as np
-from numba import njit, prange  # type: ignore
 from psutil import cpu_count
 
 from firm.Input import (
-    Evaluate,
-    Solution,
     cost_model,
-    lb,
-    lengths,
-    network_mask,
-    scenario,
-    ub,
-    undersea_mask,
     x0,
-    zero_safe_division,
 )
 
 from firm.Benchmark import (
-    Benchmark, 
-    test, 
-    profile, 
+    Benchmark,
+    test,
+    profile,
 )
 
-if __name__ == "__main__":    
+if __name__ == "__main__":
 
     import timeit
 

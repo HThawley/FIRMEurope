@@ -1,343 +1,384 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed May  8 14:53:22 2024
-
-@author: u6942852
-"""
-
 import numpy as np
 from numba import njit  # type: ignore
 
 from firm.Interconnection import Interconnection
 from firm.Utils import (
-    cclock, 
-    array_sum_2d_axis1, 
-)  #type: ignore 
-
-
+    cclock,
+    array_sum_2d_axis1,
+)  # type: ignore
 
 
 @njit
-def Simulate(solution):
-
-    TransmissionSimulate(solution)
-
-    if solution.profiling:
-        time_adj = (solution.time_interconnection0+
-                    solution.time_interconnection1+
-                    solution.time_interconnection2+
-                    solution.time_interconnection3+
-                    solution.time_spilldeft+
-                    solution.time_unbalancedt)
-        calls_adj = (solution.calls_interconnection0+
-                     solution.calls_interconnection1+
-                     solution.calls_interconnection2+
-                     solution.calls_interconnection3+
-                     solution.calls_spilldeft+
-                     solution.calls_unbalancedt)
+def Simulate(solution):  # noqa: C901
+    if solution.static.profiling == -1:
+        solution.profile.open_adj_simulation()
         start = cclock()
-    # meet deficits in place 
-    for t in range(solution.intervals):
-        for n in range(solution.nodes):
-            solution.MFlexible[t, n] = min(solution.MDeficit[t, n], solution.CPeak[n])
-        UpdateUnbalancedt(solution, t)
-        UpdateSpillDeft(solution, t)
-
-    fill = np.zeros(solution.nodes, np.float64)
-    flex = 0.0
-    for t in range(solution.intervals - 1, -1, -1):
-        # timestep backwards
-        if solution.MDeficit[t].sum() > 1e-6:
-            # original import/export
-            _import = array_sum_2d_axis1(solution.TImport[t])
-            _export = array_sum_2d_axis1(solution.TExport[t])
-            # meet deficits just-in-time by importiing flex from neighbours
-            Interconnection(
-                solution,
-                solution.MDeficit[t],
-                solution.CPeak - solution.MFlexible[t],
-                solution.TImport[t],
-                solution.TExport[t],
-            )
-            # flexible += iexports from neighbours
-            solution.MFlexible[t] += np.maximum(
-                (_import + _export - array_sum_2d_axis1(solution.TImport[t] + solution.TExport[t])), 0
-            )
-            # accumulate remaing deficits
-            fill += solution.MDeficit[t] / solution.efficiency
-        if fill.sum() > 1e-6:
-            # clip fill by storage capacity
-            for n in range(solution.nodes):
-                fill[n] = min(fill[n], (solution.CPHS[n] - solution.MStorage[t - 1, n]) / solution.resolution / solution.efficiency)
-                flex = min(fill[n], solution.CPeak[n] - solution.MFlexible[t, n], solution.CPHP[n] - solution.MCharge[t, n] + solution.MDischarge[t, n])
-                fill[n] -= flex
-                solution.MFlexible[t, n] += flex
-
-            if fill.sum() > 1e-6:
-                _import = array_sum_2d_axis1(solution.TImport[t])
-                _export = array_sum_2d_axis1(solution.TExport[t])
-                Interconnection(
-                    solution, fill, solution.CPeak - solution.MFlexible[t], solution.TImport[t], solution.TExport[t]
-                )
-                solution.MFlexible[t] += np.maximum(
-                    (_import + _export - array_sum_2d_axis1(solution.TImport[t] + solution.TExport[t])), 0
-                )
-
-                # fill adjusted in-place
-    if solution.profiling:
-        solution.calls_backfill +=1 
-        solution.time_backfill += cclock() - start
-        time_adj -= (solution.time_interconnection0+
-                     solution.time_interconnection1+
-                     solution.time_interconnection2+
-                     solution.time_interconnection3+
-                     solution.time_spilldeft+
-                     solution.time_unbalancedt)
-        calls_adj -= (solution.calls_interconnection0+
-                      solution.calls_interconnection1+
-                      solution.calls_interconnection2+
-                      solution.calls_interconnection3+
-                      solution.calls_spilldeft+
-                      solution.calls_unbalancedt)
-        solution.time_backfill += time_adj
-        solution.time_backfill += calls_adj * solution.profile_overhead
-
-        
-
-    BasicSimulate(solution)
-
-@njit
-def TransmissionSimulate(solution):
-    if solution.profiling:
-        time_adj = (solution.time_interconnection0+
-                    solution.time_interconnection1+
-                    solution.time_interconnection2+
-                    solution.time_interconnection3+
-                    solution.time_storage_behaviort+
-                    solution.time_spilldeft+
-                    solution.time_unbalancedt+
-                    solution.time_update_soct)
-        calls_adj = (solution.calls_interconnection0+
-                     solution.calls_interconnection1+
-                     solution.calls_interconnection2+
-                     solution.calls_interconnection3+
-                     solution.calls_storage_behaviort+
-                     solution.calls_spilldeft+
-                     solution.calls_unbalancedt+
-                     solution.calls_update_soct)
+    if solution.static.profiling == 1:
         start = cclock()
-    Surplust = np.zeros(solution.nodes, np.float64)
-    for t in range(solution.intervals):
+
+    # allocate some memory
+    working_buffer = np.zeros(solution.static.nodes, np.float64)
+
+    for t in range(solution.static.intervals):
         # storage operation
-        UpdateStoraget(solution, t)
-        UpdateSpillDeft(solution, t)
+        UpdateBalancingt(solution, t)
 
         # fill deficits from spilled power
-        if (solution.MDeficit[t] > 1e-6).any():
-            if (solution.MSpillage[t] > 1e-6).any():
+        if (solution.operations.Mdeficit[t] > 1e-6).any():
+            if (solution.operations.Mspillage[t] > 1e-6).any():
                 Interconnection(
-                    solution, solution.MDeficit[t], solution.MSpillage[t], solution.TImport[t], solution.TExport[t]
+                    solution,
+                    solution.operations.Mdeficit[t],
+                    solution.operations.Mspillage[t],
+                    solution.operations.Timport[t],
+                    solution.operations.Texport[t],
                 )
                 # update storage behaviour
-                UpdateUnbalancedt(solution, t)
-                UpdateStoraget(solution, t)
-                # UpdateSpillDeft(solution, t) # updated inplace by Interconnection
- 
+                UpdateBalancingt(solution, t)
+
         # fill deficits by drawing down neighbours' storage reserves
-        if (solution.MDeficit[t] > 1e-6).any():
-            for n in range(solution.nodes):
-                Surplust[n] = max(0, 
-                    solution.MSpillage[t, n]
-                    + solution.MCharge[t, n]
-                    + min(solution.CPHP[n], solution.MStorage[t - 1, n] / solution.resolution)
-                    - solution.MDischarge[t, n])
-            if (Surplust > 1e-6).any():
-                Interconnection(solution, solution.MDeficit[t], Surplust, solution.TImport[t], solution.TExport[t])
+        if (solution.operations.Mdeficit[t] > 1e-6).any():
+            # Msurplust = working_buffer
+            GetSurplust(solution, t, working_buffer)
+
+            if (working_buffer > 1e-6).any():
+                Interconnection(
+                    solution,
+                    solution.operations.Mdeficit[t],
+                    working_buffer,
+                    solution.operations.Timport[t],
+                    solution.operations.Texport[t],
+                )
                 # update storage behaviour
-                UpdateUnbalancedt(solution, t)
-                UpdateStoraget(solution, t)
-                UpdateSpillDeft(solution, t)
+                UpdateBalancingt(solution, t)
 
         UpdateSOCt(solution, t)
 
-    # precharge batteries with spillage only 
-    fill = np.zeros(solution.nodes, dtype=np.float64)
+    # fill = working_buffer
+    working_buffer[:] = 0.0
     # timestep backwards
-    for t in range(solution.intervals - 1, -1, -1):
-        if (fill > 1e-6).any():
-            if (solution.MSpillage[t] > 1e-6).any():
+    for t in range(solution.static.intervals - 1, -1, -1):
+        if (working_buffer > 1e-6).any():
+            if (solution.operations.Mspillage[t] > 1e-6).any():
                 # cap fill by storage capacity
-                for n in range(solution.nodes):
-                    fill[n] = min(fill[n], (solution.CPHS[n] - solution.MStorage[t - 1, n]) / solution.resolution / solution.efficiency)
+                for n in range(solution.static.nodes):
+                    working_buffer[n] = min(
+                        working_buffer[n],
+                        (solution.assets.CphE[n] - solution.operations.Mphstorage[t - 1, n])
+                        / solution.static.resolution
+                        / solution.static.ph_charge_eff,
+                    )
                 # meet fill with neighbours' spillage - don't draw down power as this affects future SOC
-                Interconnection(solution, fill, solution.MSpillage[t], solution.TImport[t], solution.TExport[t])
+                Interconnection(
+                    solution,
+                    working_buffer,
+                    solution.operations.Mspillage[t],
+                    solution.operations.Timport[t],
+                    solution.operations.Texport[t],
+                )
                 # fill adjusted in-place
-        for n in range(solution.nodes):
-            fill[n] += solution.MDeficit[t, n] / solution.efficiency
-
-    if solution.profiling:
-        solution.calls_transmission +=1 
-        solution.time_transmission += cclock() - start 
-        time_adj -= (solution.time_interconnection0+
-                     solution.time_interconnection1+
-                     solution.time_interconnection2+
-                     solution.time_interconnection3+
-                     solution.time_storage_behaviort+
-                     solution.time_spilldeft+
-                     solution.time_unbalancedt+
-                     solution.time_update_soct)
-        calls_adj -= (solution.calls_interconnection0+
-                      solution.calls_interconnection1+
-                      solution.calls_interconnection2+
-                      solution.calls_interconnection3+
-                      solution.calls_storage_behaviort+
-                      solution.calls_spilldeft+
-                      solution.calls_unbalancedt+
-                      solution.calls_update_soct)
-        solution.time_transmission += time_adj
-        solution.time_transmission += calls_adj * solution.profile_overhead
-        
+        for n in range(solution.static.nodes):
+            working_buffer[n] += solution.operations.Mdeficit[t, n] / solution.static.ph_charge_eff
 
     # fix storage traces
+    BasicSimulate(solution)
+
+    # meet deficits in place
+    for t in range(solution.static.intervals):
+        for n in range(solution.static.nodes):
+            solution.operations.Mflexible[t, n] = min(solution.operations.Mdeficit[t, n], solution.assets.Cpeak[n])
+        UpdateBalancingt(solution, t)
+
+    # fill = working_buffer
+    working_buffer[:] = 0.0
+    for t in range(solution.static.intervals - 1, -1, -1):
+        # timestep backwards
+        if (solution.operations.Mdeficit[t] > 1e-6).any():
+            # recalculate transmission to meet deficits at point in time
+            # remaining deficits are accumulated into `fill`
+            working_buffer += PrechargeWithTranst(solution, t, solution.operations.Mdeficit[t])
+
+        if (working_buffer > 1e-6).any():
+            # clip fill if no precharge capacity (imperfect assumptions)
+            ClipFillByStoraget(solution, t, working_buffer)
+
+            if (working_buffer > 1e-6).any():
+                # recalculate transmission to facilitate precharge
+                # remaining deficits are forgotten about
+                # fill adjusted in-place
+                PrechargeWithTranst(solution, t, working_buffer)
+
+    if solution.static.profiling == 1:
+        solution.profile.calls.simulation += 1
+        solution.profile.times.simulation += cclock() - start
+    if solution.static.profiling == -1:
+        solution.profile.calls.simulation += 1
+        solution.profile.times.simulation += cclock() - start
+        solution.profile.close_adj_simulation()
+
     BasicSimulate(solution)
 
 
 @njit
 def BasicSimulate(solution):
-    # if solution.profiling:
-    #     start_basic = cclock()
-    for t in range(solution.intervals):
+    if solution.static.profiling == 2 or solution.static.profiling == -1:
+        start = cclock()
+
+    for t in range(solution.static.intervals):
         UpdateUnbalancedt(solution, t)
         UpdateStoraget(solution, t)
         UpdateSOCt(solution, t)
         UpdateSpillDeft(solution, t)
-    # UpdateUnbalanced(solution)
-    # UpdateStorage(solution)
-    # UpdateSOC(solution)
-    # UpdateSpillDef(solution)
-    # if solution.profiling:
-    #     solution.time_basic += cclock() - start_basic
-    #     solution.calls_basic +=1 
+
+    if solution.static.profiling == 2 or solution.static.profiling == -1:
+        solution.profile.times.basic += cclock() - start
+        solution.profile.calls.basic += 1
+
+
+@njit
+def GetSurplust(solution, t, Msurplust):
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
+        start = cclock()
+    for n in range(solution.static.nodes):
+        Msurplust[n] = max(
+            0,
+            solution.operations.Mspillage[t, n]
+            + solution.operations.Mphcharge[t, n]
+            + min(solution.assets.CphP[n], solution.operations.Mphstorage[t - 1, n] / solution.static.resolution)
+            - solution.operations.Mphdischarge[t, n],
+        )
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
+        solution.profile.times.get_surplus += cclock() - start
+        solution.profile.calls.get_surplus += 1
+
+
+@njit
+def ClipFillByStoraget(solution, t, fillt):
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
+        start = cclock()
+    # clip fill by storage capacity
+    for n in range(solution.static.nodes):
+        fillt[n] = min(
+            fillt[n],
+            (solution.assets.CphE[n] - solution.operations.Mphstorage[t - 1, n])
+            / solution.static.resolution
+            / solution.static.ph_discha_eff,
+        )
+        flex = min(
+            fillt[n],
+            solution.assets.Cpeak[n] - solution.operations.Mflexible[t, n],
+            solution.assets.CphP[n]
+            - solution.operations.Mphcharge[t, n]
+            + solution.operations.Mphdischarge[t, n],
+        )
+        fillt[n] -= flex
+        solution.operations.Mflexible[t, n] += flex
+
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
+        solution.profile.calls.clip_fill += 1
+        solution.profile.times.clip_fill += cclock() - start
+
+
+@njit
+def PrechargeWithTranst(solution, t, fillt):
+    if solution.static.profiling == 2 or solution.static.profiling == -1:
+        start = cclock()
+    # original import/export
+    _import = array_sum_2d_axis1(solution.operations.Timport[t])
+    _export = array_sum_2d_axis1(solution.operations.Texport[t])
+    # meet deficits just-in-time by importing flex from neighbours
+    Interconnection(
+        solution,
+        fillt,
+        solution.assets.Cpeak - solution.operations.Mflexible[t],
+        solution.operations.Timport[t],
+        solution.operations.Texport[t],
+    )
+    # flexible += iexports from neighbours
+    solution.operations.Mflexible[t] += np.maximum(
+        _import
+        + _export
+        - array_sum_2d_axis1(solution.operations.Timport[t] + solution.operations.Texport[t]),
+        0
+    )
+    if solution.static.profiling == 2 or solution.static.profiling == -1:
+        solution.profile.calls.trans_precharge += 1
+        solution.profile.times.trans_precharge += cclock() - start
+    # accumulate remaing deficits
+    return solution.operations.Mdeficit[t] / solution.static.ph_charge_eff
 
 
 @njit
 def UpdateUnbalancedt(solution, t):
-    if solution.profiling:
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
         start = cclock()
-    for n in range(solution.nodes):
-        _timport = 0.0
-        for m in range(solution.nhvi):
-            _timport += solution.TImport[t,n,m] 
-            _timport += solution.TExport[t,n,m]
-        solution.MUnbalanced[t,n] = solution.MNetload[t,n] - solution.MFlexible[t,n] - _timport
-    if solution.profiling:
-        solution.calls_unbalancedt +=1 
-        solution.time_unbalancedt += cclock() - start
-        
+    for n in range(solution.static.nodes):
+        _Timport = 0.0
+        for m in range(solution.static.nhvi):
+            _Timport += solution.operations.Timport[t, n, m]
+            _Timport += solution.operations.Texport[t, n, m]
+        solution.operations.Munbalanced[t, n] = (
+            solution.operations.Mnetload[t, n] - solution.operations.Mflexible[t, n] - _Timport
+        )
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
+        solution.profile.calls.unbalancedt += 1
+        solution.profile.times.unbalancedt += cclock() - start
 
 
 @njit
 def UpdateUnbalanced(solution):
-    if solution.profiling:
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
         start = cclock()
-    
-    for t in range(solution.intervals):
-        for n in range(solution.nodes):
-            _timport = 0.0
-            for m in range(solution.nhvi):
-                _timport += solution.TImport[t, n, m]
-                _timport += solution.TExport[t, n, m]
-            solution.MUnbalanced[t, n] = solution.MNetload[t, n] - solution.MFlexible[t, n] - _timport
 
-    if solution.profiling:
-        solution.calls_unbalanced +=1 
-        solution.time_unbalanced += cclock() - start
-        
+    for t in range(solution.static.intervals):
+        for n in range(solution.static.nodes):
+            _Timport = 0.0
+            for m in range(solution.static.nhvi):
+                _Timport += solution.operations.Timport[t, n, m]
+                _Timport += solution.operations.Texport[t, n, m]
+            solution.operations.Munbalanced[t, n] = (
+                solution.operations.Mnetload[t, n] - solution.operations.Mflexible[t, n] - _Timport
+            )
+
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
+        solution.profile.calls.unbalanced += 1
+        solution.profile.times.unbalanced += cclock() - start
 
 
 @njit
 def UpdateStoraget(solution, t):
-    if solution.profiling:
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
         start = cclock()
-    for n in range(solution.nodes):
-        solution.MCharge[t, n] = min(-min(0,solution.MUnbalanced[t, n]), solution.CPHP[n], (solution.CPHS[n] - solution.MStorage[t - 1, n]) / solution.efficiency / solution.resolution)
-        solution.MDischarge[t, n] = min(max(0, solution.MUnbalanced[t, n]), solution.CPHP[n], solution.MStorage[t - 1, n] / solution.resolution)
+    for n in range(solution.static.nodes):
+        solution.operations.Mphcharge[t, n] = min(
+            -min(0, solution.operations.Munbalanced[t, n]),
+            solution.assets.CphP[n],
+            (solution.assets.CphE[n] - solution.operations.Mphstorage[t - 1, n])
+            / solution.static.ph_charge_eff
+            / solution.static.resolution
+        )
+        solution.operations.Mphdischarge[t, n] = min(
+            max(0, solution.operations.Munbalanced[t, n]),
+            solution.assets.CphP[n],
+            solution.operations.Mphstorage[t - 1, n]
+            / solution.static.resolution
+        )
 
-    if solution.profiling:
-        solution.calls_storage_behaviort +=1 
-        solution.time_storage_behaviort += cclock() - start
-        
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
+        solution.profile.calls.storage_behaviort += 1
+        solution.profile.times.storage_behaviort += cclock() - start
 
 
 @njit
 def UpdateStorage(solution):
-    if solution.profiling:
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
         start = cclock()
 
-    for t in range(solution.intervals):
-        for n in range(solution.nodes):
-            solution.MCharge[t, n] = min(-min(solution.MUnbalanced[t, n], 0), solution.CPHP[n])
-            solution.MDischarge[t, n] = min(max(solution.MUnbalanced[t, n], 0), solution.CPHP[n])
+    for t in range(solution.static.intervals):
+        for n in range(solution.static.nodes):
+            solution.operations.Mphcharge[t, n] = min(
+                -min(solution.operations.Munbalanced[t, n], 0), solution.assets.CphP[n])
+            solution.operations.Mphdischarge[t, n] = min(
+                max(solution.operations.Munbalanced[t, n], 0), solution.assets.CphP[n])
 
-    if solution.profiling:
-        solution.calls_storage_behavior +=1 
-        solution.time_storage_behavior += cclock() - start
-        
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
+        solution.profile.calls.storage_behavior += 1
+        solution.profile.times.storage_behavior += cclock() - start
 
-    
+
 @njit(fastmath=True)
 def UpdateSOCt(solution, t):
-    if solution.profiling:
-       start = cclock()
-    for n in range(solution.nodes):
-        solution.MStorage[t, n] = solution.MStorage[t - 1, n] + solution.resolution * (solution.MCharge[t, n] * solution.efficiency - solution.MDischarge[t, n])
-    if solution.profiling:
-        solution.calls_update_soct +=1 
-        solution.time_update_soct += cclock() - start
-        
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
+        start = cclock()
+    for n in range(solution.static.nodes):
+        solution.operations.Mphstorage[t, n] = (
+            solution.operations.Mphstorage[t - 1, n]
+            + solution.static.resolution
+            * (
+                solution.operations.Mphcharge[t, n]
+                * solution.static.ph_charge_eff
+                - solution.operations.Mphdischarge[t, n]
+            )
+        )
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
+        solution.profile.calls.update_soct += 1
+        solution.profile.times.update_soct += cclock() - start
+
 
 @njit(fastmath=True)
 def UpdateSOC(solution):
-    if solution.profiling:
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
         start = cclock()
-    solution.MStorage[-1] = 0.5 * solution.CPHS 
-    for t in range(solution.intervals):
-        for n in range(solution.nodes):
-            solution.MCharge[t, n] = min(solution.MCharge[t, n], (solution.CPHS[n] - solution.MStorage[t - 1, n]) / solution.efficiency / solution.resolution)
-            solution.MDischarge[t, n] = min(solution.MDischarge[t, n], solution.MStorage[t - 1, n] / solution.resolution)
-            solution.MStorage[t, n] = solution.MStorage[t - 1, n] + solution.resolution * (solution.MCharge[t, n] * solution.efficiency - solution.MDischarge[t, n])
-    if solution.profiling:
-        solution.calls_update_soc +=1 
-        solution.time_update_soc += cclock() - start
-        
+    solution.operations.Mphstorage[-1] = 0.5 * solution.assets.CphE
+    for t in range(solution.static.intervals):
+        for n in range(solution.static.nodes):
+            solution.operations.Mphcharge[t, n] = min(
+                solution.operations.Mphcharge[t, n],
+                (solution.assets.CphE[n] - solution.operations.Mphstorage[t - 1, n])
+                / solution.static.ph_charge_eff
+                / solution.static.resolution,
+            )
+            solution.operations.Mphdischarge[t, n] = min(
+               solution.operations.Mphdischarge[t, n],
+               solution.operations.Mphstorage[t - 1, n] / solution.static.resolution
+            )
+            solution.operations.Mphstorage[t, n] = (
+                solution.operations.Mphstorage[t - 1, n]
+                + solution.static.resolution
+                * (
+                    solution.operations.Mphcharge[t, n]
+                    * solution.static.ph_charge_eff
+                    - solution.operations.Mphdischarge[t, n]
+                )
+            )
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
+        solution.profile.calls.update_soc += 1
+        solution.profile.times.update_soc += cclock() - start
+
 
 @njit
 def UpdateSpillDeft(solution, t):
-    if solution.profiling:
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
         start = cclock()
 
-    for n in range(solution.nodes):
-        _inter = (solution.MUnbalanced[t, n] + solution.MCharge[t, n] - solution.MDischarge[t, n])
-        solution.MDeficit[t, n] = max(0, _inter)
-        solution.MSpillage[t,n] = -min(0, _inter)
-        
-    if solution.profiling:
-        solution.calls_spilldeft +=1 
-        solution.time_spilldeft += cclock() - start
-        
+    for n in range(solution.static.nodes):
+        _inter = (
+            solution.operations.Munbalanced[t, n]
+            + solution.operations.Mphcharge[t, n]
+            - solution.operations.Mphdischarge[t, n]
+        )
+        solution.operations.Mdeficit[t, n] = max(0, _inter)
+        solution.operations.Mspillage[t, n] = -min(0, _inter)
+
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
+        solution.profile.calls.spilldeft += 1
+        solution.profile.times.spilldeft += cclock() - start
+
 
 @njit
 def UpdateSpillDef(solution):
-    if solution.profiling:
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
         start = cclock()
 
-    for t in range(solution.intervals):
-        for n in range(solution.nodes):
-            _inter = solution.MUnbalanced[t, n] + solution.MCharge[t, n] - solution.MDischarge[t, n]
-            solution.MDeficit[t, n] = max(_inter, 0)
-            solution.MSpillage[t, n] = -min(_inter, 0)
+    for t in range(solution.static.intervals):
+        for n in range(solution.static.nodes):
+            _inter = (
+                solution.operations.Munbalanced[t, n]
+                + solution.operations.Mphcharge[t, n]
+                - solution.operations.Mphdischarge[t, n]
+            )
+            solution.operations.Mdeficit[t, n] = max(_inter, 0)
+            solution.operations.Mspillage[t, n] = -min(_inter, 0)
 
-    if solution.profiling:
-        solution.calls_spilldef +=1 
-        solution.time_spilldef += cclock() - start
-        
+    if solution.static.profiling == 3 or solution.static.profiling == -1:
+        solution.profile.calls.spilldef += 1
+        solution.profile.times.spilldef += cclock() - start
+
+
+@njit
+def UpdateBalancingt(solution, t):
+    # Convenience function as these three often go together
+    # Not profiled
+    UpdateUnbalancedt(solution, t)
+    UpdateStoraget(solution, t)
+    UpdateSpillDeft(solution, t)

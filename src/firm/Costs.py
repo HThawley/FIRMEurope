@@ -1,7 +1,6 @@
 import numpy as np
 from numba import boolean, float64, int64, njit  # type: ignore
 from numba.experimental import jitclass  # type: ignore
-from firm.Input import lengths, undersea_mask
 
 USD_to_AUD = 1 / 0.65  # AUD to USD where necessary
 discount_rate = 0.0599  # Real discount rate - same as gencost
@@ -259,16 +258,11 @@ def annualization_fossils(capex, fom, vom, fuel, carbon, life, dr):
         ("hvi", float64[:]),
         ("hvu", float64[:]),
         ("scenario", int64),
-        ("lengths", int64[:]),
-        ("undersea_mask", boolean[:]),
         ("network_mask", boolean[:]),
     ]
 )
-class Raw_Costs:
-    def __init__(
-        self,
-        solution_data
-    ):
+class RawCosts:
+    def __init__(self, solution_data):
         self.scenario = solution_data.scenario
         self.network_mask = solution_data.network_mask
 
@@ -292,7 +286,7 @@ class Raw_Costs:
         self.coal[4] = tCO2e_per_GJ_coal / MWh_per_GJ * price
 
     def CostFactors(self):
-        return Cost_Factors(self)
+        return CostFactors(self)
 
 
 @jitclass(
@@ -309,7 +303,7 @@ class Raw_Costs:
         ("hvi", float64[:, :]),
     ]
 )
-class Cost_Factors:
+class CostFactors:
     def __init__(self, raw_costs):
         self.pv = annualization(raw_costs.pv[0], raw_costs.pv[1], raw_costs.pv[2], raw_costs.pv[3], raw_costs.dr)
         self.onsw = annualization(
@@ -366,29 +360,20 @@ class Cost_Factors:
         )
 
         self.hvi = np.zeros((len(raw_costs.network_mask), 3), np.float64)
-        if raw_costs.scenario >= 21:
-            for i, undersea in enumerate(undersea_mask):
-                if raw_costs.network_mask[i] is False:
-                    continue
-                if undersea:
-                    self.hvi[i] = annualization_transmission(
-                        raw_costs.hvu[0],
-                        raw_costs.hvu[1],
-                        raw_costs.hvu[2],
-                        raw_costs.hvu[3],
-                        lengths[i],
-                        raw_costs.dr,
-                    )  # vom is 0
-                else:
-                    self.hvi[i] = annualization(
-                        raw_costs.hvi[0], raw_costs.hvi[1], raw_costs.hvi[2], raw_costs.hvi[3], raw_costs.dr
-                    )
+        for i in range(len(raw_costs.network_mask)):
+            self.hvi[i] = annualization(
+                    raw_costs.hvi[0], raw_costs.hvi[1], raw_costs.hvi[2], raw_costs.hvi[3], raw_costs.dr
+                )
         self.hvi = self.hvi.T
 
-if __name__=='__main__':
+
+CostsType = CostFactors.class_type.instance_type
+
+
+if __name__ == "__main__":
     from firm.Parameters import Parameters
-    from firm.Input import Solution_data
+    from firm.Input import StaticData
+
     parameters = Parameters(21, 1, False)
-    sd = Solution_data(*parameters)
-    costs = Raw_Costs(sd).CostFactors()
-    
+    sd = StaticData(*parameters)
+    costs = RawCosts(sd).CostFactors()

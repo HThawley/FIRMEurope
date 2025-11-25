@@ -15,6 +15,7 @@ from firm.Input import (
 from firm.Simulation import Simulate
 from firm.Utils import zero_safe_division
 
+
 def Debug(solution):
     """Debugging"""
 
@@ -60,21 +61,25 @@ def Debug(solution):
     try:
         assert solution.MPV.sum(axis=1).max() <= solution.CPV.sum()
         assert solution.MWind.sum(axis=1).max() <= solution.CWind.sum()
-    
-        assert ((solution.TImport.sum(axis=2) + solution.TExport.sum(axis=2)) < 0.001).all, "import/export imbalance (lines)"
-        assert ((solution.TImport.sum(axis=1) + solution.TExport.sum(axis=1)) < 0.001).all, "import/export imbalance (nodes)"
-    
+
+        assert (
+            (solution.TImport.sum(axis=2) + solution.TExport.sum(axis=2)) < 0.001
+        ).all, "import/export imbalance (lines)"
+        assert (
+            (solution.TImport.sum(axis=1) + solution.TExport.sum(axis=1)) < 0.001
+        ).all, "import/export imbalance (nodes)"
+
         assert (solution.TImport.sum(axis=2).max(axis=0) - solution.CHVI <= 0.001).all(), "HVI bounds"
         assert (solution.TImport.min(axis=2).min(axis=0) >= -0.001).all(), "HVI bounds"
-    
+
         assert (solution.TExport.min(axis=2).min(axis=0) + solution.CHVI >= -0.001).all(), "HVI bounds"
         assert (solution.TExport.max(axis=2).max(axis=0) <= 0.001).all(), "HVI bounds"
-    
+
         assert (solution.MDischarge.max(axis=0) - solution.CPHP <= 0.001).all(), "Phes Discharge"
         assert (solution.MCharge.max(axis=0) - solution.CPHP <= 0.001).all(), "Phes Charge"
         assert (solution.MStorage.max(axis=0) - solution.CPHS <= 0.001).all(), "Phes SOC, too much"
         assert (solution.MStorage.min(axis=0) >= -0.001).all(), "Phes SOC, negative"
-    except: 
+    except:
         pass
     print("Debugging: everything is ok")
 
@@ -102,14 +107,9 @@ def LPGM(solution):
     )
     TDC = np.zeros((len(solution.network_mask), solution.intervals))
     TDC[solution.network_mask] = solution.TDC.T
-    
-    C = np.vstack(
-        (
-            C, 
-            TDC
-        )
-    )
-    C = np.around(1000.*C.T)
+
+    C = np.vstack((C, TDC))
+    C = np.around(1000.0 * C.T)
 
     datentime = np.array(
         [
@@ -154,7 +154,7 @@ def LPGM(solution):
                     solution.MStorage[:, j],
                 ]
             )
-            C = np.around(1000.*C.T)
+            C = np.around(1000.0 * C.T)
 
             C = np.insert(C.astype("str"), 0, datentime, axis=1)
             np.savetxt(
@@ -169,23 +169,33 @@ def LPGM(solution):
 def GGTA(solution):
     """GW, GWh, TWh p.a. and A$/MWh information"""
 
-
-    GPV    = solution.MPV.sum()    * solution.resolution / solution.years
-    GWind  = solution.MWind.sum()  * solution.resolution / solution.years
+    GPV = solution.MPV.sum() * solution.resolution / solution.years
+    GWind = solution.MWind.sum() * solution.resolution / solution.years
     GHydro = solution.MHydro.sum() * solution.resolution / solution.years
-    GBio   = solution.MBio.sum()   * solution.resolution / solution.years
-    GPHES  = solution.MDischarge.sum() * solution.resolution / solution.years 
+    GBio = solution.MBio.sum() * solution.resolution / solution.years
+    GPHES = solution.MDischarge.sum() * solution.resolution / solution.years
 
-    CFPV = 100*zero_safe_division(GPV, solution.CPV.sum() * 8760)
-    CFWind = 100*zero_safe_division(GWind, solution.CWind.sum() * 8760)
-    CFPHES = 100*zero_safe_division(GPHES, solution.CPHP.sum() * 8760 / 2 * (1+solution.efficiency)/2)
+    CFPV = 100 * zero_safe_division(GPV, solution.CPV.sum() * 8760)
+    CFWind = 100 * zero_safe_division(GWind, solution.CWind.sum() * 8760)
+    CFPHES = 100 * zero_safe_division(GPHES, solution.CPHP.sum() * 8760 / 2 * (1 + solution.efficiency) / 2)
 
-    LCOGP = zero_safe_division((cost_model.pv    * np.array([solution.CPV.sum(),    solution.CPV.sum(),    GPV])).sum(),    GPV*1000)
-    LCOGW = zero_safe_division((cost_model.onsw  * np.array([solution.CWind.sum(),  solution.CWind.sum(),  GWind])).sum(),  GWind*1000)
-    LCOGH = zero_safe_division((cost_model.hydro * np.array([solution.CHydro.sum(), solution.CHydro.sum(), GHydro])).sum(), GHydro*1000)
-    LCOGB = zero_safe_division((cost_model.hydro * np.array([solution.CBio.sum(),   solution.CBio.sum(),   GBio])).sum(),   GBio*1000)
-    LCOSP = zero_safe_division((cost_model.phes * np.array([solution.CPHP.sum(), solution.CPHS.sum(), solution.CPHP.sum(), GPHES, 1])).sum(), GPHES*1000)
-    
+    LCOGP = zero_safe_division(
+        (cost_model.pv * np.array([solution.CPV.sum(), solution.CPV.sum(), GPV])).sum(), GPV * 1000
+    )
+    LCOGW = zero_safe_division(
+        (cost_model.onsw * np.array([solution.CWind.sum(), solution.CWind.sum(), GWind])).sum(), GWind * 1000
+    )
+    LCOGH = zero_safe_division(
+        (cost_model.hydro * np.array([solution.CHydro.sum(), solution.CHydro.sum(), GHydro])).sum(), GHydro * 1000
+    )
+    LCOGB = zero_safe_division(
+        (cost_model.hydro * np.array([solution.CBio.sum(), solution.CBio.sum(), GBio])).sum(), GBio * 1000
+    )
+    LCOSP = zero_safe_division(
+        (cost_model.phes * np.array([solution.CPHP.sum(), solution.CPHS.sum(), solution.CPHP.sum(), GPHES, 1])).sum(),
+        GPHES * 1000,
+    )
+
     print("Levelised costs of electricity:")
     print("\u2022 LCOE:", solution.LCOE)
     print("\u2022 LCOG:", solution.LCOG)
@@ -200,26 +210,66 @@ def GGTA(solution):
     print("\u2022 CAPEX:", solution.CAPEX)
     print("\u2022 OPEX:", solution.OPEX)
 
-    D = np.atleast_2d(np.array(
-        [solution.energy / 1000_000, solution.CPV.sum(), GPV/1000, solution.CWind.sum(), GWind/1000, 
-         solution.CHydro.sum() + solution.CBio.sum(), (GHydro+GBio)/1000, solution.CPHP.sum(), 
-         solution.CPHS.sum(), GPHES/1000]
-        + list(solution.CHVI)
-        + [solution.LCOE, solution.LCOG, solution.LCOBS, solution.LCOBT, solution.LCOBL, 
-           LCOGP, LCOGW, solution.CAPEX, solution.OPEX]))
-    
-    Nodel = np.array(["FNQ", "NSW", "NT", "QLD", "SA", "TAS", "VIC", "WA"])[solution.Nodel_int]
-    
-    header = ','.join(['Energy (PWh p.a.)', 'Utility PV (GW)', 'Utility PV (TWh p.a.)', 
-                       'Onshore Wind (GW)', 'Onshore Wind (TWh p.a.)', 'Hydro & Bio (GW)', 'Hydro & Bio (TWh p.a.)', 
-                       'PHES capacity (GW)', 'PHES capacity (GWh)', 'PHES (TWh p.a.)'] +
-                      [f'{Nodel[n[0]]}-{Nodel[n[1]]} (GW)' for n in solution.basic_network] +
-                      ['LCOE', 'LCOG', 'LCOB (storage)', 'LCOB (transmission)', 'LCOB (curtailment)', 
-                       'LCOE-PV', 'LCOE-Wind', 'CAPEX', 'OPEX']
-                      )
+    D = np.atleast_2d(
+        np.array(
+            [
+                solution.energy / 1000_000,
+                solution.CPV.sum(),
+                GPV / 1000,
+                solution.CWind.sum(),
+                GWind / 1000,
+                solution.CHydro.sum() + solution.CBio.sum(),
+                (GHydro + GBio) / 1000,
+                solution.CPHP.sum(),
+                solution.CPHS.sum(),
+                GPHES / 1000,
+            ]
+            + list(solution.CHVI)
+            + [
+                solution.LCOE,
+                solution.LCOG,
+                solution.LCOBS,
+                solution.LCOBT,
+                solution.LCOBL,
+                LCOGP,
+                LCOGW,
+                solution.CAPEX,
+                solution.OPEX,
+            ]
+        )
+    )
 
-    np.savetxt(f'../Results/GGTA{solution.scenario}.csv', D, fmt='%f', delimiter=',', header=header, comments='')
-    print('Energy generation, storage and transmission information is produced.')
+    Nodel = np.array(["FNQ", "NSW", "NT", "QLD", "SA", "TAS", "VIC", "WA"])[solution.Nodel_int]
+
+    header = ",".join(
+        [
+            "Energy (PWh p.a.)",
+            "Utility PV (GW)",
+            "Utility PV (TWh p.a.)",
+            "Onshore Wind (GW)",
+            "Onshore Wind (TWh p.a.)",
+            "Hydro & Bio (GW)",
+            "Hydro & Bio (TWh p.a.)",
+            "PHES capacity (GW)",
+            "PHES capacity (GWh)",
+            "PHES (TWh p.a.)",
+        ]
+        + [f"{Nodel[n[0]]}-{Nodel[n[1]]} (GW)" for n in solution.basic_network]
+        + [
+            "LCOE",
+            "LCOG",
+            "LCOB (storage)",
+            "LCOB (transmission)",
+            "LCOB (curtailment)",
+            "LCOE-PV",
+            "LCOE-Wind",
+            "CAPEX",
+            "OPEX",
+        ]
+    )
+
+    np.savetxt(f"../Results/GGTA{solution.scenario}.csv", D, fmt="%f", delimiter=",", header=header, comments="")
+    print("Energy generation, storage and transmission information is produced.")
 
     return True
 
@@ -237,12 +287,12 @@ def Information(x):
     except AssertionError:
         pass
     S.TDC = (np.atleast_3d(S.trans_mask).T * (S.TImport + S.TExport)).sum(axis=2)
-    S.MImport = (S.TImport+S.TExport).sum(axis=1)
+    S.MImport = (S.TImport + S.TExport).sum(axis=1)
 
     S.MHydro = np.minimum(S.MFlexible, S.CHydro)
     S.MBio = np.minimum(S.MFlexible - S.MHydro, S.CBio)
     S.MHydro += S.CBaseload
-    
+
     LPGM(S)
     GGTA(S)
 
