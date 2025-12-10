@@ -26,11 +26,10 @@ from firm_ce.optimisation.broad_optimum import (
     write_broad_optimum_bands,
     write_broad_optimum_records,
 )
-from firm_ce.optimisation.single_time import Solution, evaluate_vectorised_xs
+from firm_ce.optimisation.single_time import Solution, evaluate_vectorised_xs, parallel_wrapper
 from firm_ce.system.components import Fleet_InstanceType, Generator_InstanceType, Reservoir_InstanceType, Storage_InstanceType
 from firm_ce.system.parameters import ModelConfig, ScenarioParameters_InstanceType
 from firm_ce.system.topology import Line_InstanceType, Network_InstanceType
-from firm_ce.optimisation.generate_alternatives import MGAObjective
 
 
 class Solver:
@@ -159,13 +158,14 @@ class Solver:
         )[0, :]  # just cost + penalties * penalty_multiplier
 
     def generate_alternatives(self) -> None:
-        self.logger.info("[MHMGA] Initialising MGA algorithm...")
+        self.logger.info("[MHMGA] Initialising MGA algorithm...\n\t"
+                         "(if evaluating a known optimum, this may take a while)")
 
         args = self.get_differential_evolution_args()
-        objective_wrapper = MGAObjective(*args)
 
         problem = OptimizationProblem(
-            objective=objective_wrapper,
+            objective=parallel_wrapper,
+            fargs=args,
             bounds=(self.lower_bounds, self.upper_bounds),
             maximize=False,
             vectorized=True,
@@ -204,7 +204,7 @@ class Solver:
             )
 
             self.logger.info("[MHMGA] Starting evolution step...")
-            print(f"mhmga {self.config.disp_rate=}")
+            print(f"mhmga {self.config.mga_disp_rate=}")
             algorithm.step(disp_rate=self.config.mga_disp_rate)
 
             # 4. Terminate and get results
