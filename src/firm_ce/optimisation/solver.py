@@ -26,7 +26,8 @@ from firm_ce.optimisation.broad_optimum import (
     write_broad_optimum_bands,
     write_broad_optimum_records,
 )
-from firm_ce.optimisation.single_time import Solution, evaluate_vectorised_xs, parallel_wrapper
+from firm_ce.optimisation.single_time import Solution, evaluate_vectorised_xs, mga_parallel_wrapper
+
 from firm_ce.system.components import Fleet_InstanceType, Generator_InstanceType, Reservoir_InstanceType, Storage_InstanceType
 from firm_ce.system.parameters import ModelConfig, ScenarioParameters_InstanceType
 from firm_ce.system.topology import Line_InstanceType, Network_InstanceType
@@ -164,7 +165,7 @@ class Solver:
         args = self.get_differential_evolution_args()
 
         problem = OptimizationProblem(
-            objective=parallel_wrapper,
+            objective=mga_parallel_wrapper,
             fargs=args,
             bounds=(self.lower_bounds, self.upper_bounds),
             maximize=False,
