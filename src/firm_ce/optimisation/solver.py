@@ -182,6 +182,7 @@ class Solver:
             log_dir=log_dir,
             log_freq=self.config.mga_log_freq,
             random_seed=None,
+            parallelize=False,  # we will implement parallelisation independently
         )
         self.logger.info("[MHMGA] MGA algorithm initialised.")
 

@@ -369,12 +369,12 @@ def mga_parallel_wrapper(
     fixed_costs_threshold: float64,
 ) -> float64[:, :]:
     """
-    Behaves identically to `parallel_wrapper` but returns [lcoe, penalties] only. Used for MGA optimisation.
+    Behaves identically to `parallel_wrapper` but expects xs.T and returns [lcoe, penalties] only. Used for MGA optimisation.
     """
-    n_points = xs.shape[1]
+    n_points = xs.shape[0]
     result = np.zeros((2, n_points), dtype=np.float64)
     for j in prange(n_points):
-        xj = xs[:, j]
+        xj = xs[j]
         sol = Solution(xj, static, fleet, network, balancing_type, fixed_costs_threshold)
         sol.evaluate()
         result[0, j] = sol.lcoe
