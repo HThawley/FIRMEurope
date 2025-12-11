@@ -14,8 +14,9 @@ from scipy.optimize import OptimizeResult, differential_evolution
 
 from mga.problem_definition import OptimizationProblem
 from mga.mhmga import MGAProblem
+from mga.population import Population
 
-from firm_ce.common.constants import SAVE_POPULATION
+from firm_ce.common.constants import SAVE_POPULATION, PENALTY_MULTIPLIER
 from firm_ce.optimisation.broad_optimum import (
     append_to_midpoint_csv,
     broad_optimum_objective,
@@ -203,6 +204,7 @@ class Solver:
                 crossover_prob=self.config.mga_crossover_prob[step],
                 niche_elitism=self.config.mga_niche_elitism[step],
                 noptimal_slack=self.config.mga_noptimal_slack[step],
+                violation_factor=PENALTY_MULTIPLIER
             )
 
             self.logger.info("[MHMGA] Starting evolution step...")
@@ -386,3 +388,31 @@ def callback(intermediate_result: OptimizeResult) -> None:
                 writer = csv.writer(f)
                 for energy in intermediate_result.population_energies:
                     writer.writerow([energy])
+
+
+def mga_callback(population: Population) -> None:
+    results_dir = os.path.join("results", "temp")
+    os.makedirs(results_dir, exist_ok=True)
+
+    # Save best solution from last iteration
+    with open(os.path.join(results_dir, "callback.csv"), "a", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(list(population.current_optima[0]))
+
+    if SAVE_POPULATION:
+        # Save population from last iteration
+        with open(os.path.join(results_dir, "population.csv"), "a", newline="") as f:
+            writer = csv.writer(f)
+            for i in range(population.num_niches):
+                writer.writerows(population.points[i])
+
+        with open(os.path.join(results_dir, "latest_population.csv"), "w", newline="") as f:
+            writer = csv.writer(f)
+            for i in range(population.num_niches):
+                writer.writerows(population.points[i])
+
+        # # Save population energies from last iteration
+        # with open(os.path.join(results_dir, "population_energies.csv"), "a", newline="") as f:
+        #     writer = csv.writer(f)
+        #     for energy in population.fitness_values:
+        #         writer.writerow([energy])
