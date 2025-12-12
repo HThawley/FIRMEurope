@@ -180,7 +180,7 @@ class ResultFile:
         else:
             self.float_format_string = None
         self.data = data
-        self.write_kwargs = write_kwargs if self.write_kwargs is not None else {}
+        self.write_kwargs = write_kwargs if write_kwargs is not None else {}
 
     def __repr__(self) -> str:
         return f"ResultFile ({self.report!r})"

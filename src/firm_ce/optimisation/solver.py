@@ -177,13 +177,15 @@ class Solver:
 
         log_dir = os.path.join(self.log_dir, "mga_logs")
         os.makedirs(log_dir, exist_ok=True)
+        path_name = os.path.join(log_dir, "log")
 
         algorithm = MGAProblem(
             problem=problem,
-            log_dir=log_dir,
+            log_dir=path_name,
             log_freq=self.config.mga_log_freq,
             random_seed=None,
             parallelize=False,  # we will implement parallelisation independently
+            callback=mga_callback,
         )
         self.logger.info("[MHMGA] MGA algorithm initialised.")
 
@@ -391,6 +393,7 @@ def callback(intermediate_result: OptimizeResult) -> None:
 
 
 def mga_callback(population: Population) -> None:
+    print("MGA callback called")
     results_dir = os.path.join("results", "temp")
     os.makedirs(results_dir, exist_ok=True)
 
@@ -411,8 +414,13 @@ def mga_callback(population: Population) -> None:
             for i in range(population.num_niches):
                 writer.writerows(population.points[i])
 
-        # # Save population energies from last iteration
-        # with open(os.path.join(results_dir, "population_energies.csv"), "a", newline="") as f:
-        #     writer = csv.writer(f)
-        #     for energy in population.fitness_values:
-        #         writer.writerow([energy])
+        # Save population energies from last iteration
+        with open(os.path.join(results_dir, "population_energies.csv"), "a", newline="") as f:
+            writer = csv.writer(f)
+            for i in range(population.num_niches):
+                write_out = np.vstack((
+                    population.objective_values[i],
+                    population.violations[i],
+                    population.fitnesses[i],
+                ))
+                writer.writerows(write_out.T)
