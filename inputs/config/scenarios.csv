@@ -2,5 +2,4 @@ id,scenario_name,resolution,allowance,firstyear,finalyear,networksteps_max,type
 -1,Test,1,0.00002,2010,2018,3,single_time
 0,Base,1,0.00002,2010,2018,4,single_time
 1,ZeroCarbon,1,0.00002,2010,2018,4,single_time
-2,HydroExpansion,1,0.00002,2010,2018,4,single_time
-3,Hydrogen,1,0.00002,2010,2018,4,single_time
+2,Hydrogen,1,0.00002,2010,2018,4,single_time

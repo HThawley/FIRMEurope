@@ -2,6 +2,6 @@ id,name,emissions,cost,scenarios
 0,solar,0,0,"all"
 1,wind,0,0,"all"
 2,water,0,0,"all"
-3,gas,1,13.5,"Test,Base,HydroExpansion"
+3,gas,1,13.5,"Test,Base"
 4,biogas,0,0,"all"
 5,nuclear,1,0,"all"

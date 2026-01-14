@@ -53,15 +53,19 @@ class ImportCSV:
         filepath = self.repository.joinpath(filename)
         if not filepath.is_file():
             raise FileNotFoundError(f"File {filepath} does not exist.")
-        imported_dict = pd.read_csv(filepath, index_col="id")
-        for col in imported_dict.columns:
-            if col in ("filename", "units"):
-                continue
-            if hasattr(imported_dict[col], "str"):
-                imported_dict[col] = imported_dict[col].str.lower()
-        imported_dict = imported_dict.to_dict(orient="index")
-        for idx in imported_dict:
-            imported_dict[idx]["id"] = idx
+        try:
+            imported_dict = pd.read_csv(filepath, index_col="id")
+            for col in imported_dict.columns:
+                if col in ("filename", "units"):
+                    continue
+                if hasattr(imported_dict[col], "str"):
+                    imported_dict[col] = imported_dict[col].str.lower()
+            imported_dict = imported_dict.to_dict(orient="index")
+            for idx in imported_dict:
+                imported_dict[idx]["id"] = idx
+        except Exception as e:
+            print(f"Error on {filepath}")
+            raise e
         return imported_dict
 
     def get_config_dict(self) -> Dict[str, Dict[str, Any]]:
