@@ -232,7 +232,6 @@ class ResultFile:
         default_kwargs = {
             "header": False,
             "index": True,
-            "float_format": self.float_format_string,
             "mode": "x",
         }
         for k, v in self.write_kwargs.items():
@@ -267,7 +266,6 @@ class ResultFile:
         default_kwargs = {
             "header": False,
             "index": True,
-            "float_format": self.float_format_string,
             "mode": "x",
             "sheet_name": self.report,
         }
