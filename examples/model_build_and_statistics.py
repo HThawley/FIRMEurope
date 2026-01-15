@@ -24,7 +24,7 @@ for scenario in model.scenarios.values():
     if scenario.x0.size == 0:
         continue
 
-    scenario.load_datafiles(model.datafile_filenames_dict, model.data_directory)
+    scenario.load_datafiles(model.datafile_filenames_dict, model.data_directory, model.config)
     scenario.statistics = Statistics(
         scenario.x0,
         scenario.static,

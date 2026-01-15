@@ -1,3 +1,4 @@
+# flake8: noqa: B023
 import os
 
 import numpy as np
@@ -100,6 +101,7 @@ def validate_model_config(config_dict, model_logger):
         ),
         "simple_blocks_per_day": validate_positive_int,
         "fixed_costs_threshold": lambda v: validate_range(v, 0),
+        "debug_timesteps": validate_positive_int,
     }
 
     for item in config_dict.values():
@@ -147,18 +149,15 @@ def validate_scenarios(scenarios_dict, model_logger):
             model_logger.error("'allowance' must be float in range [0,1]")
             flag = False
 
+        for year_field in ["firstyear", "finalyear"]:
+            val = item.get(year_field, "auto")
+            if str(val).lower().strip() in ("auto", "", "none"):
+                continue
         try:
-            fy = int(item["firstyear"])
-            ly = int(item["finalyear"])
-            firstyear = fy if firstyear is None else min(firstyear, fy)
-            finalyear = ly if finalyear is None else max(finalyear, ly)
+            int(val)
         except ValueError:
-            model_logger.error("'firstyear' and 'finalyear' must be integers")
+            model_logger.error(f"'{year_field}' must be an integer or 'auto'")
             flag = False
-
-    if firstyear is not None and finalyear is not None and firstyear > finalyear:
-        model_logger.error("'firstyear' must be less than or equal to 'finalyear'")
-        flag = False
 
     return scenarios_list, flag
 

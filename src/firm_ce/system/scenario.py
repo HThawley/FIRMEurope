@@ -112,13 +112,27 @@ class Scenario:
 
         return lower_bounds, upper_bounds
 
-    def load_datafiles(self, datafile_filenames_dict: Dict[str, DataFile], data_directory: str) -> None:
+    def load_datafiles(
+        self,
+        datafile_filenames_dict: Dict[str, DataFile],
+        data_directory: str,
+        config: ModelConfig,
+    ) -> None:
         datafiles = self._get_datafiles(datafile_filenames_dict, data_directory)
 
-        load_datafiles_to_network(self.network, datafiles)
+        debug_timesteps, yeartuple = None, None
 
-        load_datafiles_to_generators(self.fleet, datafiles, self.static.resolution)
-        load_datafiles_to_reservoirs(self.fleet, datafiles)
+        if hasattr(config, "debug_timesteps") and config.debug_timesteps is not None:
+            debug_timesteps = int(config.debug_timesteps)
+            self.logger.info(f"Slicing data to first {debug_timesteps} timesteps per config file.")
+        else:
+            firstyear = self.scenario_data.get("firstyear", "auto")
+            lastyear = self.scenario_data.get("lastyear", "auto")
+            yeartuple = firstyear, lastyear
+
+        load_datafiles_to_network(self.network, datafiles, debug_timesteps, yeartuple)
+        load_datafiles_to_generators(self.fleet, datafiles, self.static.resolution, debug_timesteps, yeartuple)
+        load_datafiles_to_reservoirs(self.fleet, datafiles, debug_timesteps, yeartuple)
 
         static_m.set_year_energy_demand(self.static, self.network.nodes)
 
