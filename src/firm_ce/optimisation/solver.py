@@ -1,12 +1,7 @@
 # type: ignore
 import csv
 import os
-from itertools import chain
-from typing import Dict, List, Tuple, Union, Callable, TYPE_CHECKING
-
-# Avoid circular import issues
-if TYPE_CHECKING:
-    from firm_ce.system import Scenario
+from typing import Dict, Tuple, Union, Callable, TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
@@ -15,6 +10,10 @@ from scipy.optimize import OptimizeResult, differential_evolution
 from mga.problem_definition import OptimizationProblem
 from mga.mhmga import MGAProblem
 from mga.population import Population
+
+# Avoid circular import issues
+if TYPE_CHECKING:
+    from firm_ce.system import Scenario
 
 from firm_ce.common.constants import SAVE_POPULATION, PENALTY_MULTIPLIER
 from firm_ce.optimisation.broad_optimum import (
@@ -29,9 +28,9 @@ from firm_ce.optimisation.broad_optimum import (
 )
 from firm_ce.optimisation.single_time import Solution, evaluate_vectorised_xs, mga_parallel_wrapper
 
-from firm_ce.system.components import Fleet_InstanceType, Generator_InstanceType, Reservoir_InstanceType, Storage_InstanceType
+from firm_ce.system.components import Fleet_InstanceType
 from firm_ce.system.parameters import ModelConfig, ScenarioParameters_InstanceType
-from firm_ce.system.topology import Line_InstanceType, Network_InstanceType
+from firm_ce.system.topology import Network_InstanceType
 
 
 class Solver:
@@ -44,12 +43,12 @@ class Solver:
     ) -> None:
         self.config = config
         self.decision_x0 = scenario.x0 if len(scenario.x0) > 0 else None
+        self.lower_bounds, self.upper_bounds = scenario.lower_bounds, scenario.upper_bounds
         self.parameters_static = scenario.static
         self.fleet_static = scenario.fleet
         self.network_static = scenario.network
         self.logger = scenario.logger
         self.log_dir = scenario.results_dir
-        self.lower_bounds, self.upper_bounds = self.get_bounds()
         self.broad_optimum_var_info = build_broad_optimum_var_info(self.fleet_static, self.network_static)
         self.scenario_name = scenario.name
         self.result = None
@@ -61,53 +60,6 @@ class Solver:
                 self.iterations = int(config.iterations // 2)
             else:
                 self.iterations = config.iterations
-
-    def get_bounds(self) -> NDArray[np.float64]:
-        def power_capacity_bounds(
-            asset_list: Union[List[Generator_InstanceType], List[Reservoir_InstanceType],
-                              List[Storage_InstanceType], List[Line_InstanceType]],
-            build_cap_constraint: str,
-        ) -> List[float]:
-            return [getattr(asset, build_cap_constraint) for asset in asset_list]
-
-        def energy_capacity_bounds(
-                asset_list: Union[List[Storage_InstanceType], List[Reservoir_InstanceType]],
-                build_cap_constraint: str
-        ) -> List[float]:
-            return [getattr(asset, build_cap_constraint) if asset.duration == 0 else 0.0 for asset in asset_list]
-
-        generators = list(self.fleet_static.generators.values())
-        reservoirs = list(self.fleet_static.reservoirs.values())
-        storages = list(self.fleet_static.storages.values())
-        lines = list(self.network_static.major_lines.values())
-
-        lower_bounds = np.array(
-            list(
-                chain(
-                    power_capacity_bounds(generators, "min_build"),
-                    power_capacity_bounds(reservoirs, "min_build_p"),
-                    energy_capacity_bounds(reservoirs, "min_build_e"),
-                    power_capacity_bounds(storages, "min_build_p"),
-                    energy_capacity_bounds(storages, "min_build_e"),
-                    power_capacity_bounds(lines, "min_build"),
-                )
-            )
-        )
-
-        upper_bounds = np.array(
-            list(
-                chain(
-                    power_capacity_bounds(generators, "max_build"),
-                    power_capacity_bounds(reservoirs, "max_build_p"),
-                    energy_capacity_bounds(reservoirs, "max_build_e"),
-                    power_capacity_bounds(storages, "max_build_p"),
-                    energy_capacity_bounds(storages, "max_build_e"),
-                    power_capacity_bounds(lines, "max_build"),
-                )
-            )
-        )
-
-        return lower_bounds, upper_bounds
 
     def initialise_callback(self) -> None:
         temp_dir = os.path.join("results", "temp")

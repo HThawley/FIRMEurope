@@ -82,3 +82,12 @@ def safe_divide2(num: float, denom: Any, zero_fail: float = 0.0) -> Any:
         return safe_divide(num, denom, zero_fail)
     else:
         return denom
+
+
+def chain(*iterables):
+    """
+    Behaves like itertools.chain
+    """
+    for it in iterables:
+        for element in it:
+            yield element

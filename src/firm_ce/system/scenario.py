@@ -1,11 +1,12 @@
+# type: ignore
 import gc
-from typing import Dict
+from typing import Dict, List, Union
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult
 
-from firm_ce.common.helpers import parse_comma_separated
+from firm_ce.common.helpers import parse_comma_separated, chain
 from firm_ce.constructors.component_cons import construct_Fleet_object
 from firm_ce.constructors.parameter_cons import construct_ScenarioParameters_object
 from firm_ce.constructors.topology_cons import construct_Network_object
@@ -22,6 +23,8 @@ from firm_ce.io.file_manager import DataFile
 from firm_ce.io.data_model import ModelData
 from firm_ce.optimisation.solver import Solver
 from firm_ce.system.parameters import ModelConfig
+from firm_ce.system.components import Generator_InstanceType, Reservoir_InstanceType, Storage_InstanceType
+from firm_ce.system.topology import Line_InstanceType
 
 
 class Scenario:
@@ -33,7 +36,6 @@ class Scenario:
         self.id = scenario_id
         self.name = self.scenario_data["scenario_name"].lower()
         self.type = self.scenario_data["type"]
-        self.x0 = self._get_x0(model_data.x0s)
 
         self.network = construct_Network_object(
             self.get_scenario_dicts(model_data.nodes),
@@ -50,12 +52,65 @@ class Scenario:
             self.network.nodes,
         )
 
-        self.statistics = None
+        self.x0 = self._get_x0(model_data.x0s)
+        self.lower_bounds, self.upper_bounds = self.get_bounds()
+        if len(self.x0) > 0:
+            if (self.x0 - self.lower_bounds).min() < 0 or (self.x0 - self.upper_bounds).max() > 0:
+                self.logger.info("Initial guess (x0) is out of bounds. Clipping to bounds.")
+                self.x0 = np.clip(self.x0, self.lower_bounds, self.upper_bounds)
 
+        self.statistics = None
         self.assign_x_indices()
 
     def __repr__(self):
         return f"Scenario({self.id!r} {self.name!r})"
+
+    def get_bounds(self) -> NDArray[np.float64]:
+        def power_capacity_bounds(
+            asset_list: Union[List[Generator_InstanceType], List[Reservoir_InstanceType],
+                              List[Storage_InstanceType], List[Line_InstanceType]],
+            build_cap_constraint: str,
+        ) -> List[float]:
+            return [getattr(asset, build_cap_constraint) for asset in asset_list]
+
+        def energy_capacity_bounds(
+                asset_list: Union[List[Storage_InstanceType], List[Reservoir_InstanceType]],
+                build_cap_constraint: str
+        ) -> List[float]:
+            return [getattr(asset, build_cap_constraint) if asset.duration == 0 else 0.0 for asset in asset_list]
+
+        generators = list(self.fleet.generators.values())
+        reservoirs = list(self.fleet.reservoirs.values())
+        storages = list(self.fleet.storages.values())
+        lines = list(self.network.major_lines.values())
+
+        lower_bounds = np.array(
+            list(
+                chain(
+                    power_capacity_bounds(generators, "min_build"),
+                    power_capacity_bounds(reservoirs, "min_build_p"),
+                    energy_capacity_bounds(reservoirs, "min_build_e"),
+                    power_capacity_bounds(storages, "min_build_p"),
+                    energy_capacity_bounds(storages, "min_build_e"),
+                    power_capacity_bounds(lines, "min_build"),
+                )
+            )
+        )
+
+        upper_bounds = np.array(
+            list(
+                chain(
+                    power_capacity_bounds(generators, "max_build"),
+                    power_capacity_bounds(reservoirs, "max_build_p"),
+                    energy_capacity_bounds(reservoirs, "max_build_e"),
+                    power_capacity_bounds(storages, "max_build_p"),
+                    energy_capacity_bounds(storages, "max_build_e"),
+                    power_capacity_bounds(lines, "max_build"),
+                )
+            )
+        )
+
+        return lower_bounds, upper_bounds
 
     def load_datafiles(self, datafile_filenames_dict: Dict[str, DataFile], data_directory: str) -> None:
         datafiles = self._get_datafiles(datafile_filenames_dict, data_directory)
@@ -112,7 +167,7 @@ class Scenario:
                 except AttributeError:
                     x0_list = []
                 return np.array(x0_list, dtype=np.float64)
-        return None
+        return np.array([], dtype=np.float64)
 
     def assign_x_indices(self) -> None:
         x_index = 0
