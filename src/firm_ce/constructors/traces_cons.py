@@ -26,9 +26,9 @@ def select_datafile(
     datafile_type: str,
     object_name: str,
     datafiles_imported_dict: Dict[str, DataFile],
-    error_on_fail=True,
-    debug_timesteps: int = None,
+    limit_timesteps: int = None,
     yeartuple: tuple[int] = None,
+    error_on_fail: bool = True,
 ) -> NDArray[np.float64]:
     """
     Locates and returns the a data trace of a specified datafile_type associated with
@@ -54,9 +54,9 @@ def select_datafile(
     for datafile in matching_datafiles:
         if object_name in datafile.data.keys():
             trace = np.array(datafile.data[object_name], dtype=np.float64)
-
-            if debug_timesteps is not None:
-                trace = trim_with_timesteps(trace, debug_timesteps)
+            if limit_timesteps is not None:
+                # debug supercedes yeartuple specified in scenario
+                trace = trim_with_timesteps(trace, limit_timesteps)
             elif yeartuple is not None:
                 trace = trim_with_years(trace, datafile.data["year"], yeartuple)
 
@@ -71,21 +71,21 @@ def select_datafile(
 
 def trim_with_timesteps(
     data: NDArray[np.float64],
-    debug_timesteps: int,
+    limit_timesteps: int,
 ) -> NDArray[np.float64]:
     """
-    Trims the data array to only include the first `debug_timesteps` entries.
+    Trims the data array to only include the first `limit_timesteps` entries.
 
     Parameters:
     -------
     data (NDArray[np.float64]): The full data array.
-    debug_timesteps (int): The number of timesteps to retain.
+    limit_timesteps (int): The number of timesteps to retain.
 
     Returns:
     -------
     NDArray[np.float64]: The trimmed data array.
     """
-    return data[:debug_timesteps]
+    return data[:limit_timesteps]
 
 
 def trim_with_years(
@@ -106,8 +106,12 @@ def trim_with_years(
     -------
     NDArray[np.float64]: The trimmed data array.
     """
-    firstyear, lastyear = yeartuple
-    in_time_mask = (np.array(year_trace) >= firstyear) & (np.array(year_trace) <= lastyear)
+    firstyear, finalyear = yeartuple
+    in_time_mask = np.ones(data.shape, np.bool_)
+    if firstyear not in ('auto', 'none', ''):
+        in_time_mask *= year_trace >= firstyear
+    if finalyear not in ('auto', 'none', ''):
+        in_time_mask *= year_trace <= finalyear
     return data[in_time_mask]
 
 
@@ -115,7 +119,7 @@ def load_datafiles_to_generators(
     fleet: Fleet_InstanceType,
     datafiles_imported_dict: Dict[str, DataFile],
     resolution: float,
-    debug_timesteps: int = None,
+    limit_timesteps: int = None,
     yeartuple: tuple[int] = None,
 ) -> None:
     """
@@ -153,8 +157,8 @@ def load_datafiles_to_generators(
 
         generator_m.load_data(
             generator,
-            select_datafile("generation", generator.name, datafiles_imported_dict, generation, debug_timesteps, yeartuple),
-            select_datafile("flexible_annual_limit", generator.name, datafiles_imported_dict, flexible, debug_timesteps, yeartuple),
+            select_datafile("generation", generator.name, datafiles_imported_dict, limit_timesteps, yeartuple, generation),
+            select_datafile("flexible_annual_limit", generator.name, datafiles_imported_dict, limit_timesteps, yeartuple, flexible),
             resolution,
         )
 
@@ -164,7 +168,7 @@ def load_datafiles_to_generators(
 def load_datafiles_to_reservoirs(
     fleet: Fleet_InstanceType,
     datafiles_imported_dict: Dict[str, DataFile],
-    debug_timesteps: int = None,
+    limit_timesteps: int = None,
     yeartuple: tuple[int] = None,
 ) -> None:
     """
@@ -190,7 +194,7 @@ def load_datafiles_to_reservoirs(
     for reservoir in fleet.reservoirs.values():
         reservoir_m.load_data(
             reservoir,
-            select_datafile("reservoir_inflow", reservoir.name, datafiles_imported_dict, debug_timesteps, yeartuple),
+            select_datafile("reservoir_inflow", reservoir.name, datafiles_imported_dict, limit_timesteps, yeartuple),
         )
     return None
 
@@ -198,7 +202,7 @@ def load_datafiles_to_reservoirs(
 def load_datafiles_to_network(
     network: Network_InstanceType,
     datafiles_imported_dict: Dict[str, DataFile],
-    debug_timesteps: int = None,
+    limit_timesteps: int = None,
     yeartuple: tuple[int] = None,
 ) -> None:
     """
@@ -225,7 +229,7 @@ def load_datafiles_to_network(
     for node in network.nodes.values():
         node_m.load_data(
             node,
-            select_datafile("demand", node.name, datafiles_imported_dict, debug_timesteps, yeartuple),
+            select_datafile("demand", node.name, datafiles_imported_dict, limit_timesteps, yeartuple),
         )
     return None
 

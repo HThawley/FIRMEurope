@@ -24,7 +24,7 @@ for scenario in model.scenarios.values():
     if scenario.x0.size == 0:
         continue
 
-    scenario.load_datafiles(model.datafile_filenames_dict, model.data_directory, model.config)
+    scenario.load_datafiles(model.datafile_filenames_dict, model.data_directory)
     scenario.statistics = Statistics(
         scenario.x0,
         scenario.static,
@@ -40,7 +40,7 @@ for scenario in model.scenarios.values():
     scenario.statistics.write_results()
 
     scenario.validation = Validation(scenario)
-    scenario.validation.validate()
+    scenario.validation.validate(verbose = False)
     scenario.validation.write_results()
 
     scenario.unload_datafiles()

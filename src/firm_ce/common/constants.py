@@ -2,7 +2,7 @@ import os
 
 import numpy as np
 
-JIT_ENABLED = True
+JIT_ENABLED = False
 SAVE_POPULATION = True
 DEBUG = False
 EPSILON_FLOAT64 = np.finfo(np.float64).eps

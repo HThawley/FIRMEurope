@@ -76,6 +76,7 @@ class ModelConfig:
         self.model_name = config_dict["model_name"]
         self.balancing_type = str(config_dict["balancing_type"])
         self.fixed_costs_threshold = float(config_dict.get("fixed_costs_threshold", 500.0))
+        self.limit_timesteps = config_dict.get("limit_timesteps")
 
         if self.type == "single_time":
             self.iterations = int(config_dict["iterations"])

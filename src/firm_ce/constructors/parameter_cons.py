@@ -53,6 +53,7 @@ def determine_interval_parameters(
 def construct_ScenarioParameters_object(
     scenario_data_dict: Dict[str, str],
     node_count: int,
+    limit_timesteps: int = None,
 ) -> ScenarioParameters_InstanceType:
     """
     Takes data required to initialise the ScenarioParameters object, casts values into Numba-compatible
@@ -71,14 +72,30 @@ def construct_ScenarioParameters_object(
     """
     resolution = float(scenario_data_dict.get("resolution", 0.0))
     allowance = float(scenario_data_dict.get("allowance", 0.0))
+
     first_year = int(scenario_data_dict.get("firstyear", 0))
-    final_year = int(scenario_data_dict.get("finalyear", 0))
-    year_count = final_year - first_year + 1
-    leap_year_count, year_first_t, intervals_count = determine_interval_parameters(
-        first_year,
-        year_count,
-        resolution,
-    )
+    if limit_timesteps is not None:
+        intervals_count = limit_timesteps
+        year_count = int(intervals_count * resolution // 8759 + 1)
+        final_year = first_year + year_count - 1
+        leap_year_count, year_first_t, _ = determine_interval_parameters(
+            first_year,
+            year_count,
+            resolution,
+        )
+        if year_first_t[-1] > limit_timesteps: 
+            year_first_t = year_first_t[:-1]
+
+    else:
+        final_year = int(scenario_data_dict.get("finalyear", 0))
+        year_count = final_year - first_year + 1
+        leap_year_count, year_first_t, intervals_count = determine_interval_parameters(
+            first_year,
+            year_count,
+            resolution,
+        )
+
+
 
     return ScenarioParameters(
         resolution,

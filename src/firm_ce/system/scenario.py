@@ -31,7 +31,14 @@ class Scenario:
     def __init__(self, model_data: ModelData, scenario_id: int) -> None:
         self.logger, self.results_dir = model_data.logger, model_data.results_dir
 
-        self.scenario_data = model_data.scenarios[scenario_id]
+        self.model_data = model_data
+        config_dict = self.model_data.config
+        self.limit_timesteps = None
+        for item in config_dict.values():
+            if item["name"] == "limit_timesteps":
+                self.limit_timesteps = int(item["value"])
+                break
+        self.scenario_data = self.model_data.scenarios[scenario_id]
 
         self.id = scenario_id
         self.name = self.scenario_data["scenario_name"].lower()
@@ -42,7 +49,7 @@ class Scenario:
             self.get_scenario_dicts(model_data.lines),
             self.scenario_data["networksteps_max"],
         )
-        self.static = construct_ScenarioParameters_object(self.scenario_data, len(self.network.nodes))
+        self.static = construct_ScenarioParameters_object(self.scenario_data, len(self.network.nodes), self.limit_timesteps)
         self.fleet = construct_Fleet_object(
             self.get_scenario_dicts(model_data.generators),
             self.get_scenario_dicts(model_data.reservoirs),
@@ -116,23 +123,21 @@ class Scenario:
         self,
         datafile_filenames_dict: Dict[str, DataFile],
         data_directory: str,
-        config: ModelConfig,
     ) -> None:
         datafiles = self._get_datafiles(datafile_filenames_dict, data_directory)
 
-        debug_timesteps, yeartuple = None, None
+        yeartuple = None
 
-        if hasattr(config, "debug_timesteps") and config.debug_timesteps is not None:
-            debug_timesteps = int(config.debug_timesteps)
-            self.logger.info(f"Slicing data to first {debug_timesteps} timesteps per config file.")
+        if self.limit_timesteps is not None:
+            self.logger.info(f"Slicing data to first {self.limit_timesteps} timesteps per config file.")
         else:
             firstyear = self.scenario_data.get("firstyear", "auto")
-            lastyear = self.scenario_data.get("lastyear", "auto")
-            yeartuple = firstyear, lastyear
+            finalyear = self.scenario_data.get("finalyear", "auto")
+            yeartuple = firstyear, finalyear
 
-        load_datafiles_to_network(self.network, datafiles, debug_timesteps, yeartuple)
-        load_datafiles_to_generators(self.fleet, datafiles, self.static.resolution, debug_timesteps, yeartuple)
-        load_datafiles_to_reservoirs(self.fleet, datafiles, debug_timesteps, yeartuple)
+        load_datafiles_to_network(self.network, datafiles, self.limit_timesteps, yeartuple)
+        load_datafiles_to_generators(self.fleet, datafiles, self.static.resolution, self.limit_timesteps, yeartuple)
+        load_datafiles_to_reservoirs(self.fleet, datafiles, self.limit_timesteps, yeartuple)
 
         static_m.set_year_energy_demand(self.static, self.network.nodes)
 

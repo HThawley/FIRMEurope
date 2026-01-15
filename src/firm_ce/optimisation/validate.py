@@ -18,7 +18,7 @@ class Validation:
     def __init__(
         self,
         scenario: Scenario,
-        statistics_attr: str = "statistics"
+        statistics_attr: str = "statistics",
     ):
         if not hasattr(scenario, statistics_attr):
             raise RuntimeError("Run statistics before validating!")
@@ -42,10 +42,10 @@ class Validation:
         os.makedirs(validation_dir, exist_ok=True)
         return validation_dir
 
-    def validate(self) -> None:
+    def validate(self, verbose: bool = True) -> None:
         if not self.solution.evaluated:
             raise RuntimeError("Solution must be evaluated before validation")
-
+        self.verbose = verbose 
         self.result_files = {
             "energy_balance_ASSETS": self.validate_energy_balance("assets"),
             "energy_balance_NODES": self.validate_energy_balance("nodes"),
@@ -119,7 +119,7 @@ class Validation:
                 check_pass = (df.abs() <= TOLERANCE).all()
 
                 for check, node in zip(check_pass, nodes):
-                    if not check:
+                    if self.verbose and not check:
                         warn(f"Warning: Node '{node}' failed check: 'energy balance'.", ValidationWarning)
 
                 total_row = pd.DataFrame(df.abs().sum(axis=0).to_list(), columns=["Total"], index=nodes).T
@@ -144,7 +144,7 @@ class Validation:
                 df["Network"] += balance[cols].sum(axis=1)
 
                 check = (df.abs() <= TOLERANCE).all().all()
-                if not check:
+                if self.verbose and not check:
                     warn("Warning: 'Network' failed check: 'energy balance'.", ValidationWarning)
 
                 total_row = pd.DataFrame(df.abs().sum(axis=0).to_list(), columns=["Total"], index=["Network"]).T
@@ -163,7 +163,7 @@ class Validation:
         )
 
         def append_check(df: pd.DataFrame, item: Tuple, name: str, check: bool) -> pd.DataFrame:
-            if not check:
+            if self.verbose and not check:
                 warn(f"Warning: Asset '{item[0]}' failed check: '{name}'.", ValidationWarning)
             res = pd.DataFrame([[*item, name, check]], columns=df.columns)
             df = pd.concat((df, res), axis=0, ignore_index=True)
@@ -235,7 +235,7 @@ class Validation:
 
         def append_check(df: pd.DataFrame, item: Tuple, name: str, check: bool) -> pd.DataFrame:
             # TODO: add magnitude
-            if not check:
+            if self.verbose and not check:
                 warn(f"Warning: Asset '{item[0]}' failed check: '{name}'.", ValidationWarning)
             res = pd.DataFrame([[*item, name, check]], columns=df.columns)
             df = pd.concat((df, res), axis=0, ignore_index=True)
