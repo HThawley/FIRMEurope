@@ -13,6 +13,7 @@ import time
 
 from firm_ce.model import Model
 from firm_ce.optimisation.statistics import Statistics
+from firm_ce.optimisation.validate import Validation
 
 start_time = time.time()
 model = Model()
@@ -37,4 +38,9 @@ for scenario in model.scenarios.values():
     )
     scenario.statistics.generate_result_files()
     scenario.statistics.write_results()
+
+    scenario.validation = Validation(scenario)
+    scenario.validation.validate()
+    scenario.validation.write_results()
+
     scenario.unload_datafiles()
