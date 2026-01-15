@@ -179,10 +179,7 @@ class ResultFile:
         self.report = report.split(".")[0]
         self.target_directory = target_directory
         self.file_path = f"{target_directory}/{report}.{self.file_ext}"
-        if decimals is not None:
-            self.float_format_string = f".{int(decimals)}f"
-        else:
-            self.float_format_string = None
+        self.decimals = decimals
         self.data = data
         self.write_kwargs = write_kwargs if write_kwargs is not None else {}
 
@@ -242,7 +239,10 @@ class ResultFile:
             # overwrite default kwargs with user-supplied kwargs
             default_kwargs[k] = v
 
-        self.data.to_csv(self.file_path, **default_kwargs)
+        if self.decimals is not None:
+            self.data.round(self.decimals).to_csv(self.file_path, **default_kwargs)
+        else:
+            self.data.to_csv(self.file_path, **default_kwargs)
         print(f"Saved {self.report} to {self.target_directory}")
         return None
 
@@ -275,8 +275,11 @@ class ResultFile:
             # overwrite default kwargs with user-supplied kwargs
             default_kwargs[k] = v
 
-        writer = pd.ExcelWriter(self.file_path, mode=default_kwargs.pop("mode"))
-        self.data.to_excel(writer, **default_kwargs)
+        with pd.ExcelWriter(self.file_path, mode=default_kwargs.pop("mode")) as writer:
+            if self.decimals is not None:
+                self.data.round(self.decimals).to_excel(writer, **default_kwargs)
+            else:
+                self.data.to_excel(writer, **default_kwargs)
         print(f"Saved {self.report} to {self.target_directory}")
         return None
 
