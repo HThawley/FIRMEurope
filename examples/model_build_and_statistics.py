@@ -12,8 +12,8 @@ Alternative filepaths for the config and data folders can be provided as argumen
 import time
 
 from firm_ce.model import Model
-from firm_ce.optimisation.statistics import Statistics
-from firm_ce.optimisation.validate import Validation
+from firm_ce.analysis.statistics import Statistics
+from firm_ce.analysis.validate import Validation
 
 start_time = time.time()
 model = Model()

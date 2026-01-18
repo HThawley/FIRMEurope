@@ -5,8 +5,8 @@ from typing import List
 from firm_ce.common.constants import DEBUG
 from firm_ce.common.exceptions import ValidationError
 from firm_ce.io.data_model import ModelData
-from firm_ce.optimisation.statistics import Statistics
-from firm_ce.optimisation.validate import Validation
+from firm_ce.analysis.statistics import Statistics
+from firm_ce.analysis.validate import Validation
 from firm_ce.system.parameters import ModelConfig
 from firm_ce.system.scenario import Scenario
 
