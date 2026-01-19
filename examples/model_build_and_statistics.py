@@ -14,6 +14,7 @@ import time
 from firm_ce.model import Model
 from firm_ce.analysis.statistics import Statistics
 from firm_ce.analysis.validate import Validation
+from firm_ce.analysis.display import Display
 
 start_time = time.time()
 model = Model()
@@ -40,7 +41,11 @@ for scenario in model.scenarios.values():
     scenario.statistics.write_results()
 
     scenario.validation = Validation(scenario)
-    scenario.validation.validate(verbose = False)
+    scenario.validation.validate(verbose=False)
     scenario.validation.write_results()
+
+    display = Display(scenario.solution)
+    display.plot_energy_mix()
+    display.plot_power_capacity()
 
     scenario.unload_datafiles()

@@ -13,6 +13,9 @@ dependencies = [
     "scipy==1.14.1",
     "icc-rt",#==2020.0.133",
     "mga @ git+https://github.com/HThawley/MH-MGA.git",
+    "seaborn>=0.13",
+    "geopandas>=1.1",
+    "matplotlib>=3.10",
 ]
 authors = [
     {name = "Timothy Webster", email = "Timothy.Weber@anu.edu.au"},
