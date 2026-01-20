@@ -10,11 +10,12 @@ from firm_ce.system.costs import LTCosts, LTCosts_InstanceType, UnitCost_Instanc
 
 if JIT_ENABLED:
     node_spec = [
+        ("object_class", unicode_type),
         ("static_instance", boolean),
         ("id", int64),
         ("order", int64),
         ("name", unicode_type),
-        ("data_status", unicode_type),
+        ("data_status", boolean),
         ("data", float64[:]),
         ("residual_load", float64[:]),
         # Dynamic
@@ -126,11 +127,12 @@ class Node:
         order (int64): A scenario-level identifier for the Node instance.
         name (unicode_type): A string providing the ordinary name of the Node.
         """
+        self.object_class = "node"
         self.static_instance = static_instance
         self.id = idx
         self.order = order  # id specific to scenario
         self.name = name
-        self.data_status = "unloaded"
+        self.data_status = False
         self.data = np.empty((0,), dtype=np.float64)
 
         self.residual_load = np.empty((0,), dtype=np.float64)
@@ -173,6 +175,7 @@ else:
 
 if JIT_ENABLED:
     line_spec = [
+        ("object_class", unicode_type),
         ("static_instance", boolean),
         ("id", int64),
         ("order", int64),
@@ -289,6 +292,7 @@ class Line:
         when minimising/maximising installed capacity within the broad optimum space.
         cost (UnitCost_InstanceType): Exogenously defined cost assumptions.
         """
+        self.object_class = "line"
         self.static_instance = static_instance
         self.id = idx
         self.order = order  # id specific to scenario
@@ -324,6 +328,7 @@ else:
 
 if JIT_ENABLED:
     route_spec = [
+        ("object_class", unicode_type),
         ("static_instance", boolean),
         ("initial_node", Node_InstanceType),
         ("nodes", ListType(Node_InstanceType)),
@@ -389,6 +394,7 @@ class Route:
         legs (int64): Number of legs (Line/Node traversals) in the Route. Maximum value defined by networksteps_max in the
             `scenarios.csv` config file.
         """
+        self.object_class = "route"
         self.static_instance = static_instance
         self.initial_node = initial_node
         self.nodes = nodes_typed_list
@@ -411,6 +417,7 @@ else:
 
 if JIT_ENABLED:
     network_spec = [
+        ("object_type", unicode_type),
         ("static_instance", boolean),
         ("nodes", DictType(int64, Node_InstanceType)),
         ("major_lines", DictType(int64, Line_InstanceType)),
@@ -480,6 +487,7 @@ class Network:
             legs). Each typed list value contains all Routes with the same initial node and the same length (legs).
         networksteps_max (int64): Maximum length of Routes used for transmission actions.
         """
+        self.object_type = "Network"
         self.static_instance = static_instance
         self.nodes = nodes
         self.major_lines = major_lines

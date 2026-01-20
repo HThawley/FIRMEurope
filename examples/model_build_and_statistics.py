@@ -44,7 +44,7 @@ for scenario in model.scenarios.values():
     scenario.validation.validate(verbose=False)
     scenario.validation.write_results()
 
-    display = Display(scenario.solution)
+    display = Display(scenario.statistics.solution)
     display.plot_energy_mix()
     display.plot_power_capacity()
 

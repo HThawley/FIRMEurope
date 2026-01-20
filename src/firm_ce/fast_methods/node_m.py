@@ -44,7 +44,7 @@ def load_data(
     -------
     Attributes modified for the Node instance: data_status, data, residual_load.
     """
-    node_instance.data_status = "loaded"
+    node_instance.data_status = True
     node_instance.data = trace
     node_instance.residual_load = trace.copy()
     return None
@@ -70,7 +70,7 @@ def unload_data(
     -------
     Attributes modified for the Node instance: data_status, data, residual_load.
     """
-    node_instance.data_status = "unloaded"
+    node_instance.data_status = False
     node_instance.data = np.empty((0,), dtype=np.float64)
     node_instance.residual_load = np.empty((0,), dtype=np.float64)
     return None
@@ -95,10 +95,10 @@ def get_data(
 
     Raises:
     -------
-    RuntimeError: Raised if data_status is "unloaded" or if data_type does not correspond
+    RuntimeError: Raised if data_status is False or if data_type does not correspond
         to any data arrays for the Node jitclass.
     """
-    if node_instance.data_status == "unloaded":
+    if not node_instance.data_status:
         raise_getting_unloaded_data_error()
 
     if data_type == "trace":

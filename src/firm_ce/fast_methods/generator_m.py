@@ -99,7 +99,7 @@ def load_data(
     """
     generator_instance.data = generation_trace
     generator_instance.annual_constraints_data = annual_constraints
-    generator_instance.data_status = "loaded"
+    generator_instance.data_status = True
 
     update_residual_load(generator_instance, generator_instance.initial_capacity, interval_resolutions)
     return None
@@ -125,7 +125,7 @@ def unload_data(generator_instance: Generator_InstanceType) -> None:
     """
     generator_instance.data = np.empty((0,), dtype=np.float64)
     generator_instance.annual_constraints_data = np.empty((0,), dtype=np.float64)
-    generator_instance.data_status = "unloaded"
+    generator_instance.data_status = False
     return None
 
 
@@ -148,10 +148,10 @@ def get_data(
 
     Raises:
     -------
-    RuntimeError: Raised if data_status is "unloaded" or if data_type does not correspond
+    RuntimeError: Raised if data_status is False or if data_type does not correspond
         to any data arrays for the Generator jitclass.
     """
-    if generator_instance.data_status == "unloaded":
+    if not generator_instance.data_status:
         raise_getting_unloaded_data_error()
 
     if data_type == "annual_constraints_data":

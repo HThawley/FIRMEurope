@@ -166,7 +166,7 @@ def load_data(
     Attributes modified for the referenced Reservoir.node: residual_load.
     """
     reservoir_instance.data = inflow_trace
-    reservoir_instance.data_status = "loaded"
+    reservoir_instance.data_status = True
 
     return None
 
@@ -189,7 +189,7 @@ def unload_data(reservoir_instance: Reservoir_InstanceType) -> None:
     Attributes modified for the Reservoir instance: data_status, data, annual_constraints_data.
     """
     reservoir_instance.data = np.empty((0,), dtype=np.float64)
-    reservoir_instance.data_status = "unloaded"
+    reservoir_instance.data_status = False
     return None
 
 
@@ -212,10 +212,10 @@ def get_data(
 
     Raises:
     -------
-    RuntimeError: Raised if data_status is "unloaded" or if data_type does not correspond
+    RuntimeError: Raised if data_status is False or if data_type does not correspond
         to any data arrays for the Reservoir jitclass.
     """
-    if reservoir_instance.data_status == "unloaded":
+    if not reservoir_instance.data_status:
         raise_getting_unloaded_data_error()
 
     if data_type == "inflow":
