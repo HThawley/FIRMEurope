@@ -20,33 +20,6 @@ from firm_ce.system.parameters import ScenarioParameters_InstanceType
 from firm_ce.system.topology import Network_InstanceType
 
 
-def prod(args):
-    retval = 1
-    for arg in args:
-        retval *= arg
-    return retval
-
-
-asset_containers = {
-    "generators": "fleet",
-    "reservoirs": "fleet",
-    "storages": "fleet",
-    "major_lines": "network",
-    "minor_lines": "network",
-    "nodes": "network",
-}
-
-
-asset_class_to_display = {
-    "generators": "Generator",
-    "reservoirs": "Reservoir",
-    "storages": "Storage",
-    "major_lines": "Major Line",
-    "minor_lines": "Minor Line",
-    "nodes": "Node",
-}
-
-
 class Statistics:
     def __init__(
         self,
@@ -196,7 +169,7 @@ class Statistics:
         def _construct_column(asset: Any, asset_class: str, index: pd.Index) -> pd.Series:
             return pd.Series([
                 asset.name,
-                asset_class_to_display[asset_class],
+                Accessor.get_display_name(asset_class),
                 asset.id,
                 "Total Cost",
                 "[$]",
@@ -389,7 +362,7 @@ class Statistics:
                     continue
                 column = pd.Series(index=df.index, dtype=object)
                 column["Asset Name"] = asset.name
-                column["Asset Type"] = asset_class_to_display[asset_class]
+                column["Asset Type"] = accessor.get_display_name(asset_class)
                 column["Asset ID"] = asset.id
                 column["Discounted Cost [$]"] = cost_getter(asset)
                 column["Generation [MWh]"] = generation_getter(asset)
@@ -526,7 +499,7 @@ class Statistics:
             full_trace = time_series_getter(asset)
             return pd.Series([
                 asset.name,
-                asset_class_to_display[asset_class],
+                accessor.get_display_name(asset_class),
                 asset.id,
                 column_name,
                 "[GWh]",
@@ -537,7 +510,6 @@ class Statistics:
         def append_asset(
             df: pd.DataFrame,
             asset_class: str,
-            asset_class_name: str,
             column_name: str,
             time_series_getter: Callable,
             condition: Callable = Accessor.is_any,
