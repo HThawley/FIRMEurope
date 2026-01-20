@@ -9,6 +9,7 @@ from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
 
 if JIT_ENABLED:
     fuel_spec = [
+        ("object_class", unicode_type),
         ("static_instance", boolean),
         ("id", int64),
         ("name", unicode_type),
@@ -41,7 +42,7 @@ class Fuel:
         id (int): Unique identifier for the fuel.
         fuel_dict (Dict[str, str]): Dictionary containing 'name', 'cost', and 'emissions' keys.
         """
-
+        self.object_class = "fuel"
         self.static_instance = static_instance
         self.id = idx
         self.name = name
@@ -56,6 +57,7 @@ else:
 
 if JIT_ENABLED:
     generator_spec = [
+        ("object_class", unicode_type),
         ("static_instance", boolean),
         ("id", int64),
         ("order", int64),
@@ -71,7 +73,7 @@ if JIT_ENABLED:
         ("near_optimum_check", boolean),
         ("group", unicode_type),
         ("cost", UnitCost_InstanceType),
-        ("data_status", unicode_type),
+        ("data_status", boolean),
         ("data", float64[:]),
         ("annual_constraints_data", float64[:]),
         ("candidate_x_idx", int64),
@@ -135,7 +137,7 @@ class Generator:
     group (unicode_type): Group label used by broad optimum optimisation. Grouped assets are considered in aggregate
         when minimising/maximising installed capacity within the broad optimum space.
     cost (UnitCost_InstanceType): Exogenously defined cost assumptions.
-    data_status (unicode_type): Status of data loading (e.g., 'unloaded').
+    data_status (boolean): Status of data loading.
     data (float64[:]): Interval capacity factor trace data. Each value represents the capacity factor of the solar, wind
         or baseload Generator in each time interval of the modelling horizon.
     annual_constraints_data (float64[:]): Annual generation constraints for flexible Generators, units GWh/year.
@@ -190,6 +192,7 @@ class Generator:
                         Minor lines should have empty node_start and node_end values. They do not form part
                         of the network topology, but are used to estimate connection costs.
         """
+        self.object_class = "generator"
         self.static_instance = static_instance
         self.id = idx
         self.order = order  # id specific to scenario
@@ -206,7 +209,7 @@ class Generator:
         self.group = group
         self.cost = cost
 
-        self.data_status = "unloaded"
+        self.data_status = False
         self.data = np.empty((0,), dtype=np.float64)
         self.annual_constraints_data = np.empty((0,), dtype=np.float64)
 
@@ -241,6 +244,7 @@ else:
 
 if JIT_ENABLED:
     reservoir_spec = [
+        ("object_class", unicode_type),
         ("static_instance", boolean),
         ("id", int64),
         ("order", int64),
@@ -262,7 +266,7 @@ if JIT_ENABLED:
         ("line", Line_InstanceType),
         ("group", unicode_type),
         ("cost", UnitCost_InstanceType),
-        ("data_status", unicode_type),
+        ("data_status", boolean),
         ("data", float64[:]),
         ("candidate_p_x_idx", int64),
         ("candidate_e_x_idx", int64),
@@ -338,7 +342,7 @@ class Reservoir:
     group (unicode_type): Group label used by broad optimum optimisation. Grouped assets are considered in aggregate
         when minimising/maximising installed capacity within the broad optimum space.
     cost (UnitCost_InstanceType): Exogenously defined cost assumptions.
-    data_status (unicode_type): Status of data loading (e.g., 'unloaded').
+    data_status (boolean): Status of data loading.
     data (float64[:]): Interval inflow trace data. Each value represents the reservoir inflow of fuel (in GWh) in each time
         interval of the modelling horizon.
     candidate_p_x_idx (int64): Index of one Reservoir decision variable (new build power capacity) in the candidate
@@ -419,6 +423,7 @@ class Reservoir:
             when minimising/maximising installed capacity within the broad optimum space.
         cost (UnitCost_InstanceType): Exogenously defined cost assumptions.
         """
+        self.object_class = "reservoir"
         self.static_instance = static_instance
         self.id = idx
         self.order = order  # id specific to scenario
@@ -441,7 +446,7 @@ class Reservoir:
         self.group = group
         self.cost = cost
 
-        self.data_status = "unloaded"
+        self.data_status = False
         self.data = np.empty((0,), dtype=np.float64)
         self.candidate_p_x_idx = -1
         self.candidate_e_x_idx = -1
@@ -478,6 +483,7 @@ else:
 
 if JIT_ENABLED:
     storage_spec = [
+        ("object_class", unicode_type),
         ("static_instance", boolean),
         ("id", int64),
         ("order", int64),
@@ -566,7 +572,7 @@ class Storage:
                         Minor lines should have empty node_start and node_end values. They do not form part
                         of the network topology, but are used to estimate connection costs.
         """
-
+        self.object_class = "storage"
         self.static_instance = static_instance
         self.id = idx
         self.order = order  # id specific to scenario
@@ -626,6 +632,7 @@ else:
 
 if JIT_ENABLED:
     fleet_spec = [
+        ("object_class", unicode_type),
         ("static_instance", boolean),
         ("generators", DictType(int64, Generator_InstanceType)),
         ("reservoirs", DictType(int64, Reservoir_InstanceType)),
@@ -670,6 +677,7 @@ class Fleet:
         storages (DictType(int64, Storage_InstanceType)): Typed dictionary of Storage instances keyed by their
             scenario-level orders.
         """
+        self.object_class = "fleet"
         self.static_instance = static_instance
         self.generators = generators
         self.reservoirs = reservoirs

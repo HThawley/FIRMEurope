@@ -6,6 +6,7 @@ from typing import Dict, Tuple
 
 # Import necessary types for type hinting if available in the environment
 from firm_ce.optimisation.single_time import Solution
+from firm_ce.analysis.accessor import Accessor
 
 
 class Display:
@@ -22,6 +23,7 @@ class Display:
         Initialize the plotter with a Solution object and map data.
         """
         self.solution = solution
+        self.accessor = Accessor(solution, "GW")
         self.map_data = gpd.read_file("./inputs/map/europe.geojson")
 
         # Filter for relevant bounds or specific countries if needed.
@@ -35,11 +37,12 @@ class Display:
         self.colors = sns.color_palette("deep")
         self.tech_colors = {
             "Solar": self.colors[1],
-            "Wind": self.colors[5],
+            "Onshore Wind": self.colors[5],
+            "Offshore Wind": self.colors[4],
             "Hydro": self.colors[0],
             "Biomass": self.colors[3],
             "Gas": self.colors[7],
-            "Nuclear": self.colors[4],
+            "Nuclear": self.colors[6],
             "Battery": self.colors[2],
             "PHES": self.colors[9],
             "Coal": (0.2, 0.2, 0.2),
@@ -50,15 +53,22 @@ class Display:
         Matches network nodes to map geometries and calculates centroids.
         """
         centroids = {}
+
+        # Create a temporary projected copy (EPSG:3035) for accurate math
+        map_projected = self.map_data.to_crs(epsg=3035)
+        # 2. Calculate centroids in the projected CRS
+        cents_projected = map_projected.geometry.centroid
+        # 3. Convert centroids back to WGS84 (EPSG:4326) to match the map plot axes
+        cents_wgs84 = cents_projected.to_crs(epsg=4326)
+
         # Iterate through nodes in the solution network
         for node in self.solution.network.nodes.values():
             # Find corresponding geometry in GeoJSON
-            # This assumes exact name match. You might need a mapping dictionary
-            # if your node names (e.g. 'FRA') differ from GeoJSON (e.g. 'France').
-            match = self.map_data[self.map_data["ISO3"] == node.name]  # Adjust column name 'name' as needed
+            match_indices = self.map_data.index[self.map_data["ISO3"].str.lower() == node.name.lower()]
 
-            if not match.empty:
-                pt = match.geometry.centroid.iloc[0]
+            if not match_indices.empty:
+                idx = match_indices[0]
+                pt = cents_wgs84[idx]
                 centroids[node.name] = (pt.x, pt.y)
             else:
                 print(f"Warning: No map geometry found for node {node.name}. Using (0,0).")
@@ -238,34 +248,20 @@ class Display:
     def _aggregate_energy_by_node(self):
         """
         Scans fleet generators, reservoirs, storages to sum energy by node and tech.
-        Note: Requires accessing 'generation' timeseries attribute from assets.
         """
         data = {}
 
-        # Generators
-        for gen in self.solution.fleet.generators.values():
-            n = gen.node.name
-            if n not in data:
-                data[n] = {}
+        for asset_class in ("generators", "reservoirs", "storages"):
+            for asset in self.accessor.get_assets(asset_class).values():
+                n = asset.node.name
+                tech = self._identify_tech(asset.unit_type)
 
-            # Identify tech
-            tech = self._identify_tech(gen.name, gen.unit_type, gen.group)
+                if n not in data:
+                    data[n] = {}
+                if tech not in data[n]:
+                    data[n][tech] = 0.0
 
-            # Sum generation (assuming generation is a numpy array in the object)
-            # You might need to adjust '.generation' to the actual attribute name
-            # in your JIT class (e.g. gen.generation or calculated locally)
-            total_gen = np.sum(gen.generation) / 1000.0  # Convert to GWh
-
-            data[n][tech] = data[n].get(tech, 0) + total_gen
-
-        # Reservoirs (Hydro)
-        for res in self.solution.fleet.reservoirs.values():
-            n = res.node.name
-            if n not in data:
-                data[n] = {}
-            tech = "Hydro"  # or distinguish PHES
-            total_gen = np.sum(res.generation) / 1000.0
-            data[n][tech] = data[n].get(tech, 0) + total_gen
+                data[n][tech] += self.accessor.get_power_net(asset)
 
         return data
 
@@ -275,26 +271,17 @@ class Display:
         """
         data = {}
 
-        for gen in self.solution.fleet.generators.values():
-            n = gen.node.name
-            if n not in data:
-                data[n] = {}
-            tech = self._identify_tech(gen.name, gen.unit_type, gen.group)
-            data[n][tech] = data[n].get(tech, 0) + (gen.capacity / 1000.0)  # MW to GW
+        for asset_class in ("generators", "reservoirs", "storages"):
+            for asset in self.accessor.get_assets(asset_class).values():
+                n = asset.node.name
+                tech = self._identify_tech(asset.unit_type)
 
-        for res in self.solution.fleet.reservoirs.values():
-            n = res.node.name
-            if n not in data:
-                data[n] = {}
-            tech = "Hydro"
-            data[n][tech] = data[n].get(tech, 0) + (res.power_capacity / 1000.0)
+                if n not in data:
+                    data[n] = {}
+                if tech not in data[n]:
+                    data[n][tech] = 0.0
 
-        for stor in self.solution.fleet.storages.values():
-            n = stor.node.name
-            if n not in data:
-                data[n] = {}
-            tech = "Storage"
-            data[n][tech] = data[n].get(tech, 0) + (stor.power_capacity / 1000.0)
+                data[n][tech] += self.accessor.get_power_capacity(asset)
 
         return data
 
@@ -304,14 +291,18 @@ class Display:
 
         if "solar" in name_lower or "pv" in name_lower:
             return "Solar"
-        if "wind" in name_lower:
-            return "Wind"
+        if "onshore" in name_lower or "onsw" in name_lower:
+            return "Onshore Wind"
+        if "offshore" in name_lower or "offw" in name_lower:
+            return "Offshore Wind"
         if "hydro" in name_lower:
             return "Hydro"
         if "nuke" in name_lower or "nuclear" in name_lower:
             return "Nuclear"
         if "gas" in name_lower or "ccgt" in name_lower or "ocgt" in name_lower:
             return "Gas"
+        if "flexible" in name_lower:
+            return "Gas"  # TODO: update flexible classification
         if "bio" in name_lower:
             return "Biomass"
         if "coal" in name_lower:
