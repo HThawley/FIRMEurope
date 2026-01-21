@@ -85,11 +85,11 @@ class Statistics:
             raise RuntimeError("Solution must be evaluated before generating statistics.")
 
         self.result_files = {
-            "capacities": self.generate_capacities_file(),
-            "component_costs": self.generate_component_costs_file(),
-            "energy_balance_ASSETS": self.generate_energy_balance_file("assets"),
-            "energy_balance_NODES": self.generate_energy_balance_file("nodes"),
-            "energy_balance_NETWORK": self.generate_energy_balance_file("network"),
+            # "capacities": self.generate_capacities_file(),
+            # "component_costs": self.generate_component_costs_file(),
+            # "energy_balance_ASSETS": self.generate_energy_balance_file("assets"),
+            # "energy_balance_NODES": self.generate_energy_balance_file("nodes"),
+            # "energy_balance_NETWORK": self.generate_energy_balance_file("network"),
             "levelised_costs": self.generate_levelised_costs_file(),
             "summary": self.generate_summary_file(),
             "x": self.generate_x_file(),
@@ -112,9 +112,9 @@ class Statistics:
         """Generates the capacities CSV"""
         accessor = Accessor(self.solution, "GW")
 
-        def _construct_column(asset, asset_class, column_name, column_units, index) -> pd.Series:
-            capacity = accessor.get_capacity(asset)
-            new_build, min_build, max_build = accessor.get_build_limits(asset)
+        def _construct_column(asset, asset_class, column_name, column_units, attribute, index) -> pd.Series:
+            capacity = accessor.get_capacity(asset, attribute)
+            new_build, min_build, max_build = accessor.get_build_limits(asset, attribute)
 
             return pd.Series([
                 asset.name,
@@ -144,7 +144,7 @@ class Statistics:
             df = pd.concat((
                 df,
                 pd.concat((
-                    _construct_column(asset, asset_class, column_name, column_units, df.index)
+                    _construct_column(asset, asset_class, column_name, column_units, attribute, df.index)
                     for asset in accessor.get_assets(asset_class).values()
                 ), axis=1),
             ), axis=1)
@@ -250,18 +250,18 @@ class Statistics:
 
                 case "node":
                     for node in accessor.get_assets("nodes").values():
-                        column = pd.Series([], index=df.index)
+                        column = pd.Series(0, index=df.index, dtype=object)
                         column.iloc[:5] = node.name, accessor.get_display_name(asset_class), node.id, column_name, column_units
                         for asset in accessor.get_assets(asset_class).values():
                             if not condition(asset) or asset.node.id != node.id:
                                 continue
                             column.iloc[5:] += _construct_column(
-                                node, asset_class, column_name, column_units, time_series_getter, df.index).iloc[5:]
+                                asset, asset_class, column_name, column_units, time_series_getter, df.index).iloc[5:]
                         df = pd.concat((df, column), axis=1)
                     return df
 
                 case "network":
-                    column = pd.Series([], index=df.index)
+                    column = pd.Series(0, index=df.index, dtype=object)
                     column.iloc[:5] = "Network", "Network", 0, column_name, column_units
                     for asset in accessor.get_assets(asset_class).values():
                         if not condition(asset):
@@ -285,7 +285,7 @@ class Statistics:
                                    condition=Accessor.is_flexible)
                 df = append_series(df, "asset", "reservoirs", "Reservoir Energy", "[MWh]", accessor.get_storage_level_trace)
                 df = append_series(df, "asset", "storages", "Stored Energy", "[MWh]", accessor.get_storage_level_trace)
-                df = append_series(df, "asset", "reservoirs", "Inflow", "[MWh]", accessor.get_inflow_energy)
+                df = append_series(df, "asset", "reservoirs", "Inflow", "[MWh]", accessor.get_inflow_trace)
                 df = append_series(df, "asset", "nodes", "Spillage", "[MW]", accessor.get_spillage_trace)
                 df = append_series(df, "asset", "nodes", "Deficit", "[MW]", accessor.get_deficit_trace)
                 df = append_series(df, "asset", "major_lines", "Flow", "[MW]", accessor.get_transmission_trace)
@@ -308,7 +308,7 @@ class Statistics:
                                    condition=Accessor.is_flexible)
                 df = append_series(df, "node", "reservoirs", "Reservoir Energy", "[MWh]", accessor.get_storage_level_trace)
                 df = append_series(df, "node", "storages", "Stored Energy", "[MWh]", accessor.get_storage_level_trace)
-                df = append_series(df, "node", "reservoirs", "Reservoir Inflow", "[MWh]", accessor.get_inflow_energy)
+                df = append_series(df, "node", "reservoirs", "Reservoir Inflow", "[MWh]", accessor.get_inflow_trace)
                 df = append_series(df, "asset", "nodes", "Spillage", "[MW]", accessor.get_spillage_trace)
                 df = append_series(df, "asset", "nodes", "Deficit", "[MW]", accessor.get_deficit_trace)
                 df = append_series(df, "asset", "major_lines", "Flow", "[MW]", accessor.get_transmission_trace)
@@ -331,7 +331,7 @@ class Statistics:
                                    condition=Accessor.is_flexible)
                 df = append_series(df, "network", "reservoirs", "Reservoir Energy", "[MWh]", accessor.get_storage_level_trace)
                 df = append_series(df, "network", "storages", "Stored Energy", "[MWh]", accessor.get_storage_level_trace)
-                df = append_series(df, "network", "reservoirs", "Reservoir Inflow", "[MWh]", accessor.get_inflow_energy)
+                df = append_series(df, "network", "reservoirs", "Reservoir Inflow", "[MWh]", accessor.get_inflow_trace)
                 df = append_series(df, "network", "nodes", "Spillage", "[MW]", accessor.get_spillage_trace)
                 df = append_series(df, "network", "nodes", "Deficit", "[MW]", accessor.get_deficit_trace)
 
@@ -341,7 +341,7 @@ class Statistics:
 
     def generate_levelised_costs_file(self) -> ResultFile:
 
-        accessor = Accessor(self.solution)
+        accessor = Accessor(self.solution, "GW")
 
         def get_ltcost(asset):
             return ltcosts_m.get_total(asset.lt_costs)  # $

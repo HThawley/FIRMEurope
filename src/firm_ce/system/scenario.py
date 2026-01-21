@@ -61,10 +61,10 @@ class Scenario:
 
         self.x0 = self._get_x0(model_data.x0s)
         self.lower_bounds, self.upper_bounds = self.get_bounds()
-        if len(self.x0) > 0:
-            if (self.x0 - self.lower_bounds).min() < 0 or (self.x0 - self.upper_bounds).max() > 0:
-                self.logger.info("Initial guess (x0) is out of bounds. Clipping to bounds.")
-                self.x0 = np.clip(self.x0, self.lower_bounds, self.upper_bounds)
+        # if len(self.x0) > 0:
+        #     if (self.x0 - self.lower_bounds).min() < 0 or (self.x0 - self.upper_bounds).max() > 0:
+        #         self.logger.info("Initial guess (x0) is out of bounds. Clipping to bounds.")
+        #         self.x0 = np.clip(self.x0, self.lower_bounds, self.upper_bounds)
 
         self.statistics = None
         self.assign_x_indices()

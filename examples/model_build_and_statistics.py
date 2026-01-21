@@ -37,7 +37,7 @@ for scenario in model.scenarios.values():
         model.config.fixed_costs_threshold,
         False,
     )
-    scenario.statistics.generate_result_files()
+    # scenario.statistics.generate_result_files()
     scenario.statistics.write_results()
 
     scenario.validation = Validation(scenario)
@@ -45,7 +45,10 @@ for scenario in model.scenarios.values():
     scenario.validation.write_results()
 
     display = Display(scenario.statistics.solution)
-    display.plot_energy_mix()
+    display.plot_energy_mix(curtailment=False)
+    display.plot_energy_mix(curtailment=True)
     display.plot_power_capacity()
+    display.plot_power_capacity("existing")
+    display.plot_power_capacity("new_build")
 
     scenario.unload_datafiles()

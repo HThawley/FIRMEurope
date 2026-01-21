@@ -1,5 +1,6 @@
 import geopandas as gpd
 import matplotlib.pyplot as plt
+from matplotlib.patches import Wedge
 import numpy as np
 import seaborn as sns
 from typing import Dict, Tuple
@@ -28,7 +29,7 @@ class Display:
 
         # Filter for relevant bounds or specific countries if needed.
         # Here we assume the geojson contains the relevant EU states.
-        self.map_data = self.map_data.to_crs(epsg=4326)  # Ensure WGS84
+        self.map_data = self.map_data.to_crs(epsg=3035)
 
         # Calculate centroids for node placement
         # Assumes the 'name' column in GeoJSON matches node.name in the Solution
@@ -36,7 +37,8 @@ class Display:
 
         self.colors = sns.color_palette("deep")
         self.tech_colors = {
-            "Solar": self.colors[1],
+            "Utility Solar": self.colors[1],
+            "Rooftop Solar": self.colors[8],
             "Onshore Wind": self.colors[5],
             "Offshore Wind": self.colors[4],
             "Hydro": self.colors[0],
@@ -54,148 +56,144 @@ class Display:
         """
         centroids = {}
 
-        # Create a temporary projected copy (EPSG:3035) for accurate math
-        map_projected = self.map_data.to_crs(epsg=3035)
-        # 2. Calculate centroids in the projected CRS
-        cents_projected = map_projected.geometry.centroid
-        # 3. Convert centroids back to WGS84 (EPSG:4326) to match the map plot axes
-        cents_wgs84 = cents_projected.to_crs(epsg=4326)
+        # Calculate centroids directly on the projected map
+        map_cents = self.map_data.geometry.centroid
 
-        # Iterate through nodes in the solution network
         for node in self.solution.network.nodes.values():
-            # Find corresponding geometry in GeoJSON
-            match_indices = self.map_data.index[self.map_data["ISO3"].str.lower() == node.name.lower()]
+            # Match ISO3 or Name
+            # Ensure your GeoJSON column name matches (e.g. 'ISO3', 'id', 'name')
+            match_indices = self.map_data.index[
+                self.map_data["ISO3"].str.lower() == node.name.lower()
+            ]
 
             if not match_indices.empty:
                 idx = match_indices[0]
-                pt = cents_wgs84[idx]
+                pt = map_cents[idx]
                 centroids[node.name] = (pt.x, pt.y)
             else:
-                print(f"Warning: No map geometry found for node {node.name}. Using (0,0).")
+                print(f"Warning: No map geometry found for node {node.name}.")
                 centroids[node.name] = (0, 0)
         return centroids
 
-    def _draw_pie(self, ax, dist, xpos, ypos, size, colors):
+    def _draw_pie(self, ax, dist, xpos, ypos, radius, colors):
         """
-        Helper to draw a pie chart at a specific location
+        Draws a pie chart using Wedge patches which respect data coordinates.
+        Replaces ax.scatter to fix the 'exploding wedge' distortion.
         """
         if sum(dist) == 0:
             return
+        # Normalize distribution for slice angles
+        data = np.array(dist)
+        data = data / data.sum()
+        start_angle = 90
 
-        # Normalize distance for pie slices
-        cumsum = np.cumsum(dist)
-        cumsum = cumsum / cumsum[-1]
-        pie = [0] + cumsum.tolist()
+        for i, val in enumerate(data):
+            if val == 0:
+                continue
 
-        for i, r in enumerate(zip(pie[:-1], pie[1:])):
-            r1, r2 = r
-            angles = np.linspace(2 * np.pi * r1, 2 * np.pi * r2)
-            x = [0] + np.cos(angles).tolist()
-            y = [0] + np.sin(angles).tolist()
+            deg = val * 360
+            end_angle = start_angle + deg
 
-            xy = np.column_stack([x, y])
-
-            ax.scatter(
-                [xpos],
-                [ypos],
-                marker=xy,
-                s=size,
-                zorder=100,
+            w = Wedge(
+                (xpos, ypos),
+                radius,
+                start_angle,
+                end_angle,
                 facecolor=colors[i],
-                edgecolor="none",
+                zorder=100,
+                edgecolor='none'
             )
+            ax.add_patch(w)
+            start_angle = end_angle
 
-        # Draw outline
-        ax.scatter(
-            [xpos],
-            [ypos],
-            marker="o",
-            s=size,
-            zorder=101,
-            facecolor=[1, 1, 1, 0],
-            edgecolor=[0, 0, 0, 1],
-            linewidth=0.5,
+        # Outline
+        outline = Wedge(
+            (xpos, ypos), radius, 0, 360,
+            facecolor="none", edgecolor="black", linewidth=0.5, zorder=101
         )
+        ax.add_patch(outline)
 
-    def plot_energy_mix(self, save_path=None):
+    def plot_energy_mix(self, curtailment=False, save_path=None):
         """
         Plots total energy generation mix (GWh) per node.
         """
         fig, ax = self._setup_map_axis()
+        node_mix = self._aggregate_energy_by_node(curtailment)
+        max_total = max((sum(mix.values()) for mix in node_mix.values()), default=0)
 
-        # Aggregate Generation Data
-        node_mix = self._aggregate_energy_by_node()
-
-        # Scale factor for pie charts
-        max_energy = max(sum(mix.values()) for mix in node_mix.values()) if node_mix else 1
-        scale_factor = 2000  # Adjust visualization size
+        MAX_RADIUS_METERS = 100_000
 
         for node_name, mix in node_mix.items():
             if node_name not in self.centroids:
                 continue
 
-            x, y = self.centroids[node_name]
             total = sum(mix.values())
             if total == 0:
                 continue
+
+            # Calculate Radius: Proportional to sqrt(Area) to preserve perception
+            # R_node = R_max * sqrt(Val_node / Val_max)
+            radius = MAX_RADIUS_METERS * np.sqrt(total / max_total)
+
+            x, y = self.centroids[node_name]
 
             # Prepare data for pie chart
             keys = sorted(mix.keys())
             values = [mix[k] for k in keys]
             colors = [self._get_color(k) for k in keys]
+            self._draw_pie(ax, values, x, y, radius, colors)
 
-            # Size relative to total energy, log scale or sqrt often better for maps
-            size = (total / max_energy) * scale_factor + 50
-
-            self._draw_pie(ax, values, x, y, size, colors)
-
-        # Draw Transmission Flows (Net Flow)
         self._draw_transmission(ax, flow_type="energy")
-
         self._add_legend(ax, node_mix)
-        ax.set_title("Annual Energy Mix (GWh)")
+
+        if curtailment:
+            ax.set_title("Annual Energy Mix post-curtailment (GWh)")
+        else:
+            ax.set_title("Annual Energy Mix pre-curtailment (GWh)")
 
         if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches="tight")
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
         return fig, ax
 
-    def plot_power_capacity(self, save_path=None):
+    def plot_power_capacity(self, build=None, save_path=None):
         """
         Plots installed power capacity (GW) per node.
         """
         fig, ax = self._setup_map_axis()
+        node_cap = self._aggregate_capacity_by_node(build)
+        max_total = max((sum(cap.values()) for cap in node_cap.values()), default=0)
 
-        # Aggregate Capacity Data
-        node_cap = self._aggregate_capacity_by_node()
-
-        max_cap = max(sum(cap.values()) for cap in node_cap.values()) if node_cap else 1
-        scale_factor = 2500
+        MAX_RADIUS_METERS = 100_000
 
         for node_name, cap in node_cap.items():
             if node_name not in self.centroids:
                 continue
 
-            x, y = self.centroids[node_name]
             total = sum(cap.values())
             if total == 0:
                 continue
+
+            radius = MAX_RADIUS_METERS * np.sqrt(total / max_total)
+            x, y = self.centroids[node_name]
 
             keys = sorted(cap.keys())
             values = [cap[k] for k in keys]
             colors = [self._get_color(k) for k in keys]
 
-            size = (total / max_cap) * scale_factor + 50
+            self._draw_pie(ax, values, x, y, radius, colors)
 
-            self._draw_pie(ax, values, x, y, size, colors)
-
-        # Draw Transmission Capacities
-        self._draw_transmission(ax, flow_type="capacity")
-
+        self._draw_transmission(ax, flow_type="capacity", build=build)
         self._add_legend(ax, node_cap)
-        ax.set_title("Installed Power Capacity (GW)")
+        match str(build).lower():
+            case "none" | "all":
+                ax.set_title("Installed Power Capacity (GW)")
+            case "new_build":
+                ax.set_title("Installed Power Capacity (GW) (New build only)")
+            case "existing" | "initial":
+                ax.set_title("Installed Power Capacity (GW) (Existing only)")
 
         if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches="tight")
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
         return fig, ax
 
     def _setup_map_axis(self):
@@ -204,48 +202,76 @@ class Display:
         ax.set_yticks([])
         ax.axis("off")
 
+        ax.set_aspect("equal")
+
         # Plot background map
         self.map_data.plot(ax=ax, edgecolor="black", facecolor="lightgrey", zorder=1)
 
-        # Set European Limits (-25W to 45E, 34N to 72N)
-        ax.set_xlim(-25, 45)
-        ax.set_ylim(34, 72)
-
+        # Set Limits dynamically based on the map bounds
+        minx, miny, maxx, maxy = self.map_data.total_bounds
+        margin = 200_000  # 200km margin
+        ax.set_xlim(minx - margin, maxx + margin)
+        ax.set_ylim(miny - margin, maxy + margin)
         return fig, ax
 
-    def _draw_transmission(self, ax, flow_type="capacity"):
+    def _draw_transmission(self, ax, flow_type="capacity", build=None):
         """
-        Draws lines between nodes.
-        flow_type='capacity': Line width represents installed capacity.
-        flow_type='energy': Arrows represent net energy flow.
+        Draws transmission lines with dynamic width scaling.
+        Uses a two-pass approach:
+        1. Scan all lines to find the maximum value (capacity or flow).
+        2. Draw lines scaled relative to that maximum.
         """
-        # Iterate over major lines in the network
-        # Note: Solution.network.major_lines is a typed dict
+        # Configuration for visual scaling
+        MAX_LINE_WIDTH = 5.0  # The thickest line will be this wide (in points)
+        MIN_LINE_WIDTH = 0.3  # The thinnest visible line
+
+        lines_data = []
+        max_val = 0.0
+
         for line in self.solution.network.major_lines.values():
             n_start = line.node_start.name
             n_end = line.node_end.name
-
             if n_start not in self.centroids or n_end not in self.centroids:
                 continue
 
-            p1 = np.array(self.centroids[n_start])
-            p2 = np.array(self.centroids[n_end])
-
             if flow_type == "capacity":
-                # Just draw a line with thickness proportional to capacity
-                width = line.capacity / 2000.0  # Scaling factor
-                if width > 0.5:
-                    ax.plot([p1[0], p2[0]], [p1[1], p2[1]], color="red", linewidth=width, zorder=50, alpha=0.7)
-
+                match str(build).lower():
+                    case "none" | "all":
+                        val = self.accessor.get_power_capacity(line)
+                    case "new_build":
+                        val = self.accessor.get_new_build_capacity(line, "power")
+                    case "existing" | "initial":
+                        val = self.accessor.get_existing_capacity(line, "power")
             elif flow_type == "energy":
-                # Net flow calculation would require accessing flow time series
-                # Assuming 'line.flow_sum' or similar exists, or calculating from time series
-                # As a placeholder, we draw capacity lines but distinct style
-                width = line.capacity / 2000.0
-                if width > 0.5:
-                    ax.plot([p1[0], p2[0]], [p1[1], p2[1]], color="blue", linewidth=width, zorder=50, alpha=0.5)
+                val = self.accessor.get_line_use_net(line)
+            else:
+                raise ValueError(f"Invalid 'flow_type'. Expected \"capacity\" or \"energy\". Got {flow_type}")
+            max_val = max(max_val, val)
 
-    def _aggregate_energy_by_node(self):
+            p1 = self.centroids[n_start]
+            p2 = self.centroids[n_end]
+            lines_data.append((p1, p2, val))
+
+        if max_val == 0:
+            return
+
+        for p1, p2, val in lines_data:
+            # Calculate dynamic width: (Current / Max) * Target_Max_Width
+            scaled_width = (val / max_val) * MAX_LINE_WIDTH
+            # Enforce minimum visibility
+            final_width = max(scaled_width, MIN_LINE_WIDTH)
+            color = "red" if flow_type == "capacity" else "blue"
+            alpha = 0.7 if flow_type == "capacity" else 0.5
+            ax.plot(
+                [p1[0], p2[0]],
+                [p1[1], p2[1]],
+                color=color,
+                linewidth=final_width,
+                zorder=50,
+                alpha=alpha,
+            )
+
+    def _aggregate_energy_by_node(self, curtailment=False):
         """
         Scans fleet generators, reservoirs, storages to sum energy by node and tech.
         """
@@ -254,18 +280,20 @@ class Display:
         for asset_class in ("generators", "reservoirs", "storages"):
             for asset in self.accessor.get_assets(asset_class).values():
                 n = asset.node.name
-                tech = self._identify_tech(asset.unit_type)
+                tech = self._identify_tech(asset.name)
 
                 if n not in data:
                     data[n] = {}
                 if tech not in data[n]:
                     data[n][tech] = 0.0
-
-                data[n][tech] += self.accessor.get_power_net(asset)
+                if curtailment:
+                    data[n][tech] += self.accessor.get_post_curtailment_energy_net(asset)
+                else:
+                    data[n][tech] += self.accessor.get_discharge_net(asset)
 
         return data
 
-    def _aggregate_capacity_by_node(self):
+    def _aggregate_capacity_by_node(self, build=None):
         """
         Scans fleet to sum capacity (GW) by node and tech.
         """
@@ -274,28 +302,33 @@ class Display:
         for asset_class in ("generators", "reservoirs", "storages"):
             for asset in self.accessor.get_assets(asset_class).values():
                 n = asset.node.name
-                tech = self._identify_tech(asset.unit_type)
+                tech = self._identify_tech(asset.name)
 
                 if n not in data:
                     data[n] = {}
                 if tech not in data[n]:
                     data[n][tech] = 0.0
-
-                data[n][tech] += self.accessor.get_power_capacity(asset)
-
+                match str(build).lower():
+                    case "none" | "all":
+                        data[n][tech] += self.accessor.get_power_capacity(asset)
+                    case "new_build":
+                        data[n][tech] += self.accessor.get_new_build_capacity(asset, "power")
+                    case "existing" | "initial":
+                        data[n][tech] += self.accessor.get_existing_capacity(asset, "power")
         return data
 
     def _identify_tech(self, name):
         """Maps asset attributes to simplified plotting categories."""
         name_lower = name.lower()
-
-        if "solar" in name_lower or "pv" in name_lower:
-            return "Solar"
+        if "solar" in name_lower or "pv" in name_lower or "roof" in name_lower:
+            return "Utility Solar"
+        if "roof" in name_lower:
+            return "Rooftop Solar"
         if "onshore" in name_lower or "onsw" in name_lower:
             return "Onshore Wind"
         if "offshore" in name_lower or "offw" in name_lower:
             return "Offshore Wind"
-        if "hydro" in name_lower:
+        if "hydro" in name_lower or "ror" in name_lower:
             return "Hydro"
         if "nuke" in name_lower or "nuclear" in name_lower:
             return "Nuclear"
@@ -307,6 +340,10 @@ class Display:
             return "Biomass"
         if "coal" in name_lower:
             return "Coal"
+        if "bess" in name_lower:
+            return "Battery"
+        if "phes" in name_lower:
+            return "PHES"
         return "Other"
 
     def _get_color(self, tech):
@@ -324,4 +361,10 @@ class Display:
             handles.append(plt.Rectangle((0, 0), 1, 1, color=self._get_color(tech)))
             labels.append(tech)
 
-        ax.legend(handles, labels, loc="lower left", title="Technology", frameon=False)
+        ax.legend(
+            handles,
+            labels,
+            loc="upper right",
+            title="Technology",
+            frameon=False,
+        )
