@@ -2,6 +2,7 @@
 import csv
 import os
 from typing import Dict, Tuple, Union, Callable, TYPE_CHECKING
+from datetime import datetime
 
 import numpy as np
 from numpy.typing import NDArray
@@ -49,6 +50,7 @@ class Solver:
         self.network_static = scenario.network
         self.logger = scenario.logger
         self.log_dir = scenario.results_dir
+        self.solution_dir = scenario.solution_dir
         self.broad_optimum_var_info = build_broad_optimum_var_info(self.fleet_static, self.network_static)
         self.scenario_name = scenario.name
         self.result = None
@@ -60,6 +62,8 @@ class Solver:
                 self.iterations = int(config.iterations // 2)
             else:
                 self.iterations = config.iterations
+                self.mga_log_dir = os.path.join(self.solution_dir, "mga_logs")
+                os.makedirs(self.mga_log_dir, exist_ok=True)
 
     def initialise_callback(self) -> None:
         temp_dir = os.path.join("results", "temp")
@@ -112,8 +116,7 @@ class Solver:
         )[0, :]  # just cost + penalties * penalty_multiplier
 
     def generate_alternatives(self) -> None:
-        self.logger.info("[MHMGA] Initialising MGA algorithm...\n\t"
-                         "(if evaluating a known optimum, this may take a while)")
+        self.logger.info("[MHMGA] Initialising MGA algorithm. (this may take a while)")
 
         args = self.get_differential_evolution_args()
 
@@ -127,9 +130,7 @@ class Solver:
             known_optimum=self.decision_x0,
         )
 
-        log_dir = os.path.join(self.log_dir, "mga_logs")
-        os.makedirs(log_dir, exist_ok=True)
-        path_name = os.path.join(log_dir, "log")
+        path_name = os.path.join(self.mga_log_dir, "mga_log")
 
         algorithm = MGAProblem(
             problem=problem,
@@ -143,7 +144,8 @@ class Solver:
         self.logger.info(f"[MHMGA] MGA algorithm initialised with {self.config.mga_start_niches} niches.")
 
         for step in range(self.config.mga_steps):
-            self.logger.info(f"[MHMGA] Starting step {step+1}/{self.config.mga_steps}")
+            start_time_str = datetime.fromtimestamp(datetime.now()).strftime("%d/%m/%Y %H:%M:%S")
+            self.logger.info(f"[MHMGA] Starting step {step+1}/{self.config.mga_steps} at {start_time_str}")
 
             if self.config.mga_new_niches[step] > 0:
                 self.logger.info(f"[MHMGA] Adding {self.config.mga_new_niches[step]} niches.")
@@ -163,8 +165,6 @@ class Solver:
                 violation_factor=PENALTY_MULTIPLIER
             )
 
-            self.logger.info("[MHMGA] Starting evolution step...")
-            print(f"mhmga {self.config.mga_disp_rate=}")
             algorithm.step(disp_rate=self.config.mga_disp_rate)
 
             # 4. Terminate and get results
@@ -176,8 +176,7 @@ class Solver:
         self.result = algorithm.population.current_optima[0]
 
     def save_mga_results(self, results: Dict) -> None:
-        log_dir = os.path.join(self.log_dir, "mga_logs")
-        filepath = os.path.join(log_dir, "mga_alternatives.csv")
+        filepath = os.path.join(self.mga_log_dir, "mga_alternatives.csv")
 
         optima = results['optima']
         fitness = results['fitness']
@@ -311,8 +310,8 @@ class Solver:
             self.generate_alternatives()
         else:
             raise Exception(
-                "Model type in config must be 'single_time' or 'capacity_expansion' or 'near_optimum' or"
-                "'midpoint_explore'"
+                "Model type in config must be 'single_time', 'capacity_expansion', 'near_optimum',"
+                "'midpoint_explore', or 'mhmga'."
             )
 
 
@@ -323,27 +322,20 @@ def callback(intermediate_result: OptimizeResult) -> None:
     # Save best solution from last iteration
     with open(os.path.join(results_dir, "callback.csv"), "a", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(list(intermediate_result.x))
+        writer.writerow([intermediate_result.fun, *intermediate_result.x])
 
     if SAVE_POPULATION:
-        # Save population from last iteration
-        if hasattr(intermediate_result, "population"):
-            with open(os.path.join(results_dir, "population.csv"), "a", newline="") as f:
-                writer = csv.writer(f)
-                for individual in intermediate_result.population:
-                    writer.writerow(list(individual))
+        combined_block = np.column_stack((intermediate_result.population,
+                                          intermediate_result.population_energies))
 
-            with open(os.path.join(results_dir, "latest_population.csv"), "w", newline="") as f:
-                writer = csv.writer(f)
-                for individual in intermediate_result.population:
-                    writer.writerow(list(individual))
+        with open(os.path.join(results_dir, "population.csv"), "a", newline="") as f_all, \
+             open(os.path.join(results_dir, "latest_population.csv"), "w", newline="") as f_latest:
 
-        # Save population energies from last iteration
-        if hasattr(intermediate_result, "population_energies"):
-            with open(os.path.join(results_dir, "population_energies.csv"), "a", newline="") as f:
-                writer = csv.writer(f)
-                for energy in intermediate_result.population_energies:
-                    writer.writerow([energy])
+            writer_all = csv.writer(f_all)
+            writer_latest = csv.writer(f_latest)
+
+            writer_all.writerows(combined_block)
+            writer_latest.writerows(combined_block)
 
 
 def mga_callback(population: Population) -> None:
@@ -353,27 +345,31 @@ def mga_callback(population: Population) -> None:
     # Save best solution from last iteration
     with open(os.path.join(results_dir, "callback.csv"), "a", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(list(population.current_optima[0]))
+        best_row = [
+            population.current_optima_obj[0][0],
+            population.current_optima_pob[0][0],
+            population.current_optima_fit[0][0],
+            *population.current_optima[0]
+        ]
+        writer.writerow(best_row)
 
     if SAVE_POPULATION:
-        # Save population from last iteration
-        with open(os.path.join(results_dir, "population.csv"), "a", newline="") as f:
-            writer = csv.writer(f)
-            for i in range(population.num_niches):
-                writer.writerows(population.points[i])
+        # Vectorized flattening: reshape(-1) turns (num_niches, pop_size) into (total_pop,)
+        # reshape(-1, ndim) turns (num_niches, pop_size, ndim) into (total_pop, ndim)
+        obj_flat = population.objective_values.reshape(-1)
+        viol_flat = population.violations.reshape(-1)
+        fit_flat = population.fitnesses.reshape(-1)
+        pts_flat = population.points.reshape(-1, population.points.shape[-1])
 
-        with open(os.path.join(results_dir, "latest_population.csv"), "w", newline="") as f:
-            writer = csv.writer(f)
-            for i in range(population.num_niches):
-                writer.writerows(population.points[i])
+        # Combine everything into one matrix: [Obj, Viol, Fit, X0, X1, ...]
+        # Shape: (total_pop, 3 + ndim)
+        combined_block = np.column_stack((obj_flat, viol_flat, fit_flat, pts_flat))
 
-        # Save population energies from last iteration
-        with open(os.path.join(results_dir, "population_energies.csv"), "a", newline="") as f:
-            writer = csv.writer(f)
-            for i in range(population.num_niches):
-                write_out = np.vstack((
-                    population.objective_values[i],
-                    population.violations[i],
-                    population.fitnesses[i],
-                ))
-                writer.writerows(write_out.T)
+        with open(os.path.join(results_dir, "population.csv"), "a", newline="") as f_all, \
+             open(os.path.join(results_dir, "latest_population.csv"), "w", newline="") as f_latest:
+
+            writer_all = csv.writer(f_all)
+            writer_latest = csv.writer(f_latest)
+
+            writer_all.writerows(combined_block)
+            writer_latest.writerows(combined_block)

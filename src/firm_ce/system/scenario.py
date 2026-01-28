@@ -1,6 +1,8 @@
 # type: ignore
 import gc
 from typing import Dict, List, Union
+from re import sub
+import os
 
 import numpy as np
 from numpy.typing import NDArray
@@ -31,18 +33,19 @@ class Scenario:
     def __init__(self, model_data: ModelData, scenario_id: int) -> None:
         self.logger, self.results_dir = model_data.logger, model_data.results_dir
 
-        self.model_data = model_data
-        config_dict = self.model_data.config
-        self.limit_timesteps = None
-        for item in config_dict.values():
-            if item["name"] == "limit_timesteps":
-                self.limit_timesteps = int(item["value"])
-                break
-        self.scenario_data = self.model_data.scenarios[scenario_id]
-
         self.id = scenario_id
         self.name = self.scenario_data["scenario_name"].lower()
         self.type = self.scenario_data["type"]
+
+        self.model_data = model_data
+        self.limit_timesteps = None
+        for item in self.model_data.config.values():
+            if item["name"] == "limit_timesteps":
+                self.limit_timesteps = int(item["value"])
+            elif item["name"] == "balancing_type":
+                balancing_type = str(item["value"])
+        self.solution_dir = self.create_solution_directory(self.results_dir, self.name + "_" + balancing_type)
+        self.scenario_data = self.model_data.scenarios[scenario_id]
 
         self.network = construct_Network_object(
             self.get_scenario_dicts(model_data.nodes),
@@ -71,6 +74,12 @@ class Scenario:
 
     def __repr__(self):
         return f"Scenario({self.id!r} {self.name!r})"
+
+    def create_solution_directory(self, result_directory: str, solution_name: str) -> str:
+        safe_name = sub(r"[^a-zA-Z0-9_\-]", "_", solution_name)
+        solution_dir = os.path.join(result_directory, safe_name)
+        os.makedirs(solution_dir, exist_ok=True)
+        return solution_dir
 
     def get_bounds(self) -> NDArray[np.float64]:
         def power_capacity_bounds(
