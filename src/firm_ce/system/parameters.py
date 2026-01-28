@@ -95,6 +95,9 @@ class ModelConfig:
                 string = config_dict.get(param_name, param_dict["default"])
 
                 if param_dict["ditherable"]:
+                    broadcastable = param_dict.get("broadcastable", True)
+                    if not broadcastable:
+                        raise ValueError(f"Parameters cannot be both ditherable and non-broadcastable (param: {param_name})")
                     value = np.array(parse_ditherable_hyperparameter(string))
                     if value.shape[0] == 1:
                         value = np.stack((value[0],) * self.mga_steps)
@@ -109,7 +112,10 @@ class ModelConfig:
                 elif param_dict["broadcastable"]:
                     value = parse_comma_separated(string)
                     if len(value) == 1:
-                        value = value * self.mga_steps
+                        if param_dict.get("autobroadcast", True):
+                            value = value * self.mga_steps
+                        else:
+                            value = add_sequences(value, [0] * (self.mga_steps - 1))
                     elif len(value) == self.mga_steps:
                         pass
                     else:
@@ -125,6 +131,11 @@ class ModelConfig:
                     valid_type = check_type(param_name, param_dict, string)
                     value = valid_type(string)
                     setattr(self, param_name, value)
+
+
+def add_sequences(a, b):
+    # Concatenate a and b, then cast to the type of b
+    return type(b)(list(a) + list(b))
 
 
 def check_type(param_name, param_dict, item):
@@ -162,48 +173,56 @@ expected_mga_hyperparameters = {
         "default": 100,
         "ditherable": False,
         "broadcastable": True,
+        "autobroadcast": True,
         "types": ((int, 1, np.inf),),
     },
     "mga_pop_size": {
         "default": 100,
         "ditherable": False,
         "broadcastable": True,
+        "autobroadcast": True,
         "types": ((int, 2, np.inf),),
     },
     "mga_noptimal_slack": {
         "default": 0.3,
         "ditherable": False,
         "broadcastable": True,
+        "autobroadcast": True,
         "types": ((float, 0, np.inf),),
     },
     "mga_mutation_prob": {
         "default": 0.2,
         "ditherable": True,
         "broadcastable": True,
+        "autobroadcast": True,
         "types": ((float, 0, 1),),  # (type, lower, upper)
     },
     "mga_mutation_sigma": {
         "default": 0.1,
         "ditherable": True,
         "broadcastable": True,
+        "autobroadcast": True,
         "types": ((float, 0, np.inf),),
     },
     "mga_crossover_prob": {
         "default": 0.2,
         "ditherable": True,
         "broadcastable": True,
+        "autobroadcast": True,
         "types": ((float, 0, 1),),
     },
     "mga_tourn_size": {
         "default": 2,
         "ditherable": False,
         "broadcastable": True,
+        "autobroadcast": True,
         "types": ((int, 2, np.inf),)
     },
     "mga_tourn_count": {
         "default": 0.8,
         "ditherable": False,
         "broadcastable": True,
+        "autobroadcast": True,
         "types": (
             (float, 0, 1),
             (int, -1, np.inf),
@@ -213,6 +232,7 @@ expected_mga_hyperparameters = {
         "default": 0.2,
         "ditherable": False,
         "broadcastable": True,
+        "autobroadcast": True,
         "types": (
             (float, 0, 1),
             (int, -1, np.inf),
@@ -222,12 +242,14 @@ expected_mga_hyperparameters = {
         "default": 10,
         "ditherable": False,
         "broadcastable": True,
+        "autobroadcast": False,
         "types": ((int, 2, np.inf),),
     },
     "mga_niche_elitism": {
         "default": "selfish",
         "ditherable": False,
         "broadcastable": True,
+        "autobroadcast": True,
         "types": ((str, ("none", "selfish", "unselfish")),),
     },
     "mga_log_freq": {
