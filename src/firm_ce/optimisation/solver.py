@@ -345,7 +345,6 @@ def callback(intermediate_result: OptimizeResult) -> None:
 
 
 def mga_callback(population: Population) -> None:
-    print("MGA callback called")
     results_dir = os.path.join("results", "temp")
     os.makedirs(results_dir, exist_ok=True)
 

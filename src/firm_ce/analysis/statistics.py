@@ -85,11 +85,11 @@ class Statistics:
             raise RuntimeError("Solution must be evaluated before generating statistics.")
 
         self.result_files = {
-            # "capacities": self.generate_capacities_file(),
-            # "component_costs": self.generate_component_costs_file(),
-            # "energy_balance_ASSETS": self.generate_energy_balance_file("assets"),
-            # "energy_balance_NODES": self.generate_energy_balance_file("nodes"),
-            # "energy_balance_NETWORK": self.generate_energy_balance_file("network"),
+            "capacities": self.generate_capacities_file(),
+            "component_costs": self.generate_component_costs_file(),
+            "energy_balance_ASSETS": self.generate_energy_balance_file("assets"),
+            "energy_balance_NODES": self.generate_energy_balance_file("nodes"),
+            "energy_balance_NETWORK": self.generate_energy_balance_file("network"),
             "levelised_costs": self.generate_levelised_costs_file(),
             "summary": self.generate_summary_file(),
             "x": self.generate_x_file(),
@@ -537,14 +537,14 @@ class Statistics:
             ]
         )
 
-        df = append_asset(df, "nodes", "Node", "Annual Demand", accessor.get_power_trace)
-        df = append_asset(df, "generators", "Generator", "Annual Generation", accessor.get_power_trace)
-        df = append_asset(df, "reservoirs", "Reservoir", "Annual Generation", accessor.get_power_trace)
-        df = append_asset(df, "storages", "Storage", "Annual Dispatch", accessor.get_discharge_trace)
-        df = append_asset(df, "reservoirs", "Reservoir", "Annual Inflow", accessor.get_inflow_trace)
-        df = append_asset(df, "nodes", "Node", "Spillage", accessor.get_spillage_trace)
-        df = append_asset(df, "nodes", "Node", "Deficit", accessor.get_deficit_trace)
-        df = append_asset(df, "major_lines", "Major Line", "Flow", accessor.get_transmission_trace())
+        df = append_asset(df, "nodes", "Annual Demand", accessor.get_power_trace)
+        df = append_asset(df, "generators", "Annual Generation", accessor.get_power_trace)
+        df = append_asset(df, "reservoirs", "Annual Generation", accessor.get_power_trace)
+        df = append_asset(df, "storages", "Annual Dispatch", accessor.get_discharge_trace)
+        df = append_asset(df, "reservoirs", "Annual Inflow", accessor.get_inflow_trace)
+        df = append_asset(df, "nodes", "Node", accessor.get_spillage_trace)
+        df = append_asset(df, "nodes", "Node", accessor.get_deficit_trace)
+        df = append_asset(df, "major_lines", "Flow", accessor.get_transmission_trace)
 
         result_file = ResultFile("summary", self.results_directory, df, decimals=3)
         return result_file

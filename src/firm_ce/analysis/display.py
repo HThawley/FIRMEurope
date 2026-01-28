@@ -3,10 +3,13 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Wedge
 import numpy as np
 import seaborn as sns
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
+import os
+import pandas as pd
 
-# Import necessary types for type hinting if available in the environment
+from firm_ce.system.scenario import Scenario
 from firm_ce.optimisation.single_time import Solution
+from firm_ce.system.parameters import ModelConfig
 from firm_ce.analysis.accessor import Accessor
 
 
@@ -18,23 +21,267 @@ class Display:
 
     def __init__(
         self,
-        solution: Solution,
+        scenario: Scenario,
+        config: ModelConfig,
     ):
         """
         Initialize the plotter with a Solution object and map data.
         """
-        self.solution = solution
-        self.accessor = Accessor(solution, "GW")
-        self.map_data = gpd.read_file("./inputs/map/europe.geojson")
+        self.scenario = scenario
+        self.config = config
+        self.statistics_generated = self.scenario.statistics.statistics_generated
 
-        # Filter for relevant bounds or specific countries if needed.
-        # Here we assume the geojson contains the relevant EU states.
-        self.map_data = self.map_data.to_crs(epsg=3035)
+        self.mhmga = self.config.type == "mhmga"
+        self.noptima = []
+        self.solution = None
 
-        # Calculate centroids for node placement
-        # Assumes the 'name' column in GeoJSON matches node.name in the Solution
-        self.centroids = self._calculate_centroids()
+        if self.mhmga:
+            self._read_in_noptima()
+            self._evaluate_noptima()
+        else:
+            self._evaluate_solution()
 
+        self._load_map_data("./inputs/map/europe.geojson")
+        self._init_colors()
+
+    def plot(self, data_type: str = "energy", mode: str = "single", **kwargs):
+        return self._dispatch_plot(data_type=data_type, mode=mode, **kwargs)
+
+    def plot_energy_mix(self, mode: str = "single", **kwargs):
+        """
+        Visualizes the energy generation mix (GWh) across the network.
+
+        Args:
+            mode (str): Visualization layout.
+                'single': One solution map.
+                'atlas': Grid of MGA alternatives (requires MHMGA config).
+                'delta': Comparative bar chart between two solutions.
+            **kwargs:
+                alternative (int): Index of the solution to plot in 'single' mode. Default 0.
+                alt_a, alt_b (int): Indices for comparison in 'delta' mode.
+                curtailment (bool): If True, plots post-curtailment net energy. Default False.
+                chart_type (str): 'pie' or 'bar'. Note: 'delta' mode only supports 'bar'.
+                max_scale (float): Value used to normalize chart sizes across the map.
+                threshold (float): Minimum value to display in charts. Default 1e-5.
+                legend (bool): Toggle the technology legend. Default True.
+                save_path (str): File path to save the resulting figure.
+        """
+        return self._dispatch_plot(data_type="energy", mode=mode, **kwargs)
+
+    def plot_power_capacity(self, mode: str = "single", **kwargs):
+        """
+        Visualizes installed power capacity (GW) across the network.
+
+        Args:
+            mode (str): Visualization layout ('single', 'atlas', or 'delta').
+            **kwargs:
+                build (str): Filters capacity by investment status.
+                    'all' or None: Total installed capacity.
+                    'new_build': Only capacity added by the optimizer.
+                    'existing' or 'initial': Only starting/brownfield capacity.
+                alternative (int): Solution index for 'single' mode.
+                chart_type (str): 'pie' or 'bar'.
+                max_scale (float): Normalization constant for pie/bar scaling.
+                legend (bool): Toggle legend visibility.
+                save_path (str): File path to save the figure.
+        """
+        return self._dispatch_plot(data_type="capacity", mode=mode, **kwargs)
+
+    def _dispatch_plot(self, data_type: str, mode: str, **kwargs):
+
+        if mode == "delta":
+            chart_type = kwargs.get("chart_type", "bar")
+            if chart_type == "pie":
+                raise NotImplementedError("Delta mode does not support 'pie' charts.")
+        else:
+            chart_type = kwargs.get("chart_type", "pie")
+
+        if mode == "single":
+            return self._plot_single(data_type, **kwargs)
+        elif mode == "atlas":
+            return self._plot_atlas(data_type, **kwargs)
+        elif mode == "delta":
+            kwargs["chart_type"] = "bar"
+            return self._plot_delta(data_type, **kwargs)
+        else:
+            raise ValueError(f"Mode '{mode}' not supported.")
+
+    def _plot_single(
+        self,
+        data_type: str,
+        alternative: int = 0,
+        save_path: str = None,
+        **kwargs
+    ):
+        """Plots one specific solution (either optimal or a specific MGA alternative)."""
+        sol = self.noptima[alternative] if self.mhmga else self.solution
+        fig, axes = self._setup_map_axis(nrows=1, ncols=1)
+        ax = axes[0]
+
+        self._draw_solution_on_axis(ax, sol, data_type, **kwargs)
+
+        title = f"{data_type.capitalize()} Mix - {'Alternative ' + str(alternative) if self.mhmga else 'Optimal'}"
+        if data_type == "capacity":
+            build_info = str(kwargs.get("build", "all")).replace("_", " ").title()
+            title += f" - Capacity: {build_info}"
+
+        ax.set_title(title)
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        return fig, ax
+
+    def _plot_atlas(
+        self,
+        data_type: str,
+        indices: List[int] = None,
+        grid: Tuple[int, int] = (2, 2),
+        save_path: str = None,
+        **kwargs
+    ):
+        """Plots a grid of multiple MGA alternatives."""
+        if not self.mhmga:
+            print("Atlas mode requires MGA alternatives.")
+            return self._plot_single(data_type, **kwargs)
+
+        indices = indices or list(range(min(len(self.noptima), grid[0] * grid[1])))
+        fig, axes = self._setup_map_axis(nrows=grid[0], ncols=grid[1])
+
+        for i, idx in enumerate(indices):
+            if i >= len(axes):
+                break
+            ax = axes[i]
+            sol = self.noptima[idx]
+            self._draw_solution_on_axis(ax, sol, data_type, **kwargs)
+            ax.set_title(f"Alt {idx}", fontsize=10)
+
+        title = f"MGA Atlas: {data_type.capitalize()} Variations"
+        if data_type == "capacity":
+            build_info = str(kwargs.get("build", "all")).replace("_", " ").title()
+            title += f" - Capacity: {build_info}"
+
+        fig.suptitle(title, fontsize=16)
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        return fig, axes
+
+    def _plot_delta(self, data_type: str, alt_a: int = 0, alt_b: int = 1, save_path: str = None, **kwargs):
+        """
+        Modified Delta Plot: Uses mini-bar charts for Solution B - Solution A.
+        """
+        sol_a = self.noptima[alt_a] if self.mhmga else self.solution
+        sol_b = self.noptima[alt_b] if self.mhmga else self.solution
+
+        fig, axes = self._setup_map_axis(nrows=1, ncols=1)
+        ax = axes[0]
+
+        # Aggregate data as before
+        if data_type == "energy":
+            data_a = self._aggregate_solution_energy_by_node(sol_a, kwargs.get("curtailment", False))
+            data_b = self._aggregate_solution_energy_by_node(sol_b, kwargs.get("curtailment", False))
+        else:
+            data_a = self._aggregate_solution_capacity_by_node(sol_a, kwargs.get("build", "all"))
+            data_b = self._aggregate_solution_capacity_by_node(sol_b, kwargs.get("build", "all"))
+
+        delta_data = self._calculate_delta_dict(data_a, data_b)
+
+        # Calculate global max for y-axis normalization across all mini-bars
+        global_max_delta = max(
+            (max([abs(v) for v in d.values()], default=0) for d in delta_data.values()),
+            default=1
+        )
+
+        for node_name, mix in delta_data.items():
+            if node_name not in self.centroids: continue
+
+            # Filter zero entries and sort
+            filtered_mix = {k: v for k, v in mix.items() if abs(v) > kwargs.get("threshold", 1e-3)}
+            if not filtered_mix: continue
+
+            x_coord, y_coord = self.centroids[node_name]
+            self._draw_bars(ax, filtered_mix, x_coord, y_coord, global_max_delta)
+
+        title = f"Delta: Alt {alt_b} - Alt {alt_a} ({data_type})"
+        if data_type == "capacity":
+            build_info = str(kwargs.get("build", "all")).replace("_", " ").title()
+            title += f" - Capacity: {build_info}"
+        ax.set_title(title, fontsize=14)
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        return fig, ax
+
+    def _calculate_delta_dict(self, dict_a, dict_b):
+        """Helper to subtract two node-tech dictionaries."""
+        delta = {}
+        all_nodes = set(dict_a.keys()) | set(dict_b.keys())
+        for n in all_nodes:
+            delta[n] = {}
+            node_a = dict_a.get(n, {})
+            node_b = dict_b.get(n, {})
+            all_techs = set(node_a.keys()) | set(node_b.keys())
+            for t in all_techs:
+                delta[n][t] = node_b.get(t, 0.0) - node_a.get(t, 0.0)
+        return delta
+
+    def _get_delta_color(self, tech, value):
+        """
+        Placeholder - may Returns a modified version of the tech color:
+        Slightly brighter/redder for positive, darker/bluer for negative?
+        Currently no difference
+        """
+        base_color = self._get_color(tech)
+        if value >= 0:
+            return base_color
+        else:
+            return base_color
+
+    def _draw_solution_on_axis(self, ax, solution, data_type, **kwargs):
+        """
+        Unified worker that switches between _draw_pie and _draw_bars.
+        """
+        chart_type = kwargs.get("chart_type", "pie")
+
+        # Data aggregation
+        if data_type == "energy":
+            node_data = self._aggregate_solution_energy_by_node(solution, kwargs.get("curtailment", False))
+            flow_type = "energy"
+        else:
+            node_data = self._aggregate_solution_capacity_by_node(solution, kwargs.get("build", "all"))
+            flow_type = "capacity"
+
+        # Scaling logic
+        max_total = kwargs.get("max_scale", max((sum(d.values()) for d in node_data.values()), default=1))
+
+        for node_name, mix in node_data.items():
+            if node_name not in self.centroids:
+                raise RuntimeError(f"Node {node_name} not found in map centroids.")
+
+            # Filter zero-valued entries for bars to keep the x-axis dynamic
+            filtered_mix = {k: v for k, v in mix.items() if abs(v) > kwargs.get("threshold", 1e-5)}
+            if not filtered_mix:
+                continue
+
+            x, y = self.centroids[node_name]
+
+            if chart_type == "bar":
+                # For non-delta plots, y_limit is the max_total of the node
+                # or a global max for consistency.
+                self._draw_bars(ax, filtered_mix, x, y, max_total)
+            else:
+                radius = 100_000 * np.sqrt(sum(mix.values()) / max_total)
+                keys = sorted(mix.keys())
+                values = [mix[k] for k in keys]
+                colors = [self._get_color(k) for k in keys]
+                self._draw_pie(ax, values, x, y, radius, colors)
+
+        self._draw_solution_transmission(solution, ax, flow_type=flow_type, build=kwargs.get("build"))
+
+        if kwargs.get("legend", True):
+            self._add_legend(ax, node_data)
+
+    def _init_colors(self):
         self.colors = sns.color_palette("deep")
         self.tech_colors = {
             "Utility Solar": self.colors[1],
@@ -50,15 +297,47 @@ class Display:
             "Coal": (0.2, 0.2, 0.2),
         }
 
+    def _read_in_noptima(self, filepath: str = None):
+        if filepath is None:
+            nmhmga_dir = os.path.join(self.scenario.results_dir, "mga_logs")
+            filepath = os.path.join(nmhmga_dir, "mga_alternatives.csv")
+        noptima_df = pd.read_csv(filepath)
+        self.noptima_x = [row.to_numpy() for _, row in noptima_df.iloc[:, 3:].iterrows()]
+
+    def _evaluate_noptima(self):
+        self.noptima = [Solution(
+            x,
+            self.scenario.static,
+            self.scenario.fleet,
+            self.scenario.network,
+            self.config.balancing_type,
+            self.config.fixed_costs_threshold,
+        ) for x in self.noptima_x]
+        [sol.evaluate() for sol in self.noptima]
+        self.solution = self.noptima[0]
+
+    def _evaluate_solution(self):
+        if self.statistics_generated:
+            return
+        else:
+            self.scenario.statistics.evaluate_statistics()
+            self.solution = self.scenario.statistics.solution
+            self.statistics_generated = True
+
+    def _load_map_data(self, filepath: str) -> gpd.GeoDataFrame:
+        self.map_data = gpd.read_file(filepath)
+        self.map_data = self.map_data.to_crs(epsg=3035)
+        # Calculate centroids for node placement
+        # Assumes the 'name' column in GeoJSON matches node.name in the Solution
+        self.centroids = self._calculate_centroids()
+
     def _calculate_centroids(self) -> Dict[str, Tuple[float, float]]:
         """
         Matches network nodes to map geometries and calculates centroids.
         """
         centroids = {}
-
         # Calculate centroids directly on the projected map
         map_cents = self.map_data.geometry.centroid
-
         for node in self.solution.network.nodes.values():
             # Match ISO3 or Name
             # Ensure your GeoJSON column name matches (e.g. 'ISO3', 'id', 'name')
@@ -113,12 +392,53 @@ class Display:
         )
         ax.add_patch(outline)
 
-    def plot_energy_mix(self, curtailment=False, save_path=None):
+    def _draw_bars(self, ax, mix, xpos, ypos, y_limit, is_delta=False):
+        # Dimensions in map units (EPSG:3035 meters)
+        width_m = 200_000
+        height_m = 200_000
+
+        keys = sorted(mix.keys())
+        values = [mix[k] for k in keys]
+        colors = [self._get_color(k) for k in keys]
+
+        num_bars = len(keys)
+        bar_width = width_m / (num_bars + 1)
+        x_start = xpos - (width_m / 2)
+
+        # Baseline: For absolute plots, baseline is bottom. For delta, it's center.
+        baseline_y = ypos if is_delta else ypos - (height_m / 2)
+
+        # Optional: draw a faint background box for the chart area
+        # ax.add_patch(plt.Rectangle((x_start, ypos - height_m/2), width_m, height_m, ...))
+
+        for i, val in enumerate(values):
+            # Scale height. If delta, height can be negative.
+            # If absolute, val/y_limit scales 0 to 1.
+            h_ratio = (val / y_limit)
+            h = h_ratio * (height_m / (2 if is_delta else 1))
+
+            bar_x = x_start + (i + 0.5) * bar_width
+
+            rect = plt.Rectangle(
+                (bar_x - bar_width/2, baseline_y),
+                bar_width * 0.8,
+                h,
+                facecolor=colors[i],
+                edgecolor='black',
+                linewidth=0.5,
+                zorder=110
+            )
+            ax.add_patch(rect)
+
+        # Draw a horizontal line at the baseline
+        ax.plot([x_start, x_start + width_m], [baseline_y, baseline_y], color='black', lw=0.8, zorder=111)
+
+    def _plot_solution_energy_mix(self, solution, curtailment=False, save_path=None):
         """
         Plots total energy generation mix (GWh) per node.
         """
         fig, ax = self._setup_map_axis()
-        node_mix = self._aggregate_energy_by_node(curtailment)
+        node_mix = self._aggregate_solution_energy_by_node(solution, curtailment)
         max_total = max((sum(mix.values()) for mix in node_mix.values()), default=0)
 
         MAX_RADIUS_METERS = 100_000
@@ -143,24 +463,19 @@ class Display:
             colors = [self._get_color(k) for k in keys]
             self._draw_pie(ax, values, x, y, radius, colors)
 
-        self._draw_transmission(ax, flow_type="energy")
+        self._draw_solution_transmission(solution, ax, flow_type="energy")
         self._add_legend(ax, node_mix)
-
-        if curtailment:
-            ax.set_title("Annual Energy Mix post-curtailment (GWh)")
-        else:
-            ax.set_title("Annual Energy Mix pre-curtailment (GWh)")
 
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
         return fig, ax
 
-    def plot_power_capacity(self, build=None, save_path=None):
+    def _plot_solution_power_capacity(self, solution, build=None, save_path=None):
         """
         Plots installed power capacity (GW) per node.
         """
         fig, ax = self._setup_map_axis()
-        node_cap = self._aggregate_capacity_by_node(build)
+        node_cap = self._aggregate_solution_capacity_by_node(solution, build)
         max_total = max((sum(cap.values()) for cap in node_cap.values()), default=0)
 
         MAX_RADIUS_METERS = 100_000
@@ -182,39 +497,37 @@ class Display:
 
             self._draw_pie(ax, values, x, y, radius, colors)
 
-        self._draw_transmission(ax, flow_type="capacity", build=build)
+        self._draw_solution_transmission(solution, ax, flow_type="capacity", build=build)
         self._add_legend(ax, node_cap)
-        match str(build).lower():
-            case "none" | "all":
-                ax.set_title("Installed Power Capacity (GW)")
-            case "new_build":
-                ax.set_title("Installed Power Capacity (GW) (New build only)")
-            case "existing" | "initial":
-                ax.set_title("Installed Power Capacity (GW) (Existing only)")
 
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
         return fig, ax
 
-    def _setup_map_axis(self):
-        fig, ax = plt.subplots(1, figsize=(10, 10), dpi=150)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.axis("off")
+    def _setup_map_axis(self, nrows=1, ncols=1, figsize=None):
+        """Handles single and multi-axis creation with background maps."""
+        if figsize is None:
+            figsize = (8 * ncols, 8 * nrows)
 
-        ax.set_aspect("equal")
+        fig, axes = plt.subplots(nrows, ncols, figsize=figsize, dpi=150, squeeze=False)
+        axes_flat = axes.flatten()
 
-        # Plot background map
-        self.map_data.plot(ax=ax, edgecolor="black", facecolor="lightgrey", zorder=1)
+        for ax in axes_flat:
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.axis("off")
+            ax.set_aspect("equal")
+            self.map_data.plot(ax=ax, edgecolor="black", facecolor="#eeeeee", zorder=1)
 
-        # Set Limits dynamically based on the map bounds
-        minx, miny, maxx, maxy = self.map_data.total_bounds
-        margin = 200_000  # 200km margin
-        ax.set_xlim(minx - margin, maxx + margin)
-        ax.set_ylim(miny - margin, maxy + margin)
-        return fig, ax
+            # Set Limits
+            minx, miny, maxx, maxy = self.map_data.total_bounds
+            margin = 200_000  # 200 km margin
+            ax.set_xlim(minx - margin, maxx + margin)
+            ax.set_ylim(miny - margin, maxy + margin)
 
-    def _draw_transmission(self, ax, flow_type="capacity", build=None):
+        return fig, axes_flat
+
+    def _draw_solution_transmission(self, solution, ax, flow_type="capacity", build=None):
         """
         Draws transmission lines with dynamic width scaling.
         Uses a two-pass approach:
@@ -227,23 +540,26 @@ class Display:
 
         lines_data = []
         max_val = 0.0
+        accessor = Accessor(solution, "GW")
 
-        for line in self.solution.network.major_lines.values():
+        for line in solution.network.major_lines.values():
             n_start = line.node_start.name
             n_end = line.node_end.name
-            if n_start not in self.centroids or n_end not in self.centroids:
-                continue
+            if n_start not in self.centroids:
+                raise RuntimeError(f"Line node {n_start} not found in map centroids.")
+            if n_end not in self.centroids:
+                raise RuntimeError(f"Line node {n_end} not found in map centroids.")
 
             if flow_type == "capacity":
                 match str(build).lower():
                     case "none" | "all":
-                        val = self.accessor.get_power_capacity(line)
+                        val = accessor.get_power_capacity(line)
                     case "new_build":
-                        val = self.accessor.get_new_build_capacity(line, "power")
+                        val = accessor.get_new_build_capacity(line, "power")
                     case "existing" | "initial":
-                        val = self.accessor.get_existing_capacity(line, "power")
+                        val = accessor.get_existing_capacity(line, "power")
             elif flow_type == "energy":
-                val = self.accessor.get_line_use_net(line)
+                val = accessor.get_line_use_net(line)
             else:
                 raise ValueError(f"Invalid 'flow_type'. Expected \"capacity\" or \"energy\". Got {flow_type}")
             max_val = max(max_val, val)
@@ -271,14 +587,15 @@ class Display:
                 alpha=alpha,
             )
 
-    def _aggregate_energy_by_node(self, curtailment=False):
+    def _aggregate_solution_energy_by_node(self, solution, curtailment=False):
         """
         Scans fleet generators, reservoirs, storages to sum energy by node and tech.
         """
         data = {}
+        accessor = Accessor(solution, "GW")
 
         for asset_class in ("generators", "reservoirs", "storages"):
-            for asset in self.accessor.get_assets(asset_class).values():
+            for asset in accessor.get_assets(asset_class).values():
                 n = asset.node.name
                 tech = self._identify_tech(asset.name)
 
@@ -287,20 +604,24 @@ class Display:
                 if tech not in data[n]:
                     data[n][tech] = 0.0
                 if curtailment:
-                    data[n][tech] += self.accessor.get_post_curtailment_energy_net(asset)
+                    data[n][tech] += accessor.get_post_curtailment_energy_net(asset)
                 else:
-                    data[n][tech] += self.accessor.get_discharge_net(asset)
-
+                    data[n][tech] += accessor.get_discharge_net(asset)
+        # --- Debug print ---
+        # for n in data:
+        #     for tech in data[n]:
+        #         print(f"Node: {n}, Tech: {tech}, Energy: {data[n][tech]} GWh")
         return data
 
-    def _aggregate_capacity_by_node(self, build=None):
+    def _aggregate_solution_capacity_by_node(self, solution, build=None):
         """
         Scans fleet to sum capacity (GW) by node and tech.
         """
         data = {}
+        accessor = Accessor(solution, "GW")
 
         for asset_class in ("generators", "reservoirs", "storages"):
-            for asset in self.accessor.get_assets(asset_class).values():
+            for asset in accessor.get_assets(asset_class).values():
                 n = asset.node.name
                 tech = self._identify_tech(asset.name)
 
@@ -310,11 +631,15 @@ class Display:
                     data[n][tech] = 0.0
                 match str(build).lower():
                     case "none" | "all":
-                        data[n][tech] += self.accessor.get_power_capacity(asset)
+                        data[n][tech] += accessor.get_power_capacity(asset)
                     case "new_build":
-                        data[n][tech] += self.accessor.get_new_build_capacity(asset, "power")
+                        data[n][tech] += accessor.get_new_build_capacity(asset, "power")
                     case "existing" | "initial":
-                        data[n][tech] += self.accessor.get_existing_capacity(asset, "power")
+                        data[n][tech] += accessor.get_existing_capacity(asset, "power")
+        # --- Debug print ---
+        # for n in data:
+        #     for tech in data[n]:
+        #         print(f"Node: {n}, Tech: {tech}, Capacity: {data[n][tech]} GW")
         return data
 
     def _identify_tech(self, name):
