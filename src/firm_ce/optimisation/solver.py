@@ -139,13 +139,15 @@ class Solver:
             parallelize=False,  # we will implement parallelisation independently
             callback=mga_callback,
         )
-        self.logger.info("[MHMGA] MGA algorithm initialised.")
+        algorithm.add_niches(num_niches=self.config.mga_start_niches)
+        self.logger.info(f"[MHMGA] MGA algorithm initialised with {self.config.mga_start_niches} niches.")
 
         for step in range(self.config.mga_steps):
             self.logger.info(f"[MHMGA] Starting step {step+1}/{self.config.mga_steps}")
-            if self.config.mga_niches[step] > 0:
-                self.logger.info(f"[MHMGA] Adding {self.config.mga_niches[step]} niches.")
-                algorithm.add_niches(num_niches=self.config.mga_niches[step])
+
+            if self.config.mga_new_niches[step] > 0:
+                self.logger.info(f"[MHMGA] Adding {self.config.mga_new_niches[step]} niches.")
+                algorithm.add_niches(num_niches=self.config.mga_new_niches[step])
 
             algorithm.update_hyperparameters(
                 max_iter=self.config.mga_iter[step],
