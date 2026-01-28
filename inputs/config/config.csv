@@ -14,5 +14,5 @@ id,name,value
 12,mga_noptimal_slack,0.2
 13,mga_log_freq,25
 14,mga_niche_elitism,selfish
-15,mga_iter,"50,20,20"
+15,mga_iter,"5,20,20"
 16,mga_pop_size,40
