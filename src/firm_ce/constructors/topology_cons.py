@@ -43,6 +43,7 @@ def construct_Line_object(
     order: int,
     line_dict: Dict[str, Any],
     nodes_object_dict: DictType(int64, Node_InstanceType),
+    major: bool,
 ) -> Line_InstanceType:
     """
     Takes data required to initialise a single line object, casts values into Numba-compatible
@@ -119,6 +120,7 @@ def construct_Line_object(
         min_build,
         capacity,
         unit_type,
+        major,
         near_opt,
         group,
         cost,
@@ -337,10 +339,10 @@ def construct_Network_object(
     order_minor = 0
     for idx in lines_imported_dict:
         if not is_nan(lines_imported_dict[idx]["node_start"]) and not is_nan(lines_imported_dict[idx]["node_end"]):
-            major_lines[order_major] = construct_Line_object(order_major, lines_imported_dict[idx], nodes)
+            major_lines[order_major] = construct_Line_object(order_major, lines_imported_dict[idx], nodes, True)
             order_major += 1
         else:
-            minor_lines[order_minor] = construct_Line_object(order_minor, lines_imported_dict[idx], nodes)
+            minor_lines[order_minor] = construct_Line_object(order_minor, lines_imported_dict[idx], nodes, False)
             order_minor += 1
 
     routes = build_routes_typed_dict(networksteps_max, nodes, major_lines)

@@ -188,6 +188,7 @@ if JIT_ENABLED:
         ("min_build", float64),
         ("initial_capacity", float64),
         ("unit_type", unicode_type),
+        ("major", boolean),
         ("near_optimum_check", boolean),
         ("group", unicode_type),
         ("cost", UnitCost_InstanceType),
@@ -264,6 +265,7 @@ class Line:
         min_build: float64,
         capacity: float64,
         unit_type: unicode_type,
+        major: boolean,
         near_optimum_check: boolean,
         group: unicode_type,
         cost: UnitCost_InstanceType,
@@ -305,6 +307,7 @@ class Line:
         self.min_build = min_build  # GW/year
         self.initial_capacity = capacity  # GW
         self.unit_type = unit_type
+        self.major = major
         self.near_optimum_check = near_optimum_check
         self.group = group
         self.cost = cost
