@@ -299,7 +299,7 @@ class Display:
 
     def _read_in_noptima(self, filepath: str = None):
         if filepath is None:
-            nmhmga_dir = os.path.join(self.scenario.results_dir, "mga_logs")
+            nmhmga_dir = os.path.join(self.scenario.solution_dir, "mga_logs")
             filepath = os.path.join(nmhmga_dir, "mga_alternatives.csv")
         noptima_df = pd.read_csv(filepath)
         self.noptima_x = [row.to_numpy() for _, row in noptima_df.iloc[:, 3:].iterrows()]
@@ -394,8 +394,8 @@ class Display:
 
     def _draw_bars(self, ax, mix, xpos, ypos, y_limit, is_delta=False):
         # Dimensions in map units (EPSG:3035 meters)
-        width_m = 200_000
-        height_m = 200_000
+        width_m = 250_000
+        height_m = 250_000
 
         keys = sorted(mix.keys())
         values = [mix[k] for k in keys]
