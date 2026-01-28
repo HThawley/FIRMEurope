@@ -33,11 +33,12 @@ class Scenario:
     def __init__(self, model_data: ModelData, scenario_id: int) -> None:
         self.logger, self.results_dir = model_data.logger, model_data.results_dir
 
+        self.model_data = model_data
+        self.scenario_data = self.model_data.scenarios[scenario_id]
         self.id = scenario_id
         self.name = self.scenario_data["scenario_name"].lower()
         self.type = self.scenario_data["type"]
 
-        self.model_data = model_data
         self.limit_timesteps = None
         for item in self.model_data.config.values():
             if item["name"] == "limit_timesteps":
@@ -45,7 +46,6 @@ class Scenario:
             elif item["name"] == "balancing_type":
                 balancing_type = str(item["value"])
         self.solution_dir = self.create_solution_directory(self.results_dir, self.name + "_" + balancing_type)
-        self.scenario_data = self.model_data.scenarios[scenario_id]
 
         self.network = construct_Network_object(
             self.get_scenario_dicts(model_data.nodes),
