@@ -277,7 +277,7 @@ def assign_storage_merit_order(
     temp_durations = temp_durations[:idx]
 
     sort_order = np.argsort(temp_durations)
-    node_instance.storage_merit_order = temp_orders[sort_order]
+    node_instance.storage_merit_order = temp_orders[sort_order[::-1]]
     return None
 
 
@@ -328,7 +328,7 @@ def assign_reservoir_merit_order(
     temp_durations = temp_durations[:idx]
 
     sort_order = np.argsort(temp_durations)
-    node_instance.reservoir_merit_order = temp_orders[sort_order]
+    node_instance.reservoir_merit_order = temp_orders[sort_order[::-1]]
     return None
 
 
@@ -388,7 +388,12 @@ def check_remaining_netload(
     -------
     boolean: True if the Node has unbalanced netload according to the check case, otherwise False.
     """
-    _imbalance = node_instance.netload_t - node_instance.storage_power[interval] - node_instance.reservoir_power[interval] - node_instance.flexible_power[interval]
+    _imbalance = (
+        node_instance.netload_t
+        - node_instance.storage_power[interval]
+        - node_instance.reservoir_power[interval]
+        - node_instance.flexible_power[interval]
+    )
     if check_case == "deficit":
         return _imbalance > TOLERANCE
     elif check_case == "spillage":
