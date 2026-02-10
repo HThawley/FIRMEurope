@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Any, Dict, Union
+from numbers import Number
 
 # import numpy as np
 import pandas as pd
@@ -186,6 +187,21 @@ class ResultFile:
     def __repr__(self) -> str:
         return f"ResultFile ({self.report!r})"
 
+    def _round_value(self, value):
+        if self.decimals is None:
+            return value
+        try:
+            if isinstance(value, Number):
+                return round(value, self.decimals)
+            return value
+        except (TypeError, ValueError):
+            return value
+
+    def _round_data(self) -> pd.DataFrame:
+        if self.decimals is None:
+            return self.data
+        return self.data.map(self._round_value)
+
     def write(self):
         """
         Write the data to a file based on file type.
@@ -239,9 +255,10 @@ class ResultFile:
             default_kwargs[k] = v
 
         if self.decimals is not None:
-            self.data.round(self.decimals).to_csv(self.file_path, **default_kwargs)
-        else:
-            self.data.to_csv(self.file_path, **default_kwargs)
+            self._round_data()
+
+        self.data.to_csv(self.file_path, **default_kwargs)
+
         print(f"Saved {self.report} to {self.target_directory}")
         return None
 
@@ -273,11 +290,12 @@ class ResultFile:
             # overwrite default kwargs with user-supplied kwargs
             default_kwargs[k] = v
 
+        if self.decimals is not None:
+            self._round_data()
+
         with pd.ExcelWriter(self.file_path, mode=default_kwargs.pop("mode")) as writer:
-            if self.decimals is not None:
-                self.data.round(self.decimals).to_excel(writer, **default_kwargs)
-            else:
-                self.data.to_excel(writer, **default_kwargs)
+            self.data.to_excel(writer, **default_kwargs)
+
         print(f"Saved {self.report} to {self.target_directory}")
         return None
 

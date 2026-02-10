@@ -202,22 +202,21 @@ class Solution:
         Attributes modified for LTCosts instances referenced in the lt_costs attributes: fom, annualised_build.
         """
         total_costs = 0.0
-        years_float = self.static.year_count * self.static.fom_scalar
 
         for generator in self.fleet.generators.values():
-            total_costs += generator_m.calculate_fixed_costs(generator, years_float, self.static.year_count)
+            total_costs += generator_m.calculate_fixed_costs(generator)
 
         for reservoir in self.fleet.reservoirs.values():
-            total_costs += reservoir_m.calculate_fixed_costs(reservoir, years_float, self.static.year_count)
+            total_costs += reservoir_m.calculate_fixed_costs(reservoir)
 
         for storage in self.fleet.storages.values():
-            total_costs += storage_m.calculate_fixed_costs(storage, years_float, self.static.year_count)
+            total_costs += storage_m.calculate_fixed_costs(storage)
 
         for line in self.network.major_lines.values():
-            total_costs += line_m.calculate_fixed_costs(line, years_float, self.static.year_count)
+            total_costs += line_m.calculate_fixed_costs(line)
 
         for line in self.network.minor_lines.values():
-            total_costs += line_m.calculate_fixed_costs(line, years_float, self.static.year_count)
+            total_costs += line_m.calculate_fixed_costs(line)
 
         return total_costs
 
@@ -253,19 +252,19 @@ class Solution:
         )
 
         for generator in self.fleet.generators.values():
-            total_costs += generator_m.calculate_variable_costs(generator)
+            total_costs += generator_m.calculate_variable_costs(generator, self.static.year_float)
 
         for reservoir in self.fleet.reservoirs.values():
-            total_costs += reservoir_m.calculate_variable_costs(reservoir)
+            total_costs += reservoir_m.calculate_variable_costs(reservoir, self.static.year_float)
 
         for storage in self.fleet.storages.values():
-            total_costs += storage_m.calculate_variable_costs(storage)
+            total_costs += storage_m.calculate_variable_costs(storage, self.static.year_float)
 
         for line in self.network.major_lines.values():
-            total_costs += line_m.calculate_variable_costs(line)
+            total_costs += line_m.calculate_variable_costs(line, self.static.year_float)
 
         for line in self.network.minor_lines.values():
-            total_costs += line_m.calculate_variable_costs(line)
+            total_costs += line_m.calculate_variable_costs(line, self.static.year_float)
 
         return total_costs
 
