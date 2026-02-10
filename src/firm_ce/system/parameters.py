@@ -23,7 +23,9 @@ if JIT_ENABLED:
         ("block_lengths", int64[:]),
         ("node_count", int64),
         ("fom_scalar", float64),
+        ("year_float", float64),
         ("year_energy_demand", float64[:]),
+        ("mean_annual_demand", float64),
     ]
 else:
     scenario_parameters_spec = []
@@ -60,7 +62,9 @@ class ScenarioParameters:
         self.fom_scalar = (
             year_count + leap_year_count / 365
         ) / year_count  # Scale average annual fom to account for leap days for PLEXOS consistency
+        self.year_float = self.year_count * self.fom_scalar
         self.year_energy_demand = np.zeros(self.year_count, dtype=np.float64)
+        self.mean_annual_demand = 0.0
 
 
 if JIT_ENABLED:

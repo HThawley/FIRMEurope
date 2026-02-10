@@ -316,7 +316,12 @@ def dispatch(
     """
     if merit_order_idx == 0:
         generator_instance.dispatch_power[interval] = min(
-            max(generator_instance.node.netload_t - generator_instance.node.reservoir_power[interval] - generator_instance.node.storage_power[interval], 0.0),
+            max(
+                generator_instance.node.netload_t
+                - generator_instance.node.reservoir_power[interval]
+                - generator_instance.node.storage_power[interval],
+                0.0
+            ),
             generator_instance.flexible_max_t,
         )
     else:
@@ -391,11 +396,37 @@ def calculate_lt_generation(
 
 
 @njit(fastmath=FASTMATH)
-def calculate_variable_costs(generator_instance: Generator_InstanceType) -> float64:
-    ltcosts_m.calculate_vom(generator_instance.lt_costs, generator_instance.lt_generation, generator_instance.cost)
+def calculate_variable_costs(
+    generator_instance: Generator_InstanceType,
+    year_float: float64,
+) -> float64:
+    """
+    Calculate the total variable costs for a Generator system at the end of unit committment.
+
+    Parameters:
+    -------
+    generator_instance (Generator_InstanceType): An instance of the Generator jitclass.
+    year_float (float64): Number of years. Leap days provide additional fractional value.
+
+    Returns:
+    -------
+    float64: Total variable costs ($), equal to sum of fuel and VO&M costs.
+
+    Side-effects:
+    -------
+    Attributes modified for the Generator instance: lt_costs.
+    Attributes modified for the referenced Generator.lt_costs: vom, fuel.
+    """
+    ltcosts_m.calculate_vom(
+        generator_instance.lt_costs,
+        generator_instance.lt_generation,
+        year_float,
+        generator_instance.cost
+    )
     ltcosts_m.calculate_fuel(
         generator_instance.lt_costs,
         generator_instance.lt_generation,
+        year_float,
         generator_instance.unit_lt_hours,
         generator_instance.cost,
     )
@@ -405,20 +436,37 @@ def calculate_variable_costs(generator_instance: Generator_InstanceType) -> floa
 @njit(fastmath=FASTMATH)
 def calculate_fixed_costs(
     generator_instance: Generator_InstanceType,
-    years_float: float64,
-    year_count: int64,
 ) -> float64:
+    """
+    Calculate the total fixed costs for a Generator system.
+
+    Parameters:
+    -------
+    generator_instance (Generator_InstanceType): An instance of the Generator jitclass.
+
+    Returns:
+    -------
+    float64: Total fixed costs ($), equal to sum of annualised build and FO&M costs.
+
+    Side-effects:
+    -------
+    Attributes modified for the Generator instance: lt_costs.
+    Attributes modified for the referenced Generator.lt_costs: annualised_build, fom.
+    """
     ltcosts_m.calculate_annualised_build(
         generator_instance.lt_costs,
         0.0,
         generator_instance.new_build,
         0.0,
         generator_instance.cost,
-        year_count,
         "generator",
     )
     ltcosts_m.calculate_fom(
-        generator_instance.lt_costs, generator_instance.capacity, years_float, 0.0, generator_instance.cost, "generator"
+        generator_instance.lt_costs,
+        generator_instance.capacity,
+        0.0,
+        generator_instance.cost,
+        "generator"
     )
     return ltcosts_m.get_fixed(generator_instance.lt_costs)
 

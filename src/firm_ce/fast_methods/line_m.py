@@ -66,6 +66,7 @@ def create_dynamic_copy(
         line_instance.min_build,
         line_instance.capacity,
         line_instance.unit_type,
+        line_type == "major",
         line_instance.near_optimum_check,
         line_instance.group,
         line_instance.cost,  # This remains static
@@ -131,25 +132,75 @@ def calculate_lt_flow(line_instance: Line_InstanceType, interval_resolutions: fl
 
 
 @njit(fastmath=FASTMATH)
-def calculate_variable_costs(line_instance: Line_InstanceType) -> float64:
-    ltcosts_m.calculate_vom(line_instance.lt_costs, line_instance.lt_flows, line_instance.cost)
-    ltcosts_m.calculate_fuel(line_instance.lt_costs, line_instance.lt_flows, 0, line_instance.cost)
+def calculate_variable_costs(
+    line_instance: Line_InstanceType,
+    year_float: float64,
+) -> float64:
+    """
+    Calculate the total variable costs for a Line system at the end of unit committment.
+
+    Parameters:
+    -------
+    line_instance (Line_InstanceType): An instance of the Line jitclass.
+    year_float (float64): Number of years. Leap days provide additional fractional value.
+
+    Returns:
+    -------
+    float64: Total variable costs ($), equal to sum of fuel and VO&M costs.
+
+    Side-effects:
+    -------
+    Attributes modified for the Line instance: lt_costs.
+    Attributes modified for the referenced Line.lt_costs: vom, fuel.
+    """
+    ltcosts_m.calculate_vom(
+        line_instance.lt_costs,
+        line_instance.lt_flows,
+        year_float,
+        line_instance.cost
+    )
+    ltcosts_m.calculate_fuel(
+        line_instance.lt_costs,
+        line_instance.lt_flows,
+        year_float,
+        0,
+        line_instance.cost
+    )
     return ltcosts_m.get_variable(line_instance.lt_costs)
 
 
 @njit(fastmath=FASTMATH)
-def calculate_fixed_costs(line_instance: Line_InstanceType, years_float: float64, year_count: int64) -> float64:
+def calculate_fixed_costs(line_instance: Line_InstanceType) -> float64:
+    """
+    Calculate the total fixed costs for a Line system.
+
+    Parameters:
+    -------
+    line_instance (Line_InstanceType): An instance of the Line jitclass.
+
+    Returns:
+    -------
+    float64: Total fixed costs ($), equal to sum of annualised build and FO&M costs.
+
+    Side-effects:
+    -------
+    Attributes modified for the Line instance: lt_costs.
+    Attributes modified for the referenced Line.lt_costs: annualised_build, fom.
+    """
     ltcosts_m.calculate_annualised_build(
         line_instance.lt_costs,
         0.0,
         line_instance.new_build,
         line_instance.length,
         line_instance.cost,
-        year_count,
         "line",
     )
     ltcosts_m.calculate_fom(
-        line_instance.lt_costs, line_instance.capacity, years_float, 0.0, line_instance.cost, "line"
+        line_instance.lt_costs,
+        line_instance.capacity,
+        0.0,
+        line_instance.cost,
+        "line"
     )
     return ltcosts_m.get_fixed(line_instance.lt_costs)
 

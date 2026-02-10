@@ -538,13 +538,17 @@ def set_node_fills_and_surpluses(
 
     elif transmission_case == "flexible":
         for node in network_instance.nodes.values():
-            node.fill = max(node.netload_t - node.storage_power[interval] - node.reservoir_power[interval] - node.flexible_power[interval], 0)
+            node.fill = max(
+                node.netload_t - node.storage_power[interval] - node.reservoir_power[interval] - node.flexible_power[interval], 0
+            )
             node.surplus = max(node.flexible_max_t[-1] - node.flexible_power[interval], 0)
 
     elif transmission_case == "storage_charge":
         for node in network_instance.nodes.values():
             node.fill = max(node.charge_max_t[-1] + node.storage_power[interval], 0)
-            node.surplus = -min(node.netload_t - node.storage_power[interval] - node.reservoir_power[interval] - node.flexible_power[interval], 0.0)
+            node.surplus = -min(
+                node.netload_t - node.storage_power[interval] - node.reservoir_power[interval] - node.flexible_power[interval], 0.0
+            )
 
     elif transmission_case == "precharging_surplus":
         for node in network_instance.nodes.values():
@@ -601,7 +605,12 @@ def calculate_spillage_and_deficit(
     Attributes modified for each Node in Network.nodes: deficits, spillage.
     """
     for node in network_instance.nodes.values():
-        _imbalance = node.netload_t - (node.storage_power[interval] + node.reservoir_power[interval] + node.flexible_power[interval])
+        _imbalance = (
+            node.netload_t
+            - node.storage_power[interval]
+            - node.reservoir_power[interval]
+            - node.flexible_power[interval]
+        )
         node.deficits[interval] = max(_imbalance, 0)
         node.spillage[interval] = min(_imbalance, 0)
     return None

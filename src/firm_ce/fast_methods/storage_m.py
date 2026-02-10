@@ -303,6 +303,7 @@ def calculate_lt_discharge(
 @njit(fastmath=FASTMATH)
 def calculate_variable_costs(
     storage_instance: Storage_InstanceType,
+    year_float: float64,
 ) -> float64:
     """
     Calculate the total variable costs for a Storage system at the end of unit committment.
@@ -310,6 +311,7 @@ def calculate_variable_costs(
     Parameters:
     -------
     storage_instance (Storage_InstanceType): An instance of the Storage jitclass.
+    year_float (float64): Number of years. Leap days provide additional fractional value.
 
     Returns:
     -------
@@ -320,16 +322,25 @@ def calculate_variable_costs(
     Attributes modified for the Storage instance: lt_costs.
     Attributes modified for the referenced Storage.lt_costs: vom, fuel.
     """
-    ltcosts_m.calculate_vom(storage_instance.lt_costs, storage_instance.lt_discharge, storage_instance.cost)
-    ltcosts_m.calculate_fuel(storage_instance.lt_costs, storage_instance.lt_discharge, 0, storage_instance.cost)
+    ltcosts_m.calculate_vom(
+        storage_instance.lt_costs,
+        storage_instance.lt_discharge,
+        year_float,
+        storage_instance.cost
+    )
+    ltcosts_m.calculate_fuel(
+        storage_instance.lt_costs,
+        storage_instance.lt_discharge,
+        year_float,
+        0,
+        storage_instance.cost
+    )
     return ltcosts_m.get_variable(storage_instance.lt_costs)
 
 
 @njit(fastmath=FASTMATH)
 def calculate_fixed_costs(
     storage_instance: Storage_InstanceType,
-    years_float: float64,
-    year_count: int64,
 ) -> float64:
     """
     Calculate the total fixed costs for a Storage system.
@@ -337,8 +348,6 @@ def calculate_fixed_costs(
     Parameters:
     -------
     storage_instance (Storage_InstanceType): An instance of the Storage jitclass.
-    years_float (float64): Number of non-leap years. Leap days provide additional fractional value.
-    year_count (int64): Total number of years across modelling horizon.
 
     Returns:
     -------
@@ -355,11 +364,14 @@ def calculate_fixed_costs(
         storage_instance.new_build_p,
         0.0,
         storage_instance.cost,
-        year_count,
         "storage",
     )
     ltcosts_m.calculate_fom(
-        storage_instance.lt_costs, storage_instance.power_capacity, years_float, 0.0, storage_instance.cost, "storage"
+        storage_instance.lt_costs,
+        storage_instance.power_capacity,
+        0.0,
+        storage_instance.cost,
+        "storage"
     )
     return ltcosts_m.get_fixed(storage_instance.lt_costs)
 

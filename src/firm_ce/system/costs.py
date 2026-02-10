@@ -50,13 +50,13 @@ class UnitCost:
         heat_rate_base (float): Constant heat rate term (GJ/h)
         heat_rate_incr (float): First order marginal heat rate term (GJ/MWh)
         fuel (Fuel): Fuel object
-        capex_e (float): Energy capacity capital cost ($/kWh for storage only)
+        capex_e (float): Energy capacity capital cost ($/kWh for storage and reservoir only)
         transformer_capex (float): Transformer-specific cost ($/MW)
         length (float): Line length (used for scaling costs and transmission losses)
         """
 
         self.capex_p = capex_p  # $/kW
-        self.capex_e = capex_e  # $/kWh, non-zero for energy storage
+        self.capex_e = capex_e  # $/kWh, non-zero for energy storage/reservoir
         self.fom = fom  # $/kW/year
         self.vom = vom  # $/MWh
         self.lifetime = lifetime  # years

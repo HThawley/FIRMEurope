@@ -504,13 +504,17 @@ def calculate_lt_generation(
 
 
 @njit(fastmath=FASTMATH)
-def calculate_variable_costs(reservoir_instance: Reservoir_InstanceType) -> float64:
+def calculate_variable_costs(
+    reservoir_instance: Reservoir_InstanceType,
+    year_float: float64
+) -> float64:
     """
     Calculate the total variable costs for a Reservoir system at the end of unit committment.
 
     Parameters:
     -------
     reservoir_instance (Reservoir_InstanceType): An instance of the Reservoir jitclass.
+    year_float (float64): Number of years. Leap days provide additional fractional value.
 
     Returns:
     -------
@@ -521,10 +525,16 @@ def calculate_variable_costs(reservoir_instance: Reservoir_InstanceType) -> floa
     Attributes modified for the Reservoir instance: lt_costs.
     Attributes modified for the referenced Reservoir.lt_costs: vom, fuel.
     """
-    ltcosts_m.calculate_vom(reservoir_instance.lt_costs, reservoir_instance.lt_generation, reservoir_instance.cost)
+    ltcosts_m.calculate_vom(
+        reservoir_instance.lt_costs,
+        reservoir_instance.lt_generation,
+        year_float,
+        reservoir_instance.cost
+    )
     ltcosts_m.calculate_fuel(
         reservoir_instance.lt_costs,
         reservoir_instance.lt_generation,
+        year_float,
         reservoir_instance.unit_lt_hours,
         reservoir_instance.cost,
     )
@@ -534,8 +544,6 @@ def calculate_variable_costs(reservoir_instance: Reservoir_InstanceType) -> floa
 @njit(fastmath=FASTMATH)
 def calculate_fixed_costs(
     reservoir_instance: Reservoir_InstanceType,
-    years_float: float64,
-    year_count: int64,
 ) -> float64:
     """
     Calculate the total fixed costs for a Reservoir system.
@@ -543,8 +551,6 @@ def calculate_fixed_costs(
     Parameters:
     -------
     reservoir_instance (Reservoir_InstanceType): An instance of the Reservoir jitclass.
-    years_float (float64): Number of non-leap years. Leap days provide additional fractional value.
-    year_count (int64): Total number of years across modelling horizon.
 
     Returns:
     -------
@@ -561,13 +567,11 @@ def calculate_fixed_costs(
         reservoir_instance.new_build_p,
         0.0,
         reservoir_instance.cost,
-        year_count,
         "reservoir",
     )
     ltcosts_m.calculate_fom(
         reservoir_instance.lt_costs,
         reservoir_instance.power_capacity,
-        years_float,
         0.0,
         reservoir_instance.cost,
         "reservoir",
