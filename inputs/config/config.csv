@@ -7,7 +7,7 @@ id,name,value
 5,mga_mutation_sigma,"0.1,0.01,0.01"
 6,mga_start_niches,20
 7,mga_new_niches,0
-8,mga_crossover_prob,"0.0"
+8,mga_crossover_prob,0.0
 9,mga_tourn_size,3
 10,mga_tourn_count,0.8
 11,mga_elite_count,-1

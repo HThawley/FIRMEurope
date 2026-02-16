@@ -177,8 +177,14 @@ expected_mga_hyperparameters = {
         "broadcastable": True,
         "types": ((int, 2, np.inf),),
     },
-    "mga_noptimal_slack": {
-        "default": 0.3,
+    "mga_noptimal_rel": {
+        "default": 0.0,
+        "ditherable": False,
+        "broadcastable": True,
+        "types": ((float, 0, np.inf),),
+    },
+    "mga_noptimal_abs": {
+        "default": 0.0,
         "ditherable": False,
         "broadcastable": True,
         "types": ((float, 0, np.inf),),

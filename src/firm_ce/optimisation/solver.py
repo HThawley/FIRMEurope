@@ -161,7 +161,8 @@ class Solver:
                 mutation_sigma=self.config.mga_mutation_sigma[step],
                 crossover_prob=self.config.mga_crossover_prob[step],
                 niche_elitism=self.config.mga_niche_elitism[step],
-                noptimal_slack=self.config.mga_noptimal_slack[step],
+                noptimal_rel=self.config.mga_noptimal_rel[step],
+                noptimal_abs=self.config.mga_noptimal_abs[step],
                 violation_factor=PENALTY_MULTIPLIER
             )
 
