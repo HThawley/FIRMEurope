@@ -13,8 +13,8 @@ id,name,value
 11,mga_elite_count,-1
 12,mga_steps,3
 13,mga_noptimal_rel,0.25
-13,mga_noptimal_abs,0.001
-14,mga_log_freq,1
-15,mga_niche_elitism,selfish
-16,mga_iter,"2,10,20"
-17,mga_pop_size,40
+14,mga_noptimal_abs,0.001
+15,mga_log_freq,1
+16,mga_niche_elitism,selfish
+17,mga_iter,"2,5,5"
+18,mga_pop_size,40
