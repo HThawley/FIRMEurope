@@ -23,8 +23,8 @@ print(f"Model build time: {model_build_time - start_time:.4f} seconds")
 
 for scenario in model.scenarios.values():
     if scenario.x0.size == 0:
+        print(f"skipping {scenario.name} as no initial guess provided")
         continue
-
     scenario.load_datafiles(model.datafile_filenames_dict, model.data_directory)
     scenario.statistics = Statistics(
         scenario.x0,
@@ -37,22 +37,18 @@ for scenario in model.scenarios.values():
         model.config.fixed_costs_threshold,
         False,
     )
-    scenario.results_dir = "results/firmeur_20260128_141526"
-    scenario.solution_dir = "results/firmeur_20260128_141526/test_simple"
-    # scenario.statistics.generate_result_files()
-    # scenario.statistics.write_results()
-
+    scenario.statistics.generate_result_files()
+    scenario.statistics.write_results()
     # scenario.validation = Validation(scenario)
     # scenario.validation.validate(verbose=False)
     # scenario.validation.write_results()
 
-    display = Display(scenario, model.config)
-    display.plot_energy_mix(mode="atlas", chart_type="bar", indices=[0, 1, 2])
-    display.plot_energy_mix(curtailment=False, alternative=2)
-    display.plot_energy_mix(curtailment=True)
-    display.plot_power_capacity()
-    display.plot_power_capacity(build="existing")
-    display.plot_power_capacity(build="new_build")
+    # display = Display(scenario, model.config)
+    # display.plot_energy_mix(mode="atlas", chart_type="bar", indices=[0, 1, 2])
+    # display.plot_energy_mix(curtailment=False, alternative=2)
+    # display.plot_energy_mix(curtailment=True)
+    # display.plot_power_capacity()
+    # display.plot_power_capacity(build="existing")
+    # display.plot_power_capacity(build="new_build")
 
     scenario.unload_datafiles()
-    break
