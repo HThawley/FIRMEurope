@@ -75,22 +75,22 @@ class Model:
 
     def single_time(self, scenario):
         start_time = datetime.now()
-        start_time_str = datetime.fromtimestamp(start_time).strftime("%d/%m/%Y %H:%M:%S")
+        start_time_str = start_time.strftime("%d/%m/%Y %H:%M:%S")
         scenario.logger.info(f"[Single Time] Started scenario {scenario.name} at {start_time_str}.")
 
         scenario.load_datafiles(self.datafile_filenames_dict, self.data_directory)
         datafile_loadtime = datetime.now()
-        datafile_loadtime_str = datetime.fromtimestamp(datafile_loadtime).strftime("%d/%m/%Y %H:%M:%S")
+        datafile_loadtime_str = datafile_loadtime.strftime("%d/%m/%Y %H:%M:%S")
         scenario.logger.info(
-            f"[Single Time] Datafiles loaded at {datafile_loadtime_str} ({datafile_loadtime - start_time:.4f} seconds)."
+            f"[Single Time] Datafiles loaded at {datafile_loadtime_str} ({(datafile_loadtime - start_time).total_seconds():.4f} seconds)."
         )
 
         de_result = scenario.solve(self.config)
 
         solve_time = datetime.now()
-        solve_time_str = datetime.fromtimestamp(solve_time).strftime("%d/%m/%Y %H:%M:%S")
+        solve_time_str = solve_time.strftime("%d/%m/%Y %H:%M:%S")
         scenario.logger.info(
-            f"[Single Time] Optimisation completed at {solve_time_str} ({(solve_time - datafile_loadtime)/(60*60):.4f} hours)."
+            f"[Single Time] Optimisation completed at {solve_time_str} ({(solve_time - datafile_loadtime).total_seconds()/(60*60):.4f} hours)."
         )
 
         scenario.statistics = Statistics(
@@ -114,37 +114,37 @@ class Model:
         if DEBUG:
             scenario.statistics.dump()
         results_time = datetime.now()
-        results_time_str = datetime.fromtimestamp(results_time).strftime("%d/%m/%Y %H:%M:%S")
-        scenario.logger.info(f"[Single Time] Results saved at {results_time_str} ({results_time - solve_time:.4f} seconds).")
+        results_time_str = results_time.strftime("%d/%m/%Y %H:%M:%S")
+        scenario.logger.info(f"[Single Time] Results saved at {results_time_str} ({(results_time - solve_time).total_seconds():.4f} seconds).")
 
         scenario.unload_datafiles()
 
         end_time = datetime.now()
-        end_time_str = datetime.fromtimestamp(end_time).strftime("%d/%m/%Y %H:%M:%S")
+        end_time_str = end_time.strftime("%d/%m/%Y %H:%M:%S")
         scenario.logger.info(
-            f"[Single Time] Scenario completed at {end_time_str} (Total time taken: {(end_time - start_time)/(60*60):.4f} hours)."
+            f"[Single Time] Scenario completed at {end_time_str} (Total time taken: {(end_time - start_time).total_seconds()/(60*60):.4f} hours)."
         )
 
         return None
 
     def mhmga(self, scenario):
         start_time = datetime.now()
-        start_time_str = datetime.fromtimestamp(start_time).strftime("%d/%m/%Y %H:%M:%S")
+        start_time_str = start_time.strftime("%d/%m/%Y %H:%M:%S")
         scenario.logger.info(f"[MHMGA] Started scenario '{scenario.name}' at {start_time_str}.")
 
         scenario.load_datafiles(self.datafile_filenames_dict, self.data_directory)
         datafile_loadtime = datetime.now()
-        datafile_loadtime_str = datetime.fromtimestamp(datafile_loadtime).strftime("%d/%m/%Y %H:%M:%S")
+        datafile_loadtime_str = datafile_loadtime.strftime("%d/%m/%Y %H:%M:%S")
         scenario.logger.info(
-            f"[MHMGA] Datafiles loaded at {datafile_loadtime_str} ({datafile_loadtime - start_time:.4f} seconds)."
+            f"[MHMGA] Datafiles loaded at {datafile_loadtime_str} ({(datafile_loadtime - start_time).total_seconds():.4f} seconds)."
         )
 
         result = scenario.solve(self.config)
 
         solve_time = datetime.now()
-        solve_time_str = datetime.fromtimestamp(solve_time).strftime("%d/%m/%Y %H:%M:%S")
+        solve_time_str = solve_time.strftime("%d/%m/%Y %H:%M:%S")
         scenario.logger.info(
-            f"[MHMGA] Optimisation completed at {solve_time_str} ({(solve_time - datafile_loadtime)/(60*60):.4f} hours)."
+            f"[MHMGA] Optimisation completed at {solve_time_str} ({(solve_time - datafile_loadtime).total_seconds()/(60*60):.4f} hours)."
         )
 
         scenario.statistics = Statistics(
@@ -168,15 +168,15 @@ class Model:
         if DEBUG:
             scenario.statistics.dump()
         results_time = datetime.now()
-        results_time_str = datetime.fromtimestamp(results_time).strftime("%d/%m/%Y %H:%M:%S")
-        scenario.logger.info(f"[MHMGA] Results saved at {results_time_str} ({results_time - solve_time:.4f} seconds).")
+        results_time_str = results_time.strftime("%d/%m/%Y %H:%M:%S")
+        scenario.logger.info(f"[MHMGA] Results saved at {results_time_str} ({(results_time - solve_time).total_seconds():.4f} seconds).")
 
         scenario.unload_datafiles()
 
         end_time = datetime.now()
-        end_time_str = datetime.fromtimestamp(end_time).strftime("%d/%m/%Y %H:%M:%S")
+        end_time_str = end_time.strftime("%d/%m/%Y %H:%M:%S")
         scenario.logger.info(
-            f"[MHMGA] Scenario completed at {end_time_str} (Total time taken: {(end_time - start_time)/(60*60):.4f} hours)."
+            f"[MHMGA] Scenario completed at {end_time_str} (Total time taken: {(end_time - start_time).total_seconds()/(60*60):.4f} hours)."
         )
 
         return None

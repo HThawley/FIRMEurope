@@ -144,7 +144,7 @@ class Solver:
         self.logger.info(f"[MHMGA] MGA algorithm initialised with {self.config.mga_start_niches} niches.")
 
         for step in range(self.config.mga_steps):
-            start_time_str = datetime.fromtimestamp(datetime.now()).strftime("%d/%m/%Y %H:%M:%S")
+            start_time_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             self.logger.info(f"[MHMGA] Starting step {step+1}/{self.config.mga_steps} at {start_time_str}")
 
             if self.config.mga_new_niches[step] > 0:
