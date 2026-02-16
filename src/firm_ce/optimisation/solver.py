@@ -62,8 +62,9 @@ class Solver:
                 self.iterations = int(config.iterations // 2)
             else:
                 self.iterations = config.iterations
-                self.mga_log_dir = os.path.join(self.solution_dir, "mga_logs")
-                os.makedirs(self.mga_log_dir, exist_ok=True)
+        else:
+            self.mga_log_dir = os.path.join(self.solution_dir, "mga_logs")
+            os.makedirs(self.mga_log_dir, exist_ok=True)
 
     def initialise_callback(self) -> None:
         temp_dir = os.path.join("results", "temp")
