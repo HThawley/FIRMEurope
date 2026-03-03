@@ -5,7 +5,6 @@ from firm_ce.common.typing import boolean, float64, int64, unicode_type
 from firm_ce.fast_methods import (
     fleet_m,
     generator_m,
-    reservoir_m,
     network_m,
     node_m,
     static_m,
@@ -44,10 +43,9 @@ def initialise_interval(
 
     Side-effects:
     -------
-    Attributes modified for the Nodes referenced in Network.nodes: netload_t, discharge_max_t,
-        charge_max_t, reservoir_max_t, flexible_max_t.
+    Attributes modified for the Nodes referenced in Network.nodes: netload_t, discharge_max_t, charge_max_t,
+        flexible_max_t.
     Attributes modified for the flexible Generators referenced in Fleet.generators: flexible_max_t, node.
-    Attributes modified for the Reservoirs referenced in Fleet.reservoirs: discharge_max_t, node.
     Attributes modified for the Storage systems referenced in Fleet.storages: discharge_max_t, charge_max_t,
         node.
     """
@@ -58,10 +56,6 @@ def initialise_interval(
         for idx, flexible_order in enumerate(node.flexible_merit_order):
             generator_m.set_flexible_max_t(
                 fleet.generators[flexible_order], interval, resolution, idx, forward_time_flag
-            )
-        for idx, reservoir_order in enumerate(node.reservoir_merit_order):
-            reservoir_m.set_reservoir_max_t(
-                fleet.reservoirs[reservoir_order], interval, resolution, idx, forward_time_flag
             )
         for idx, storage_order in enumerate(node.storage_merit_order):
             storage_m.set_dispatch_max_t(fleet.storages[storage_order], interval, resolution, idx, forward_time_flag)
@@ -153,45 +147,6 @@ def balance_with_storage(
 
 
 @njit(fastmath=FASTMATH)
-def balance_with_reservoir(
-    interval: int64,
-    network: Network_InstanceType,
-    fleet: Fleet_InstanceType,
-) -> None:
-    """
-    Dispatch Reservoir systems according to the merit order at each Node to balance remaining netload.
-    Positive netload requires Reservoir systems to discharge.
-
-    Notes:
-    -----
-    - Nodes that have no remaining netload for balancing are skipped.
-    - Nodal reservoir power is reset before dispatching the Reservoir systems.
-
-    Parameters:
-    -------
-    interval (int64): Index of the time interval to balance.
-    network (Network_InstanceType): An instance of the Network jitclass.
-    fleet (Fleet_InstanceType): An instance of the Fleet jitclass.
-
-    Returns:
-    -------
-    None.
-
-    Side-effects:
-    -------
-    Attributes modified for Nodes in Network.nodes: reservoir_power.
-    Attributes modified for the Reservoir systems in Fleet.reservoirs: dispatch_power, node.
-    """
-    for node in network.nodes.values():
-        if not node_m.check_remaining_netload(node, interval, "deficit"):
-            continue
-        node.reservoir_power[interval] = 0
-        for idx, reservoir_order in enumerate(node.reservoir_merit_order):
-            reservoir_m.dispatch(fleet.reservoirs[reservoir_order], interval, idx)
-    return None
-
-
-@njit(fastmath=FASTMATH)
 def balance_with_flexible(
     interval: int64,
     network: Network_InstanceType,
@@ -264,12 +219,10 @@ def energy_balance_for_interval(
 
     Side-effects:
     -------
-    Attributes modified for the Nodes referenced in Solution.network.nodes: netload_t, discharge_max_t,
-        charge_max_t, reservoir_max_t, flexible_max_t, fill, surplus, available_imports, imports_exports,
-        temp_surplus, imports_exports_update, imports_exports_temp, storage_power, reservoir_power, flexible_power.
+    Attributes modified for the Nodes referenced in Solution.network.nodes: netload_t, discharge_max_t, charge_max_t,
+        flexible_max_t, fill, surplus, available_imports, imports_exports, temp_surplus, imports_exports_update,
+        imports_exports_temp, storage_power, flexible_power.
     Attributes modified for the flexible Generators referenced in Solution.fleet.generators: flexible_max_t, node,
-        dispatch_power.
-    Attributes modified for the Reservoirs referenced in Solution.fleet.reservoirs: discharge_max_t, node,
         dispatch_power.
     Attributes modified for the Storage systems referenced in Solution.fleet.storages: discharge_max_t, charge_max_t,
         node, dispatch_power.
@@ -284,25 +237,27 @@ def energy_balance_for_interval(
         solution.static.interval_resolutions[interval],
         forward_time_flag,
     )
+    # Check deficits
     if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
+        # Transmit energy from nodes in surplus to nodes in deficit
         balance_with_transmission(interval, solution.network, "surplus", False)
         balance_with_storage(interval, solution.network, solution.fleet)  # Local storage
 
     if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
+        # Discharge local storage to balance remaining deficits
         balance_with_transmission(interval, solution.network, "storage_discharge", False)
         balance_with_storage(interval, solution.network, solution.fleet)  # Neighbouring and local storage
-        balance_with_reservoir(interval, solution.network, solution.fleet)  # Local reservoir
 
     if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
-        balance_with_transmission(interval, solution.network, "reservoir", False)
-        balance_with_reservoir(interval, solution.network, solution.fleet)  # Local reservoir
         balance_with_flexible(interval, solution.network, solution.fleet)  # Local flexible
 
     if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
         balance_with_transmission(interval, solution.network, "flexible", False)
         balance_with_flexible(interval, solution.network, solution.fleet)  # Neighbouring and local flexible
 
+    # check suurpluses
     if network_m.check_remaining_netloads(solution.network, interval, "spillage"):
+        # export surpluses to neighbours who can use it
         balance_with_transmission(interval, solution.network, "storage_charge", False)
         balance_with_storage(interval, solution.network, solution.fleet)  # Charge neighbouring storage
 

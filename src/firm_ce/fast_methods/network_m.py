@@ -13,11 +13,7 @@ from firm_ce.system.topology import (
     routes_key_type,
     routes_list_type,
 )
-from firm_ce.system.components import (
-    Generator_InstanceType,
-    Reservoir_InstanceType,
-    Storage_InstanceType,
-)
+from firm_ce.system.components import Generator_InstanceType, Storage_InstanceType
 
 
 @njit(fastmath=FASTMATH)
@@ -165,7 +161,7 @@ def allocate_memory(
     Side-effects:
     -------
     Attributes modified for each Node instance in Network.nodes: imports_exports, spillage, deficits, flexible_power,
-        reservoir_power, storage_power.
+        storage_power.
     Attributes modified for each Line instance in Network.major_lines: flows.
 
     Raises:
@@ -531,15 +527,10 @@ def set_node_fills_and_surpluses(
             node.fill = max(node.netload_t - node.storage_power[interval], 0)
             node.surplus = max(node.discharge_max_t[-1] - node.storage_power[interval], 0)
 
-    elif transmission_case == "reservoir":
-        for node in network_instance.nodes.values():
-            node.fill = max(node.netload_t - node.storage_power[interval] - node.reservoir_power[interval], 0)
-            node.surplus = max(node.reservoir_max_t[-1] - node.reservoir_power[interval], 0)
-
     elif transmission_case == "flexible":
         for node in network_instance.nodes.values():
             node.fill = max(
-                node.netload_t - node.storage_power[interval] - node.reservoir_power[interval] - node.flexible_power[interval], 0
+                node.netload_t - node.storage_power[interval] - node.flexible_power[interval], 0
             )
             node.surplus = max(node.flexible_max_t[-1] - node.flexible_power[interval], 0)
 
@@ -547,7 +538,7 @@ def set_node_fills_and_surpluses(
         for node in network_instance.nodes.values():
             node.fill = max(node.charge_max_t[-1] + node.storage_power[interval], 0)
             node.surplus = -min(
-                node.netload_t - node.storage_power[interval] - node.reservoir_power[interval] - node.flexible_power[interval], 0.0
+                node.netload_t - node.storage_power[interval] - node.flexible_power[interval], 0.0
             )
 
     elif transmission_case == "precharging_surplus":
@@ -608,7 +599,6 @@ def calculate_spillage_and_deficit(
         _imbalance = (
             node.netload_t
             - node.storage_power[interval]
-            - node.reservoir_power[interval]
             - node.flexible_power[interval]
         )
         node.deficits[interval] = max(_imbalance, 0)
@@ -621,29 +611,21 @@ def assign_storage_merit_orders(
     network_instance: Network_InstanceType,
     storages_typed_dict: DictType(int64, Storage_InstanceType),
 ) -> None:
-    for node in network_instance.nodes.values():
-        node_m.assign_storage_merit_order(node, storages_typed_dict)
-    return None
-
-
-@njit(fastmath=FASTMATH)
-def assign_reservoir_merit_orders(
-    network_instance: Network_InstanceType,
-    reservoirs_typed_dict: DictType(int64, Reservoir_InstanceType),
-) -> None:
     """
-    For each Node, finds all Reservoir instances at that Node. Sorts the Reservoir systems at that Node from
-    shortest to longest duration. Builds a Reservoir merit order array for that Node where the values are
-    the Reservoir.order integers of the sorted Reservoir instances. That is, it is assumed that short-duration
-    reservoir systems are dispatched first, with long-duration/seasonal reservoir dispatched last.
+    For each Node, finds all Storage instances at that Node. Sorts the Storage systems at that Node from
+    longest to shortest duration. Builds a Storage merit order array for that Node where the values are
+    the Storage.order integers of the sorted Storage instances. Thinking about bidding dynamics: Longer-
+    duration storage carries more price risk from not discharging than shorter-duraton and therefore bids
+    lower and is dispatched ealier. Thinking about energy balance, short duration storage power capacity
+    is needed for net demand spikes and should not be dispatched until necessary.
 
     Note that when balancing a deficit block in reverse time, the merit order is reversed.
 
     Parameters:
     -------
     network_instance (Network_InstanceType): An instance of the Network jitclass.
-    reservoirs_typed_dict (DictType(int64, Reservoir_InstanceType)): Typed dictionary of Reservoir instances within
-        the scenario, keyed by Reservoir.order.
+    storages_typed_dict (DictType(int64, Storage_InstanceType)): Typed dictionary of Storage instances within
+        the scenario, keyed by Storage.order.
 
     Returns:
     -------
@@ -651,10 +633,10 @@ def assign_reservoir_merit_orders(
 
     Side-effects:
     -------
-    Attributes modified for each Node in Network.nodes: reservoir_merit_order.
+    Attributes modified for each Node in Network.nodes: storage_merit_order.
     """
     for node in network_instance.nodes.values():
-        node_m.assign_reservoir_merit_order(node, reservoirs_typed_dict)
+        node_m.assign_storage_merit_order(node, storages_typed_dict)
     return None
 
 
@@ -767,11 +749,10 @@ def reset_dispatch(
 
     Side-effects:
     -------
-    Attributes modified for each Node in Network.nodes: flexible_power, reservoir_power, storage_power.
+    Attributes modified for each Node in Network.nodes: flexible_power, storage_power.
     """
     for node in network_instance.nodes.values():
         node.storage_power[interval] = 0.0
-        node.reservoir_power[interval] = 0.0
         node.flexible_power[interval] = 0.0
     return None
 
@@ -805,7 +786,6 @@ def check_precharging_end(
             node.residual_load[interval - 1]
             - node.imports_exports[interval - 1]
             - node.storage_power[interval - 1]
-            - node.reservoir_power[interval - 1]
             - node.flexible_power[interval - 1]
             > TOLERANCE
         ):

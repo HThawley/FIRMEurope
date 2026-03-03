@@ -133,6 +133,10 @@ class Solver:
 
         path_name = os.path.join(self.mga_log_dir, "mga_log")
 
+        # create callback folder
+        results_dir = os.path.join("results", "temp")
+        os.makedirs(results_dir, exist_ok=True)
+
         algorithm = MGAProblem(
             problem=problem,
             log_dir=path_name,
@@ -341,11 +345,9 @@ def callback(intermediate_result: OptimizeResult) -> None:
 
 
 def mga_callback(population: Population) -> None:
-    results_dir = os.path.join("results", "temp")
-    os.makedirs(results_dir, exist_ok=True)
 
     # Save best solution from last iteration
-    with open(os.path.join(results_dir, "callback.csv"), "a", newline="") as f:
+    with open("results/temp/callback.csv", "a", newline="") as f:
         writer = csv.writer(f)
         best_row = [
             population.current_optima_obj[0],
@@ -367,8 +369,8 @@ def mga_callback(population: Population) -> None:
         # Shape: (total_pop, 3 + ndim)
         combined_block = np.column_stack((obj_flat, viol_flat, fit_flat, pts_flat))
 
-        with open(os.path.join(results_dir, "population.csv"), "a", newline="") as f_all, \
-             open(os.path.join(results_dir, "latest_population.csv"), "w", newline="") as f_latest:
+        with open("results/temp/population.csv", "a", newline="") as f_all, \
+             open("results/temp/latest_population.csv", "w", newline="") as f_latest:
 
             writer_all = csv.writer(f_all)
             writer_latest = csv.writer(f_latest)

@@ -318,7 +318,6 @@ def dispatch(
         generator_instance.dispatch_power[interval] = min(
             max(
                 generator_instance.node.netload_t
-                - generator_instance.node.reservoir_power[interval]
                 - generator_instance.node.storage_power[interval],
                 0.0
             ),
@@ -329,7 +328,6 @@ def dispatch(
             max(
                 generator_instance.node.netload_t
                 - generator_instance.node.storage_power[interval]
-                - generator_instance.node.reservoir_power[interval]
                 - generator_instance.node.flexible_max_t[merit_order_idx - 1],
                 0.0,
             ),

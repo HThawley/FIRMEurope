@@ -6,7 +6,7 @@ import numpy as np
 from firm_ce.common.constants import JIT_ENABLED, NUM_THREADS, PENALTY_MULTIPLIER
 from firm_ce.common.jit_overload import jitclass, njit, prange
 from firm_ce.common.typing import boolean, float64, unicode_type
-from firm_ce.fast_methods import fleet_m, generator_m, line_m, network_m, reservoir_m, static_m, storage_m
+from firm_ce.fast_methods import fleet_m, generator_m, line_m, network_m, static_m, storage_m
 from firm_ce.optimisation.balancing import balance_for_period
 from firm_ce.system.components import Fleet_InstanceType
 from firm_ce.system.parameters import ScenarioParameters_InstanceType
@@ -130,7 +130,6 @@ class Solution:
         network_m.allocate_memory(self.network, self.static.intervals_count)
 
         network_m.assign_storage_merit_orders(self.network, self.fleet.storages)
-        network_m.assign_reservoir_merit_orders(self.network, self.fleet.reservoirs)
         network_m.assign_flexible_merit_orders(self.network, self.fleet.generators)
 
     def balance_residual_load(self) -> boolean:
@@ -141,7 +140,7 @@ class Solution:
         -------
         - At the end of each calendar year, the reliability constraint is evaluated. The method returns early
         if the reliability constraint is breached for any year.
-        - Stored energy in Reservoir and Storage systems is initialised at the start of the modelling period.
+        - Stored energy in Storage systems is initialised at the start of the modelling period.
         Annual generation limits for flexible Generators are initialised at the start of each calendar year.
 
         Parameters:
@@ -155,8 +154,8 @@ class Solution:
 
         Side-effects:
         -------
-        Dynamic jitlass instances are substantially modified within this method. The stored energy of Reservoirs and
-        Storage systems and remaining energy for flexible Generators are initialised using Fleet pseudo-methods. The
+        Dynamic jitlass instances are substantially modified within this method. The stored energy of Storage systems
+        and remaining energy for flexible Generators are initialised using Fleet pseudo-methods. The
         endogenous time-series data and temporary values are modified throughout the balance_for_period function.
         Attributes that are modified are marked using *Dynamic* or *Precharging* comments in the relevant jitclass
         definitions.
@@ -197,7 +196,7 @@ class Solution:
 
         Side-effects:
         -------
-        Attributes modified for values in Solution.fleet.generators, Solution.fleet.reservoirs, Solution.fleet.storages,
+        Attributes modified for values in Solution.fleet.generators, Solution.fleet.storages,
             Solution.network.major_lines, Solution.network.minor_lines: lt_costs.
         Attributes modified for LTCosts instances referenced in the lt_costs attributes: fom, annualised_build.
         """
@@ -205,9 +204,6 @@ class Solution:
 
         for generator in self.fleet.generators.values():
             total_costs += generator_m.calculate_fixed_costs(generator)
-
-        for reservoir in self.fleet.reservoirs.values():
-            total_costs += reservoir_m.calculate_fixed_costs(reservoir)
 
         for storage in self.fleet.storages.values():
             total_costs += storage_m.calculate_fixed_costs(storage)
@@ -236,8 +232,8 @@ class Solution:
 
         Side-effects:
         -------
-        Attributes modified for values in Solution.fleet.generators, Solution.fleet.reservoirs,
-            Solution.fleet.storages, Solution.network.major_lines, Solution.network.minor_lines: lt_costs.
+        Attributes modified for values in Solution.fleet.generators, Solution.fleet.storages,
+            Solution.network.major_lines, Solution.network.minor_lines: lt_costs.
         Attributes modified for LTCosts instances referenced in the lt_costs attributes: vom, fuel.
         """
         total_costs = 0.0
@@ -253,9 +249,6 @@ class Solution:
 
         for generator in self.fleet.generators.values():
             total_costs += generator_m.calculate_variable_costs(generator, self.static.year_float)
-
-        for reservoir in self.fleet.reservoirs.values():
-            total_costs += reservoir_m.calculate_variable_costs(reservoir, self.static.year_float)
 
         for storage in self.fleet.storages.values():
             total_costs += storage_m.calculate_variable_costs(storage, self.static.year_float)
@@ -313,8 +306,8 @@ class Solution:
         Side-effects:
         -------
         Attributes modified for Solution instance: lcoe, penalties.
-        Attributes modified for values in Solution.fleet.generators, Solution.fleet.reservoirs, Solution.fleet.storages,
-            Solution.network.major_lines, Solution.network.minor_lines: lt_costs.
+        Attributes modified for values in Solution.fleet.generators, Solution.fleet.storages, Solution.network.major_lines,
+            Solution.network.minor_lines: lt_costs.
         Attributes modified for LTCosts instances referenced in the lt_costs attributes: fom, annualised_build, vom, fuel.
 
         Dynamic jitlass instances are substantially modified within this method. The endogenous time-series data and temporary

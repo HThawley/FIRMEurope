@@ -20,12 +20,10 @@ if JIT_ENABLED:
         ("residual_load", float64[:]),
         # Dynamic
         ("storage_merit_order", int64[:]),
-        ("reservoir_merit_order", int64[:]),
         ("flexible_merit_order", int64[:]),
         ("netload_t", float64),
         ("discharge_max_t", float64[:]),
         ("charge_max_t", float64[:]),
-        ("reservoir_max_t", float64[:]),
         ("flexible_max_t", float64[:]),
         ("fill", float64),
         ("surplus", float64),
@@ -35,7 +33,6 @@ if JIT_ENABLED:
         ("deficits", float64[:]),
         ("spillage", float64[:]),
         ("flexible_power", float64[:]),
-        ("reservoir_power", float64[:]),
         ("storage_power", float64[:]),
         # Precharging
         ("imports_exports_temp", float64),
@@ -74,9 +71,7 @@ class Node:
     residual_load (float64[:]): Equal to the operational demand minus generation from solar, wind, and baseload generation in a
         given time interval, units GW.
     storage_merit_order (int64[:]): Merit-order of Storage assets connected to this node (array of Storage.order values). Ordered
-        from shortest to longest storage duration.
-    storage_merit_order (int64[:]): Merit-order of Reservoir assets connected to this node (array of Storage.order values). Ordered
-        from shortest to longest storage duration.
+        from longest to shortest storage duration.
     flexible_merit_order (int64[:]): Merit-order of flexible Generators connected to this node (array of Generator.order values).
         Order from lowest to highest marginal variable cost.
     netload_t (float64): Current net load for the interval based upon completed balancing actions, units GW. Equal to the sum of
@@ -86,8 +81,6 @@ class Node:
         across the storage merit order, units GW.
     charge_max_t (float64[:]): A 1-dimensional array defining the cumulative maximum charge limits for the time interval
         across the storage merit order, units GW.
-    reservoir_max_t (float64[:]): A 1-dimensional array defining the cumulative maximum discharge limits for the time interval
-        across the reservoir merit order, units GW.
     flexible_max_t (float64[:]): A 1-dimensional array defining the cumulative maximum generation limits for the time interval
         across the flexible merit order, units GW.
     fill (float64): Current energy that the node is attempting to fill through transmission actions, units GW.
@@ -98,8 +91,6 @@ class Node:
     deficits (float64[:]): Endogenous time-series defining interval power deficits after all balancing at the node, units GW.
     spillage (float64[:]): Endogenous time-series defining interval spillage/curtailment at the node, units GW.
     flexible_power (float64[:]): Endogenous time-series defining interval net dispatch of flexible Generators connected to
-        this node, units GW.
-    reservoir_power (float64[:]): Endogenous time-series defining interval net dispatch of Reservoirs connected to
         this node, units GW.
     storage_power (float64[:]): Endogenous time-series defining interval net storage power (discharge +, charge -) of Storages
         connected to this node, units GW.
@@ -139,12 +130,10 @@ class Node:
 
         # Dynamic
         self.flexible_merit_order = np.empty((0,), dtype=np.int64)
-        self.reservoir_merit_order = np.empty((0,), dtype=np.int64)
         self.storage_merit_order = np.empty((0,), dtype=np.int64)
         self.netload_t = 0.0  # GW
         self.discharge_max_t = np.empty((0,), dtype=np.float64)  # GW
         self.charge_max_t = np.empty((0,), dtype=np.float64)  # GW
-        self.reservoir_max_t = np.empty((0,), dtype=np.float64)  # GW
         self.flexible_max_t = np.empty((0,), dtype=np.float64)  # GW
 
         self.fill = 0.0  # GW, power attempting to import
@@ -157,7 +146,6 @@ class Node:
         self.spillage = np.empty((0,), dtype=np.float64)
 
         self.flexible_power = np.empty((0,), dtype=np.float64)
-        self.reservoir_power = np.empty((0,), dtype=np.float64)
         self.storage_power = np.empty((0,), dtype=np.float64)
 
         # Precharging

@@ -91,3 +91,18 @@ def chain(*iterables):
     for it in iterables:
         for element in it:
             yield element
+
+
+def parse_boolean(value: str) -> bool:
+    """
+    Parses a string value into a boolean. Recognizes "true", "1", "yes" (case-insensitive) as True.
+
+    Parameters:
+    -------
+    value (str): The string value to parse.
+
+    Returns:
+    -------
+    bool: The parsed boolean value.
+    """
+    return str(value).lower() in ("true", "t", "1.0", "1", "y", "yes")

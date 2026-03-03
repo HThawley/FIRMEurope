@@ -3,8 +3,8 @@ from firm_ce.common.constants import FASTMATH, TOLERANCE
 from firm_ce.common.exceptions import raise_static_modification_error
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import DictType, TypedDict, boolean, float64, int64, unicode_type
-from firm_ce.fast_methods import generator_m, reservoir_m, storage_m
-from firm_ce.system.components import Fleet, Fleet_InstanceType, Generator_InstanceType, Reservoir_InstanceType, Storage_InstanceType
+from firm_ce.fast_methods import generator_m, storage_m
+from firm_ce.system.components import Fleet, Fleet_InstanceType, Generator_InstanceType, Storage_InstanceType
 from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
 
 
@@ -44,14 +44,10 @@ def create_dynamic_copy(
     Fleet_InstanceType: A dynamic instance of the Fleet jitclass.
     """
     generators_copy = TypedDict.empty(key_type=int64, value_type=Generator_InstanceType)
-    reservoirs_copy = TypedDict.empty(key_type=int64, value_type=Reservoir_InstanceType)
     storages_copy = TypedDict.empty(key_type=int64, value_type=Storage_InstanceType)
 
     for order, generator in fleet_instance.generators.items():
         generators_copy[order] = generator_m.create_dynamic_copy(generator, nodes_typed_dict, lines_typed_dict)
-
-    for order, reservoir in fleet_instance.reservoirs.items():
-        reservoirs_copy[order] = reservoir_m.create_dynamic_copy(reservoir, nodes_typed_dict, lines_typed_dict)
 
     for order, storage in fleet_instance.storages.items():
         storages_copy[order] = storage_m.create_dynamic_copy(storage, nodes_typed_dict, lines_typed_dict)
@@ -59,7 +55,6 @@ def create_dynamic_copy(
     fleet_copy = Fleet(
         False,
         generators_copy,
-        reservoirs_copy,
         storages_copy,
     )
 
@@ -96,8 +91,6 @@ def build_capacities(
     Attributes modified for each Generator instance in Fleet.generators: new_build, capacity, line, node, lt_generation.
     Attributes modified for each Line instance referenced in Generator.line: new_build, capacity, lt_flows.
     Attributes modified for each Node instance referenced in Generator.node: residual_load.
-    Attributes modified for each Reservoir instance in Fleet.reservoirs: npower_capacity, new_build_p, energy_capacity, new_build_e,
-        line, node, lt_generation.
     Attributes modified for each Line instance referenced in Generator.line: new_build, capacity, lt_flows.
     Attributes modified for each Node instance referenced in Generator.node: residual_load.
     Attributes modified for each Storage instance in Fleet.storages: power_capacity, new_build_p, energy_capacity, new_build_e,
@@ -109,10 +102,6 @@ def build_capacities(
 
     for generator in fleet_instance.generators.values():
         generator_m.build_capacity(generator, decision_x[generator.candidate_x_idx], interval_resolutions)
-
-    for reservoir in fleet_instance.reservoirs.values():
-        reservoir_m.build_capacity(reservoir, decision_x[reservoir.candidate_p_x_idx], "power")
-        reservoir_m.build_capacity(reservoir, decision_x[reservoir.candidate_e_x_idx], "energy")
 
     for storage in fleet_instance.storages.values():
         storage_m.build_capacity(storage, decision_x[storage.candidate_p_x_idx], "power")
@@ -142,7 +131,6 @@ def allocate_memory(
     Side-effects:
     -------
     Attributes modified for each 'flexible' Generator instance in Fleet.generators: dispatch_power, remaining_energy.
-    Attributes modified for each Reservoir instance in Fleet.reservoirs: dispatch_power, stored_energy.
     Attributes modified for each Storage instance in Fleet.storages: dispatch_power, stored_energy.
     """
     if fleet_instance.static_instance:
@@ -151,9 +139,6 @@ def allocate_memory(
     for generator in fleet_instance.generators.values():
         if generator.unit_type == "flexible":
             generator_m.allocate_memory(generator, intervals_count)
-
-    for reservoir in fleet_instance.reservoirs.values():
-        reservoir_m.allocate_memory(reservoir, intervals_count)
 
     for storage in fleet_instance.storages.values():
         storage_m.allocate_memory(storage, intervals_count)
@@ -179,13 +164,10 @@ def initialise_stored_energies(
 
     Side-effects:
     -------
-    Attributes modified for each Storage instance in Fleet.reservoirs: stored_energy.
     Attributes modified for each Storage instance in Fleet.storages: stored_energy.
     """
     if fleet_instance.static_instance:
         raise_static_modification_error()
-    for reservoir in fleet_instance.reservoirs.values():
-        reservoir_m.initialise_stored_energy(reservoir)
     for storage in fleet_instance.storages.values():
         storage_m.initialise_stored_energy(storage)
     return None
@@ -248,30 +230,6 @@ def count_generator_unit_type(
 
 
 @njit(fastmath=FASTMATH)
-def count_reservoir_unit_type(
-    fleet_instance: Fleet_InstanceType,
-    unit_type: unicode_type,
-) -> int64:
-    """
-    Returns a count of the number of reservoirs of the specified unit_type within the Fleet.
-
-    Parameters:
-    -------
-    fleet_instance (Fleet_InstanceType): An instance of the Fleet jitclass.
-    unit_type (unicode_type): The Reservoir.unit_type to be counted.
-
-    Returns:
-    -------
-    int64: The count of the number of reservoirs of the specified unit_type.
-    """
-    count = 0
-    for reservoir in fleet_instance.reservoirs.values():
-        if reservoir.unit_type == unit_type:
-            count += 1
-    return count
-
-
-@njit(fastmath=FASTMATH)
 def update_stored_energies(
     fleet_instance: Fleet_InstanceType,
     interval: int64,
@@ -297,12 +255,9 @@ def update_stored_energies(
 
     Side-effects
     -------
-    Attributes modified for each Reservoir and Storage instance in Fleet.storages: stored_energy (forwards_time_flag = True) or
+    Attributes modified for each Storage instance in Fleet.storages: stored_energy (forwards_time_flag = True) or
         stored_energy_temp_reverse (forwards_time_flag = False).
     """
-    for reservoir in fleet_instance.reservoirs.values():
-        reservoir_m.update_stored_energy(reservoir, interval, resolution, forward_time_flag)
-
     for storage in fleet_instance.storages.values():
         storage_m.update_stored_energy(storage, interval, resolution, forward_time_flag)
 
@@ -372,20 +327,15 @@ def calculate_lt_generations(
     -------
     Attributes modified for each flexible Generator instance in Fleet.generators: unit_lt_hours, lt_generation, line.
     Attributes modified for each Line instance referenced in Generator.line: lt_flows.
-    Attributes modified for each flexible Reservoir instance in Fleet.reservoirs: unit_lt_hours, lt_generation, line.
-    Attributes modified for each Line instance referenced in Reservoir.line: lt_flows.
-    Attributes modified for each Storage instance in Fleet.storages: lt_discharge, line.
+    Attributes modified for each Storage instance in Fleet.storages: lt_generation, line.
     Attributes modified for each Line instance referenced in Storage.line: lt_flows.
     """
     for generator in fleet_instance.generators.values():
         if generator_m.check_unit_type(generator, "flexible"):
             generator_m.calculate_lt_generation(generator, interval_resolutions)
 
-    for reservoir in fleet_instance.reservoirs.values():
-        reservoir_m.calculate_lt_generation(reservoir, interval_resolutions)
-
     for storage in fleet_instance.storages.values():
-        storage_m.calculate_lt_discharge(storage, interval_resolutions)
+        storage_m.calculate_lt_generation(storage, interval_resolutions)
     return None
 
 
@@ -418,8 +368,6 @@ def initialise_deficit_block(
     """
     for storage in fleet_instance.storages.values():
         storage_m.initialise_deficit_block(storage, interval_after_deficit_block)
-
-    # TODO: Reservoirs
 
     for generator in fleet_instance.generators.values():
         if generator_m.check_unit_type(generator, "flexible"):
@@ -477,8 +425,6 @@ def reset_dispatch(
     Attributes modified for each Storage instance in Fleet.storages: dispatch_power.
     Attributes modified for each flexible Generator instance in Fleet.generators: dispatch_power.
     """
-    # TODO: Reservoirs
-
     for storage in fleet_instance.storages.values():
         storage.dispatch_power[interval] = 0.0
     reset_flexible(fleet_instance, interval)
@@ -511,8 +457,6 @@ def update_deficit_block(
     """
     for storage in fleet_instance.storages.values():
         storage_m.update_deficit_block_bounds(storage, storage.stored_energy_temp_reverse)
-
-    # TODO: Reservoirs
 
     for generator in fleet_instance.generators.values():
         if generator_m.check_unit_type(generator, "flexible"):
@@ -565,8 +509,6 @@ def assign_precharging_values(
             generator_m.update_deficit_block_bounds(generator, generator.remaining_energy_temp_forward)
             generator_m.assign_trickling_reserves(generator)
 
-    # TODO: Reservoirs
-
     for storage in fleet_instance.storages.values():
         # After reverse charging, the stored energy is discontinuous in the forward and reverse directions
         storage.stored_energy_temp_forward = (
@@ -609,8 +551,6 @@ def initialise_precharging_flags(
     for storage in fleet_instance.storages.values():
         storage_m.initialise_precharging_flags(storage, interval)
 
-    # TODO: Reservoirs
-
     for generator in fleet_instance.generators.values():
         if generator_m.check_unit_type(generator, "flexible"):
             generator_m.initialise_precharging_flags(generator, interval)
@@ -647,8 +587,6 @@ def update_precharging_flags(
     """
     for storage in fleet_instance.storages.values():
         storage_m.update_precharging_flags(storage, interval)
-
-    # TODO: Reservoirs
 
     for generator in fleet_instance.generators.values():
         if generator_m.check_unit_type(generator, "flexible"):
@@ -696,8 +634,6 @@ def check_trickling_remaining(
         if storage.trickling_flag:
             return True
 
-    # TODO: Reservoirs
-
     for generator in fleet_instance.generators.values():
         if not generator_m.check_unit_type(generator, "flexible"):
             continue
@@ -740,7 +676,6 @@ def determine_feasible_storage_dispatch(
         if abs(dispatch_power_adjustment) > TOLERANCE:
             storage.node.storage_power[interval] -= dispatch_power_adjustment
             infeasible_flag = True
-    # TODO: Reservoirs
     return infeasible_flag
 
 
@@ -778,7 +713,6 @@ def determine_feasible_flexible_dispatch(
         if abs(dispatch_power_adjustment) > TOLERANCE:
             generator.node.flexible_power[interval] -= dispatch_power_adjustment
             infeasible_flag = True
-    # TODO: Reservoirs
     return infeasible_flag
 
 
@@ -804,7 +738,6 @@ def calculate_available_storage_dispatch(fleet_instance: Fleet_InstanceType, int
     """
     for storage in fleet_instance.storages.values():
         storage_m.calculate_available_dispatch(storage, interval)
-    # TODO: Reservoirs
 
 
 @njit(fastmath=FASTMATH)

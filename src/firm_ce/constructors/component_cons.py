@@ -4,6 +4,7 @@ from typing import Dict
 import numpy as np
 
 from firm_ce.common.typing import DictType, TypedDict, int64
+from firm_ce.common.helpers import parse_boolean
 from firm_ce.constructors.cost_cons import construct_UnitCost_object
 from firm_ce.system.components import (
     Fleet,
@@ -12,8 +13,6 @@ from firm_ce.system.components import (
     Fuel_InstanceType,
     Generator,
     Generator_InstanceType,
-    Reservoir,
-    Reservoir_InstanceType,
     Storage,
     Storage_InstanceType,
 )
@@ -78,7 +77,7 @@ def construct_Generator_object(
     min_build = float(generator_dict["min_build"])
     capacity = float(generator_dict["initial_capacity"])
     unit_type = str(generator_dict["unit_type"])
-    near_optimum_check = str(generator_dict["near_optimum"]).lower() in ("true", "1", "yes")
+    near_optimum_check = parse_boolean(generator_dict["near_optimum"])
 
     node = next(node for node in nodes_object_dict.values() if node.name == str(generator_dict["node"]))
 
@@ -125,102 +124,6 @@ def construct_Generator_object(
     )
 
 
-def construct_Reservoir_object(
-    reservoir_dict: Dict[str, str],
-    fuels_imported_dict: Dict[str, Dict[str, str]],
-    nodes_object_dict: DictType(int64, Node_InstanceType),
-    lines_object_dict: DictType(int64, Line_InstanceType),
-    order: int,
-) -> Reservoir_InstanceType:
-    """
-    Takes data required to initialise a single storage object,
-    casts values into Numba-compatible types, and returns an
-    instance of the Storage jitclass.
-
-    Parameters:
-    -------
-    reservoir_dict (Dict[str,str]): A dictionary containing the attributes of
-        a single reservoir object in `config/reservoirs.csv`.
-    fuels_imported_dict (Dict[str, Dict[str, str]]): A dictionary containing data for all fuels
-        imported from `config/fules.csv`.
-    nodes_object_dict (DictType(int64, Node_InstanceType)): A typed dictionary of
-        all Node jitclass instances for the scenario. Key defined as Node.order.
-    lines_object_dict (DictType(int64, Line_InstanceType)): A typed dictionary of
-        all Line jitclass instances for the scenario. Key defined as Line.order.
-    order (int): The scenario-specific id for the Reservoir instance.
-
-    Returns:
-    -------
-    Reservoir_InstanceType: A static instance of the Reservoir jitclass.
-    """
-    idx = int(reservoir_dict["id"])
-    name = str(reservoir_dict["name"])
-    unit_size = float(reservoir_dict["unit_size"])
-    power_capacity = float(reservoir_dict["initial_power_capacity"])
-
-    duration = int(reservoir_dict["duration"]) if int(reservoir_dict["duration"]) > 0 else 0
-    if duration == 0:
-        energy_capacity = float(reservoir_dict["initial_energy_capacity"])
-        duration = int(energy_capacity / power_capacity) if power_capacity > 0 else 0
-    else:
-        energy_capacity = float(power_capacity * duration)
-
-    discharge_efficiency = float(reservoir_dict["discharge_efficiency"])
-    max_build_p = float(reservoir_dict["max_build_p"])
-    max_build_e = float(reservoir_dict["max_build_e"])
-    min_build_p = float(reservoir_dict["min_build_p"])
-    min_build_e = float(reservoir_dict["min_build_e"])
-    unit_type = str(reservoir_dict["unit_type"])
-    near_optimum_check = str(reservoir_dict["near_optimum"]).lower() in ("true", "1", "yes")
-
-    node = next(node for node in nodes_object_dict.values() if node.name == str(reservoir_dict["node"]))
-
-    fuel_dict = next(
-        fuel_dict for fuel_dict in fuels_imported_dict.values() if fuel_dict["name"] == str(reservoir_dict["fuel"])
-    )
-    fuel = construct_Fuel_object(fuel_dict)
-
-    line = next(line for line in lines_object_dict.values() if line.name == str(reservoir_dict["line"]))
-
-    raw_group = reservoir_dict["range_group"]
-    if raw_group is None or (isinstance(raw_group, float) and np.isnan(raw_group)) or str(raw_group).strip() == "":
-        group = name
-    else:
-        group = str(raw_group).strip()
-
-    cost = construct_UnitCost_object(
-        capex_p=float(reservoir_dict["capex_p"]),
-        fom=float(reservoir_dict["fom"]),
-        vom=float(reservoir_dict["vom"]),
-        lifetime=int(reservoir_dict["lifetime"]),
-        discount_rate=float(reservoir_dict["discount_rate"]),
-        capex_e=float(reservoir_dict["capex_e"]),
-        fuel=fuel,
-    )
-    return Reservoir(
-        True,
-        idx,
-        order,
-        name,
-        unit_size,
-        power_capacity,
-        energy_capacity,
-        duration,
-        discharge_efficiency,
-        max_build_p,
-        max_build_e,
-        min_build_p,
-        min_build_e,
-        unit_type,
-        near_optimum_check,
-        node,
-        fuel,
-        line,
-        group,
-        cost,
-    )
-
-
 def construct_Storage_object(
     storage_dict: Dict[str, str],
     nodes_object_dict: DictType(int64, Node_InstanceType),
@@ -248,7 +151,11 @@ def construct_Storage_object(
     """
     idx = int(storage_dict["id"])
     name = str(storage_dict["name"])
-    power_capacity = float(storage_dict["initial_power_capacity"])
+
+    chargeable = parse_boolean(storage_dict["chargeable"])
+    inflows = parse_boolean(storage_dict["inflows"])
+
+    power_capacity = float(storage_dict["initial_discha_capacity"])
 
     duration = int(storage_dict["duration"]) if int(storage_dict["duration"]) > 0 else 0
     if duration == 0:
@@ -264,7 +171,7 @@ def construct_Storage_object(
     min_build_p = float(storage_dict["min_build_p"])
     min_build_e = float(storage_dict["min_build_e"])
     unit_type = str(storage_dict["unit_type"])
-    near_optimum_check = str(storage_dict["near_optimum"]).lower() in ("true", "1", "yes")
+    near_optimum_check = parse_boolean(storage_dict["near_optimum"])
 
     node = next(node for node in nodes_object_dict.values() if node.name == str(storage_dict["node"]))
 
@@ -292,6 +199,8 @@ def construct_Storage_object(
         power_capacity,
         energy_capacity,
         duration,
+        chargeable,
+        inflows,
         charge_efficiency,
         discharge_efficiency,
         max_build_p,
@@ -309,7 +218,6 @@ def construct_Storage_object(
 
 def construct_Fleet_object(
     generators_imported_dict: Dict[str, Dict[str, str]],
-    reservoirs_imported_dict: Dict[str, Dict[str, str]],
     storages_imported_dict: Dict[str, Dict[str, str]],
     fuels_imported_dict: Dict[str, Dict[str, str]],
     lines_object_dict: DictType(int64, Line_InstanceType),
@@ -350,16 +258,6 @@ def construct_Fleet_object(
             order,
         )
 
-    reservoirs = TypedDict.empty(key_type=int64, value_type=Reservoir_InstanceType)
-    for order, idx in enumerate(reservoirs_imported_dict):
-        reservoirs[order] = construct_Reservoir_object(
-            reservoirs_imported_dict[idx],
-            fuels_imported_dict,
-            nodes_object_dict,
-            lines_object_dict,
-            order,
-        )
-
     storages = TypedDict.empty(key_type=int64, value_type=Storage_InstanceType)
     for order, idx in enumerate(storages_imported_dict):
         storages[order] = construct_Storage_object(
@@ -372,6 +270,5 @@ def construct_Fleet_object(
     return Fleet(
         True,
         generators,
-        reservoirs,
         storages,
     )

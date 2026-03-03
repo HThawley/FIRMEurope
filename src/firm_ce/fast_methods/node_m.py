@@ -9,7 +9,7 @@ from firm_ce.common.exceptions import (
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import DictType, boolean, float64, int64, unicode_type
 from firm_ce.fast_methods import generator_m
-from firm_ce.system.components import Generator_InstanceType, Reservoir_InstanceType, Storage_InstanceType
+from firm_ce.system.components import Generator_InstanceType, Storage_InstanceType
 from firm_ce.system.topology import Node, Node_InstanceType
 
 
@@ -131,7 +131,7 @@ def allocate_memory(
     Side-effects:
     -------
     Attributes modified for the Node instance: imports_exports, deficits, spillage, flexible_power,
-        reservoir_power storage_power.
+        storage_power.
 
     Raises:
     -------
@@ -144,7 +144,6 @@ def allocate_memory(
     node_instance.spillage = np.zeros(intervals_count, dtype=np.float64)
 
     node_instance.flexible_power = np.zeros(intervals_count, dtype=np.float64)
-    node_instance.reservoir_power = np.zeros(intervals_count, dtype=np.float64)
     node_instance.storage_power = np.zeros(intervals_count, dtype=np.float64)
     return None
 
@@ -212,7 +211,6 @@ def update_netload_t(
     if precharging_flag:
         node_instance.netload_t -= (
             node_instance.storage_power[interval]
-            + node_instance.reservoir_power[interval]
             + node_instance.flexible_power[interval]
         )
     return None
@@ -259,76 +257,37 @@ def assign_storage_merit_order(
     node_instance: Node_InstanceType,
     storages_typed_dict: DictType(int64, Storage_InstanceType),
 ) -> None:
-    storages_count = len(storages_typed_dict)
-    temp_orders = np.full(storages_count, -1, dtype=np.int64)
-    temp_durations = np.full(storages_count, -1, dtype=np.float64)
+    orders = []
+    durations = []
 
-    idx = 0
     for storage_order, storage in storages_typed_dict.items():
         if storage.node.order == node_instance.order:
-            temp_orders[idx] = storage_order
-            temp_durations[idx] = storage.duration
-            idx += 1
+            orders.append(storage_order)
+            durations.append(storage.duration)
 
-    if idx == 0:
-        return
-
-    temp_orders = temp_orders[:idx]
-    temp_durations = temp_durations[:idx]
-
-    sort_order = np.argsort(temp_durations)
-    node_instance.storage_merit_order = temp_orders[sort_order[::-1]]
-    return None
-
-
-@njit(fastmath=FASTMATH)
-def assign_reservoir_merit_order(
-    node_instance: Node_InstanceType,
-    reservoirs_typed_dict: DictType(int64, Reservoir_InstanceType),
-) -> None:
-    """
-    Identifies Reservoir instances located at the Node and sorts them from shortest to longest reservoir duration.
-    The Reservoir.order values for the merit order are stored in an array for the Node.
-
-    The pseudo-method starts by iterating through all Reservoir instances in the scenario and adding the Reservoir.order
-    and Reservoir.duration values to temporary arrays. If there are no Reservoir instances at the Node, the function
-    returns None early. Otherwise, the temporary arrays are clipped to have a length equal to the number of Reservoir
-    instances at that Node. The indices that would sort the temporary reservoir duration array are calculated, and then
-    the temporary reservoir order array is sorted using those indices.
-
-    Parameters:
-    -------
-    node_instance (Node_InstanceType): An instance of the Node jitclass.
-    reservoirs_typed_dict (DictType(int64, Reservoir_InstanceType)): Typed dictionary of Reservoir instances within
-        the scenario, keyed by Reservoir.order.
-
-    Returns:
-    -------
-    None.
-
-    Side-effects:
-    -------
-    Attributes modified for each Node in Network.nodes: reservoir_merit_order.
-    """
-    reservoirs_count = len(reservoirs_typed_dict)
-    temp_orders = np.full(reservoirs_count, -1, dtype=np.int64)
-    temp_durations = np.full(reservoirs_count, -1, dtype=np.float64)
-
-    idx = 0
-    for reservoir_order, reservoir in reservoirs_typed_dict.items():
-        if reservoir.node.order == node_instance.order:
-            temp_orders[idx] = reservoir_order
-            temp_durations[idx] = reservoir.duration
-            idx += 1
-
-    if idx == 0:
+    count = len(orders)
+    if count == 0:
         return None
 
-    temp_orders = temp_orders[:idx]
-    temp_durations = temp_durations[:idx]
+    temp_orders = np.array(orders, dtype=np.int64)
+    temp_durations = np.array(durations, dtype=np.float64)
 
-    sort_order = np.argsort(temp_durations)
-    node_instance.reservoir_merit_order = temp_orders[sort_order[::-1]]
+    # Faster than argsort for a small number of items
+    # sort durations longest to shortest
+    for i in range(1, count):
+        key_dur = temp_durations[i]
+        key_ord = temp_orders[i]
+        j = i - 1
+        # KEY LOGIC: If the value on the left is SMALLER than the current key,
+        # move it to the right. This pushes LARGER values to the front (index 0).
+        while j >= 0 and temp_durations[j] < key_dur:
+            temp_durations[j + 1] = temp_durations[j]
+            temp_orders[j + 1] = temp_orders[j]
+            j -= 1
+        temp_durations[j + 1] = key_dur
+        temp_orders[j + 1] = key_ord
+
+    node_instance.storage_merit_order = temp_orders
     return None
 
 
@@ -391,7 +350,6 @@ def check_remaining_netload(
     _imbalance = (
         node_instance.netload_t
         - node_instance.storage_power[interval]
-        - node_instance.reservoir_power[interval]
         - node_instance.flexible_power[interval]
     )
     if check_case == "deficit":
@@ -436,11 +394,10 @@ def reset_dispatch_max_t(
     node_instance: Node_InstanceType,
 ) -> None:
     """
-    Resets the temporary storage discharging/charging maximum powers, reservoir discharge maximum powers, and
-    flexible maximum powers for the node to zero before balancing a new time interval. Note that these nodal
-    values are cumulative sums for Storage systems, Reservoirs, and flexible Generators along the merit order
-    for this Node (with the cumulative sums stored in an array). If there are no Storage systems, reservoirs,
-    or flexible Generators at the Node, then the arrays have a length of 1.
+    Resets the temporary storage discharging/charging maximum powers and flexible maximum powers for the node to
+    zero before balancing a new time interval. Note that these nodal values are cumulative sums for Storage systems
+    and flexible Generators along the merit order for this Node (with the cumulative sums stored in an array). If
+    there are no Storage systems or flexible Generators at the Node, then the arrays have a length of 1.
 
     Parameters:
     -------
@@ -452,8 +409,7 @@ def reset_dispatch_max_t(
 
     Side-effects:
     -------
-    Attributes modified for each Node in Network.nodes: discharge_max_t, charge_max_t, reservoir_max_t,
-        flexible_max_t.
+    Attributes modified for each Node in Network.nodes: discharge_max_t, charge_max_t, flexible_max_t.
     """
     if len(node_instance.storage_merit_order) > 0:
         node_instance.discharge_max_t = np.zeros(len(node_instance.storage_merit_order), dtype=np.float64)
@@ -461,11 +417,6 @@ def reset_dispatch_max_t(
     else:
         node_instance.discharge_max_t = np.zeros(1, dtype=np.float64)
         node_instance.charge_max_t = np.zeros(1, dtype=np.float64)
-
-    if len(node_instance.reservoir_merit_order) > 0:
-        node_instance.reservoir_max_t = np.zeros(len(node_instance.reservoir_merit_order), dtype=np.float64)
-    else:
-        node_instance.reservoir_max_t = np.zeros(1, dtype=np.float64)
 
     if len(node_instance.flexible_merit_order) > 0:
         node_instance.flexible_max_t = np.zeros(len(node_instance.flexible_merit_order), dtype=np.float64)
