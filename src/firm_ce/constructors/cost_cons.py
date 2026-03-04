@@ -44,11 +44,9 @@ def construct_UnitCost_object(
     UnitCost_InstanceType: A static instance of the UnitCost jitclass.
     """
 
-    fuel_cost_mwh = 0.0
-    fuel_cost_h = 0.0
+    fuel_cost = 0.0
     if fuel:
-        fuel_cost_mwh = fuel.cost * heat_rate_incr
-        fuel_cost_h = fuel.cost * heat_rate_base
+        fuel_cost = fuel.cost
 
     return UnitCost(
         capex_p,
@@ -56,8 +54,9 @@ def construct_UnitCost_object(
         vom,
         lifetime,
         discount_rate,
-        fuel_cost_mwh,
-        fuel_cost_h,
+        heat_rate_base,
+        heat_rate_incr,
+        fuel_cost,
         capex_e,
         transformer_capex,
     )

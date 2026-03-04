@@ -5,7 +5,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from firm_ce.common.exceptions import ValidationError
-from firm_ce.fast_methods import generator_m, reservoir_m, node_m
+from firm_ce.fast_methods import generator_m, storage_m, node_m, fuel_m
 from firm_ce.io.file_manager import DataFile
 from firm_ce.system.components import Fleet_InstanceType
 from firm_ce.system.topology import Network_InstanceType
@@ -37,7 +37,7 @@ def select_datafile(
     Parameters:
     -------
     datafile_type (str): The type of datafile. Either 'generation', 'flexible_annual_limit',
-        'demand', 'reservoir_inflow'
+        'demand', 'inflow'
     object_name (str): The name attribute of the Generator or Node instance.
     datafiles_imported_dict (Dict[str, DataFile]): A dictionary of DataFile instances, where
         the key is a str of the id in `config/datafiles.csv`.
@@ -115,6 +115,26 @@ def trim_with_years(
     return data[in_time_mask]
 
 
+def load_datafiles_to_fuels(
+    fleet: Fleet_InstanceType,
+    datafiles_imported_dict: Dict[str, DataFile],
+    yeartuple: tuple[int] = None,
+) -> None:
+    for fuel in fleet.fuels.values():
+        fuel_m.load_data(
+            fuel,
+            select_datafile(
+                "fuel_constraint",
+                fuel.name,
+                datafiles_imported_dict,
+                None,
+                yeartuple,
+            ),
+        )
+
+    return None
+
+
 def load_datafiles_to_generators(
     fleet: Fleet_InstanceType,
     datafiles_imported_dict: Dict[str, DataFile],
@@ -150,31 +170,33 @@ def load_datafiles_to_generators(
     means that load_datafiles_to_network must be run before load_datafiles_to_generators.
     """
     for generator in fleet.generators.values():
-        if generator.unit_type == "flexible":
-            generation, flexible = False, True
-        else:
-            generation, flexible = True, False
-
         generator_m.load_data(
             generator,
-            select_datafile("generation", generator.name, datafiles_imported_dict, limit_timesteps, yeartuple, generation),
-            select_datafile("flexible_annual_limit", generator.name, datafiles_imported_dict, limit_timesteps, yeartuple, flexible),
+            select_datafile(
+                "generation",
+                generator.name,
+                datafiles_imported_dict,
+                limit_timesteps,
+                yeartuple,
+                ~generator.is_flexible
+            ),
             resolution,
         )
 
     return None
 
 
-def load_datafiles_to_reservoirs(
+def load_datafiles_to_storages(
     fleet: Fleet_InstanceType,
     datafiles_imported_dict: Dict[str, DataFile],
     limit_timesteps: int = None,
     yeartuple: tuple[int] = None,
 ) -> None:
     """
-    Iterates through all reservoirs in the fleet and loads their time-series data to each
-    instance. The reservoirs are expected to have an 'inflow' traces defining the inflow of
-    energy to the reservoir in each time interval.
+    Iterates through all storages in the fleet and loads their time-series data to each
+    instance which takes a datafile. The storages may have an 'inflow' traces defining the
+    inflow of energy to the storage in each time interval. This is usually used for modelling
+    hydro assets.
 
     Parameters:
     -------
@@ -189,13 +211,14 @@ def load_datafiles_to_reservoirs(
 
     Side-effects:
     -------
-    The data_status, data, attributes of each reservoir object are modified.
+    The data_status, data, attributes of each storage object are modified.
     """
-    for reservoir in fleet.reservoirs.values():
-        reservoir_m.load_data(
-            reservoir,
-            select_datafile("reservoir_inflow", reservoir.name, datafiles_imported_dict, limit_timesteps, yeartuple),
-        )
+    for storage in fleet.storages.values():
+        if storage.inflows:
+            storage_m.load_data(
+                storage,
+                select_datafile("inflow", storage.name, datafiles_imported_dict, limit_timesteps, yeartuple),
+            )
     return None
 
 
@@ -234,6 +257,14 @@ def load_datafiles_to_network(
     return None
 
 
+def unload_data_from_fuels(
+        fleet: Fleet_InstanceType
+):
+    for fuel in fleet.fuels.values():
+        fuel_m.unload_data(fuel)
+    return None
+
+
 def unload_data_from_generators(
         fleet: Fleet_InstanceType
 ):
@@ -259,11 +290,11 @@ def unload_data_from_generators(
     return None
 
 
-def unload_data_from_reservoirs(
+def unload_data_from_storages(
         fleet: Fleet_InstanceType
 ):
     """
-    Iterates through all reservoirs and unloads time-series data. Allows large amounts of
+    Iterates through all storages and unloads time-series data. Allows large amounts of
     memory to be cleared before running an optimisation for a new scenario.
 
     Parameters:
@@ -278,8 +309,9 @@ def unload_data_from_reservoirs(
     -------
     The data_status, data attributes of each generator object are modified.
     """
-    for reservoir in fleet.reservoirs.values():
-        reservoir_m.unload_data(reservoir)
+    for storage in fleet.storages.values():
+        if storage.inflows:
+            storage_m.unload_data(storage)
     return None
 
 

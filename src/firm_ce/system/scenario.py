@@ -13,11 +13,13 @@ from firm_ce.constructors.component_cons import construct_Fleet_object
 from firm_ce.constructors.parameter_cons import construct_ScenarioParameters_object
 from firm_ce.constructors.topology_cons import construct_Network_object
 from firm_ce.constructors.traces_cons import (
+    load_datafiles_to_fuels,
     load_datafiles_to_generators,
-    load_datafiles_to_reservoirs,
+    load_datafiles_to_storages,
     load_datafiles_to_network,
+    unload_data_from_fuels,
     unload_data_from_generators,
-    unload_data_from_reservoirs,
+    unload_data_from_storages,
     unload_data_from_network,
 )
 from firm_ce.fast_methods import static_m
@@ -25,7 +27,7 @@ from firm_ce.io.file_manager import DataFile
 from firm_ce.io.data_model import ModelData
 from firm_ce.optimisation.solver import Solver
 from firm_ce.system.parameters import ModelConfig
-from firm_ce.system.components import Generator_InstanceType, Reservoir_InstanceType, Storage_InstanceType
+from firm_ce.system.components import Generator_InstanceType, Storage_InstanceType
 from firm_ce.system.topology import Line_InstanceType
 
 
@@ -55,7 +57,6 @@ class Scenario:
         self.static = construct_ScenarioParameters_object(self.scenario_data, len(self.network.nodes), self.limit_timesteps)
         self.fleet = construct_Fleet_object(
             self.get_scenario_dicts(model_data.generators),
-            self.get_scenario_dicts(model_data.reservoirs),
             self.get_scenario_dicts(model_data.storages),
             self.get_scenario_dicts(model_data.fuels),
             self.network.minor_lines,
@@ -83,20 +84,18 @@ class Scenario:
 
     def get_bounds(self) -> NDArray[np.float64]:
         def power_capacity_bounds(
-            asset_list: Union[List[Generator_InstanceType], List[Reservoir_InstanceType],
-                              List[Storage_InstanceType], List[Line_InstanceType]],
+            asset_list: Union[List[Generator_InstanceType], List[Storage_InstanceType], List[Line_InstanceType]],
             build_cap_constraint: str,
         ) -> List[float]:
             return [getattr(asset, build_cap_constraint) for asset in asset_list]
 
         def energy_capacity_bounds(
-                asset_list: Union[List[Storage_InstanceType], List[Reservoir_InstanceType]],
+                asset_list: List[Storage_InstanceType],
                 build_cap_constraint: str
         ) -> List[float]:
             return [getattr(asset, build_cap_constraint) if asset.duration == 0 else 0.0 for asset in asset_list]
 
         generators = list(self.fleet.generators.values())
-        reservoirs = list(self.fleet.reservoirs.values())
         storages = list(self.fleet.storages.values())
         lines = list(self.network.major_lines.values())
 
@@ -104,8 +103,6 @@ class Scenario:
             list(
                 chain(
                     power_capacity_bounds(generators, "min_build"),
-                    power_capacity_bounds(reservoirs, "min_build_p"),
-                    energy_capacity_bounds(reservoirs, "min_build_e"),
                     power_capacity_bounds(storages, "min_build_p"),
                     energy_capacity_bounds(storages, "min_build_e"),
                     power_capacity_bounds(lines, "min_build"),
@@ -117,8 +114,6 @@ class Scenario:
             list(
                 chain(
                     power_capacity_bounds(generators, "max_build"),
-                    power_capacity_bounds(reservoirs, "max_build_p"),
-                    energy_capacity_bounds(reservoirs, "max_build_e"),
                     power_capacity_bounds(storages, "max_build_p"),
                     energy_capacity_bounds(storages, "max_build_e"),
                     power_capacity_bounds(lines, "max_build"),
@@ -146,7 +141,8 @@ class Scenario:
 
         load_datafiles_to_network(self.network, datafiles, self.limit_timesteps, yeartuple)
         load_datafiles_to_generators(self.fleet, datafiles, self.static.resolution, self.limit_timesteps, yeartuple)
-        load_datafiles_to_reservoirs(self.fleet, datafiles, self.limit_timesteps, yeartuple)
+        load_datafiles_to_fuels(self.fleet, datafiles, yeartuple)
+        load_datafiles_to_storages(self.fleet, datafiles, self.limit_timesteps, yeartuple)
 
         static_m.set_year_energy_demand(self.static, self.network.nodes)
 
@@ -154,9 +150,9 @@ class Scenario:
 
     def unload_datafiles(self) -> None:
         unload_data_from_network(self.network)
-
         unload_data_from_generators(self.fleet)
-        unload_data_from_reservoirs(self.fleet)
+        unload_data_from_fuels(self.fleet)
+        unload_data_from_storages(self.fleet)
 
         static_m.unset_year_energy_demand(self.static)
 
@@ -201,12 +197,6 @@ class Scenario:
         x_index = 0
         for generator in self.fleet.generators.values():
             generator.candidate_x_idx = x_index
-            x_index += 1
-        for reservoir in self.fleet.reservoirs.values():
-            reservoir.candidate_p_x_idx = x_index
-            x_index += 1
-        for reservoir in self.fleet.reservoirs.values():
-            reservoir.candidate_e_x_idx = x_index
             x_index += 1
         for storage in self.fleet.storages.values():
             storage.candidate_p_x_idx = x_index

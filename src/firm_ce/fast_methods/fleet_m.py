@@ -3,8 +3,8 @@ from firm_ce.common.constants import FASTMATH, TOLERANCE
 from firm_ce.common.exceptions import raise_static_modification_error
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import DictType, TypedDict, boolean, float64, int64, unicode_type
-from firm_ce.fast_methods import generator_m, storage_m
-from firm_ce.system.components import Fleet, Fleet_InstanceType, Generator_InstanceType, Storage_InstanceType
+from firm_ce.fast_methods import generator_m, storage_m, fuel_m
+from firm_ce.system.components import Fleet, Fleet_InstanceType, Generator_InstanceType, Storage_InstanceType, Fuel_InstanceType
 from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
 
 
@@ -45,9 +45,17 @@ def create_dynamic_copy(
     """
     generators_copy = TypedDict.empty(key_type=int64, value_type=Generator_InstanceType)
     storages_copy = TypedDict.empty(key_type=int64, value_type=Storage_InstanceType)
+    fuels_copy = TypedDict.empty(key_type=int64, value_type=Fuel_InstanceType)
 
     for order, generator in fleet_instance.generators.items():
-        generators_copy[order] = generator_m.create_dynamic_copy(generator, nodes_typed_dict, lines_typed_dict)
+        if generator.fuel.id not in fuels_copy:
+            fuels_copy[generator.fuel.id] = fuel_m.create_dynamic_copy(generator.fuel)
+        generators_copy[order] = generator_m.create_dynamic_copy(
+            generator,
+            nodes_typed_dict,
+            lines_typed_dict,
+            fuels_copy[generator.fuel.id]
+        )
 
     for order, storage in fleet_instance.storages.items():
         storages_copy[order] = storage_m.create_dynamic_copy(storage, nodes_typed_dict, lines_typed_dict)
@@ -56,6 +64,7 @@ def create_dynamic_copy(
         False,
         generators_copy,
         storages_copy,
+        fuels_copy,
     )
 
     return fleet_copy
@@ -136,8 +145,11 @@ def allocate_memory(
     if fleet_instance.static_instance:
         raise_static_modification_error()
 
+    for fuel in fleet_instance.fuels.values():
+        fuel_m.allocate_memory(fuel, intervals_count)
+
     for generator in fleet_instance.generators.values():
-        if generator.unit_type == "flexible":
+        if generator.is_flexible:
             generator_m.allocate_memory(generator, intervals_count)
 
     for storage in fleet_instance.storages.values():
@@ -200,8 +212,8 @@ def initialise_annual_limits(
     """
     if fleet_instance.static_instance:
         raise_static_modification_error()
-    for generator in fleet_instance.generators.values():
-        generator_m.initialise_annual_limit(generator, year, first_t)
+    for fuel in fleet_instance.fuels.values():
+        fuel_m.initialise_annual_limits(fuel, year, first_t)
     return None
 
 
@@ -270,7 +282,6 @@ def update_remaining_flexible_energies(
     interval: int64,
     resolution: float64,
     forward_time_flag: boolean,
-    previous_year_flag: boolean,
 ) -> None:
     """
     Once the dispatch_power for the flexible Generator objects have been determined for a time interval, the remaining_energy
@@ -296,10 +307,18 @@ def update_remaining_flexible_energies(
     Attributes modified for each flexible Generator instance in Fleet.generators: remaining_energy (forwards_time_flag = True) or
         remaining_energy_temp_reverse (forwards_time_flag = False).
     """
-    for generator in fleet_instance.generators.values():
-        if not generator_m.check_unit_type(generator, "flexible"):
-            continue
-        generator_m.update_remaining_energy(generator, interval, resolution, forward_time_flag, previous_year_flag)
+    if forward_time_flag:
+        for fuel in fleet_instance.fuels.values():
+            fuel.remaining_energy[interval] = fuel.remaining_energy[interval - 1]
+        for generator in fleet_instance.generators.values():
+            generator.fuel.remaining_energy[interval] -= generator.dispatch_power[interval] / resolution
+
+    else:
+        for fuel in fleet_instance.fuels.values():
+            fuel.remaining_energy_temp_reverse = fuel.remaining_energy[interval - 1]
+        for generator in fleet_instance.generators.values():
+            generator.fuel.remaining_energy_temp_reverse -= generator.dispatch_power[interval] / resolution
+
     return None
 
 
@@ -331,7 +350,7 @@ def calculate_lt_generations(
     Attributes modified for each Line instance referenced in Storage.line: lt_flows.
     """
     for generator in fleet_instance.generators.values():
-        if generator_m.check_unit_type(generator, "flexible"):
+        if generator.is_flexible:
             generator_m.calculate_lt_generation(generator, interval_resolutions)
 
     for storage in fleet_instance.storages.values():
@@ -369,9 +388,8 @@ def initialise_deficit_block(
     for storage in fleet_instance.storages.values():
         storage_m.initialise_deficit_block(storage, interval_after_deficit_block)
 
-    for generator in fleet_instance.generators.values():
-        if generator_m.check_unit_type(generator, "flexible"):
-            generator_m.initialise_deficit_block(generator, interval_after_deficit_block)
+    for fuel in fleet_instance.fuels.values():
+        fuel_m.initialise_deficit_block(fuel, interval_after_deficit_block)
 
     return None
 
@@ -398,7 +416,7 @@ def reset_flexible(
     Attributes modified for each flexible Generator instance in Fleet.generators: dispatch_power.
     """
     for generator in fleet_instance.generators.values():
-        if generator_m.check_unit_type(generator, "flexible"):
+        if generator.is_flexible:
             generator.dispatch_power[interval] = 0.0
     return None
 
@@ -458,9 +476,8 @@ def update_deficit_block(
     for storage in fleet_instance.storages.values():
         storage_m.update_deficit_block_bounds(storage, storage.stored_energy_temp_reverse)
 
-    for generator in fleet_instance.generators.values():
-        if generator_m.check_unit_type(generator, "flexible"):
-            generator_m.update_deficit_block_bounds(generator, generator.remaining_energy_temp_reverse)
+    for fuel in fleet_instance.fuels.values():
+        fuel_m.update_deficit_block_bounds(fuel, fuel.remaining_energy_temp_reverse)
     return None
 
 
@@ -498,16 +515,16 @@ def assign_precharging_values(
     Attributes modified for each Storage instance in Fleet.storages: stored_energy_temp_forward,
         deficit_block_min_storage, deficit_block_max_storage, precharge_flag, precharge_energy, trickling_reserves.
     """
+    for fuel in fleet_instance.fuels.values():
+        fuel.remaining_energy[interval] = fuel.remaining_energy[interval - 1]
+        fuel.remaining_energy_temp_forward = min(max(fuel.remaining_energy_temp_forward, 0.0), fuel_m.get_annual_limit(fuel, year))
+
+        fuel_m.update_deficit_block_bounds(fuel, fuel.remaining_energy_temp_forward)
+        fuel_m.assign_trickling_reserves(fuel)
+
     for generator in fleet_instance.generators.values():
-        if generator_m.check_unit_type(generator, "flexible"):
-            generator.remaining_energy_temp_forward = (
-                generator.remaining_energy[interval - 1] - generator.dispatch_power[interval] * resolution
-            )
-            generator.remaining_energy_temp_forward = min(
-                max(generator.remaining_energy_temp_forward, 0.0), generator_m.get_annual_limit(generator, year)
-            )
-            generator_m.update_deficit_block_bounds(generator, generator.remaining_energy_temp_forward)
-            generator_m.assign_trickling_reserves(generator)
+        if generator.is_flexible:
+            generator.fuel.remaining_energy[interval] -= generator.dispatch_power[interval] / resolution
 
     for storage in fleet_instance.storages.values():
         # After reverse charging, the stored energy is discontinuous in the forward and reverse directions
@@ -551,9 +568,9 @@ def initialise_precharging_flags(
     for storage in fleet_instance.storages.values():
         storage_m.initialise_precharging_flags(storage, interval)
 
-    for generator in fleet_instance.generators.values():
-        if generator_m.check_unit_type(generator, "flexible"):
-            generator_m.initialise_precharging_flags(generator, interval)
+    for fuel in fleet_instance.fuels.values():
+        fuel_m.initialise_precharging_flags(fuel, interval)
+
     return None
 
 
@@ -588,9 +605,9 @@ def update_precharging_flags(
     for storage in fleet_instance.storages.values():
         storage_m.update_precharging_flags(storage, interval)
 
-    for generator in fleet_instance.generators.values():
-        if generator_m.check_unit_type(generator, "flexible"):
-            generator_m.update_precharging_flags(generator, interval)
+    for fuel in fleet_instance.fuels.values():
+        fuel_m.update_precharging_flags(fuel, interval)
+
     return None
 
 
@@ -634,11 +651,11 @@ def check_trickling_remaining(
         if storage.trickling_flag:
             return True
 
-    for generator in fleet_instance.generators.values():
-        if not generator_m.check_unit_type(generator, "flexible"):
-            continue
-        if generator.trickling_flag:
-            return True
+    for fuel in fleet_instance.fuels.values():
+        for generator in fleet_instance.generators.values():
+            if generator.fuel.id == fuel.id and generator.is_flexible and fuel.trickling_flag:
+                return True
+
     return False
 
 
@@ -705,7 +722,7 @@ def determine_feasible_flexible_dispatch(
     """
     infeasible_flag = False
     for generator in fleet_instance.generators.values():
-        if not generator_m.check_unit_type(generator, "flexible"):
+        if not generator.is_flexible:
             continue
         original_dispatch_power = generator.dispatch_power[interval]
         generator.dispatch_power[interval] = min(original_dispatch_power, generator.flexible_max_t)
@@ -758,8 +775,6 @@ def reset_flexible_reserves(fleet_instance: Fleet_InstanceType) -> None:
     -------
     Attributes modified for each flexible Generator instance in Fleet.generators: trickling_reserves.
     """
-    for generator in fleet_instance.generators.values():
-        if not generator_m.check_unit_type(generator, "flexible"):
-            continue
-        generator.trickling_reserves = 0
+    for fuel in fleet_instance.generators.values():
+        fuel.trickling_reserves = 0
     return None

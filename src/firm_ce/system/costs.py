@@ -10,6 +10,8 @@ if JIT_ENABLED:
         ("vom", float64),
         ("lifetime", int64),
         ("discount_rate", float64),
+        ("heat_rate_base", float64),
+        ("heat_rate_incr", float64),
         ("fuel_cost_mwh", float64),
         ("fuel_cost_h", float64),
         ("capex_e", float64),
@@ -32,8 +34,9 @@ class UnitCost:
         vom: float64,
         lifetime: int64,
         discount_rate: float64,
-        fuel_cost_mwh: float64,
-        fuel_cost_h: float64,
+        heat_rate_base: float64,
+        heat_rate_incr: float64,
+        fuel_cost: float64,
         capex_e: float64,
         transformer_capex: float64,
     ) -> None:
@@ -47,9 +50,10 @@ class UnitCost:
         vom (float): Variable O&M cost ($/MWh)
         lifetime (int): Asset lifetime in years
         discount_rate (float): Annual discount rate in range [0,1]
-        heat_rate_base (float): Constant heat rate term (GJ/h)
-        heat_rate_incr (float): First order marginal heat rate term (GJ/MWh)
-        fuel (Fuel): Fuel object
+        heat_rate_base (float): Constant heat rate term (GJ/h or (MWh/h)
+        heat_rate_incr (float): First order marginal heat rate term (GJ/MWh or MWh/MWh)
+        fuel_cost (Fuel): cost of fuel ($/GJ or $/MWh)
+            The units of heat_rate_base, heat_rate_incr, and fuel_cost should align (all MWh or all GJ)
         capex_e (float): Energy capacity capital cost ($/kWh for storage and reservoir only)
         transformer_capex (float): Transformer-specific cost ($/MW)
         length (float): Line length (used for scaling costs and transmission losses)
@@ -62,8 +66,12 @@ class UnitCost:
         self.lifetime = lifetime  # years
         self.discount_rate = discount_rate  # [0,1]
 
-        self.fuel_cost_mwh = fuel_cost_mwh  # $/MWh = $/GJ * GJ/MWh
-        self.fuel_cost_h = fuel_cost_h  # $/h/unit = $/GJ * GJ/h/unit
+        # At the moment, annual usage limits are given in electric energy units. In future they will be thermal
+        self.heat_rate_base = heat_rate_base  # MWh/MWh or MWh/GJ depending on how fuel costs are specified
+        self.heat_rate_incr = heat_rate_incr  # MWh/MWh or MWh/GJ depending on how fuel costs are specified
+
+        self.fuel_cost_mwh = fuel_cost * self.heat_rate_incr  # $/MWh = $/GJ * GJ/MWh or = $/MWh * MWh/MWh
+        self.fuel_cost_h = fuel_cost * self.heat_rate_base  # $/h/unit = $/GJ * GJ/h/unit or = $/MWh * MWh/h/unit
 
         self.transformer_capex = transformer_capex  # $/kW, non-zero for lines
 

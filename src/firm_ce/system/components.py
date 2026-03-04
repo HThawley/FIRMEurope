@@ -15,6 +15,19 @@ if JIT_ENABLED:
         ("name", unicode_type),
         ("cost", float64),
         ("emissions", float64),
+        ("annual_limit", float64[:]),
+        ("remaining_energy", float64[:]),
+        ("data_status", boolean),
+        # Precharging
+        ("remaining_energy_temp_reverse", float64),
+        ("remaining_energy_temp_forward", float64),
+        ("deficit_block_max_energy", float64),
+        ("deficit_block_min_energy", float64),
+        ("trickling_flag", boolean),
+        ("trickling_reserves", float64),
+        ("remaining_trickling_reserves", float64),
+        ("allocated_energy", float64),
+        ("allocated_trickling", float64),
     ]
 else:
     fuel_spec = []
@@ -24,6 +37,29 @@ else:
 class Fuel:
     """
     Represents a fuel type with associated cost and emissions.
+
+    Attributes:
+    -------
+    static_instance (boolean): True value indicates 'static' instance, False indicates 'dynamic' instance.
+        A static instance is unsafe to modify within a worker process for the unit committment process.
+    id (int64): A model-level identifier for the Fuel instance.
+    name (unicode_type): A string providing the oridinary name of the Fuel.
+    cost (float64): Cost in currency/MWh (thermal)
+    emissions (float64): Carbon emissions in tCO2-e / MWh (thermal)
+
+    annual_limit (float64[:]): Annual generation constraints in GWh/year.
+    remaining_energy (float64[:]): Amount of energy left in the annual limit
+
+    remaining_energy_temp_reverse (float64): Temporary value for remaining energy when balancing deficit block in reverse time,
+        units GWh.
+    remaining_energy_temp_forward (float64): Temporary value for remaining energy when balancing deficit block in forward time,
+        units GWh.
+    deficit_block_max_energy (float64): Maximum value of remaining energy within a deficit block, units GWh.
+    deficit_block_min_energy (float64): Minimum value of remaining energy within a deficit block, units GWh.
+    trickling_flag (boolean): Flag indicating if flexible Generator is a trickle-charger and can precharge Storage systems.
+    trickling_reserves (float64): Energy that must be retained during precharging so that flexible Generator can dispatch
+        during deficit block, units GWh.
+    remaining_trickling_reserves (float64): Energy remaining for trickle charging in the precharging period, units GWh.
     """
 
     def __init__(
@@ -41,6 +77,7 @@ class Fuel:
         -------
         id (int): Unique identifier for the fuel.
         fuel_dict (Dict[str, str]): Dictionary containing 'name', 'cost', and 'emissions' keys.
+
         """
         self.object_class = "fuel"
         self.static_instance = static_instance
@@ -48,6 +85,20 @@ class Fuel:
         self.name = name
         self.cost = cost  # $/GJ
         self.emissions = emissions  # kg/GJ
+        self.annual_limit = np.zeros((0,), dtype=np.float64)  # GWh/year
+        self.remaining_energy = np.zeros((0,), dtype=np.float64)  # GWh
+
+        self.data_status = False
+        # Precharging
+        self.remaining_energy_temp_reverse = 0.0  # GWh
+        self.remaining_energy_temp_forward = 0.0  # GWh
+        self.deficit_block_max_energy = 0.0  # GWh
+        self.deficit_block_min_energy = 0.0  # GWh
+        self.trickling_flag = False  # Determines whether flexible generator can precharge storage systems
+        self.trickling_reserves = 0.0  # GWh
+        self.remaining_trickling_reserves = 0.0  # GWh
+        self.allocated_energy = 0.0  # GWh
+        self.allocated_trickling = 0.0  # GWh
 
 
 if JIT_ENABLED:
@@ -75,25 +126,16 @@ if JIT_ENABLED:
         ("cost", UnitCost_InstanceType),
         ("data_status", boolean),
         ("data", float64[:]),
-        ("annual_constraints_data", float64[:]),
         ("candidate_x_idx", int64),
         # Dynamic
         ("new_build", float64),
         ("capacity", float64),
         ("dispatch_power", float64[:]),
-        ("remaining_energy", float64[:]),
         ("flexible_max_t", float64),
         ("lt_generation", float64),
         ("unit_lt_hours", float64),
         ("lt_costs", LTCosts_InstanceType),
-        # Precharging
-        ("remaining_energy_temp_reverse", float64),
-        ("remaining_energy_temp_forward", float64),
-        ("deficit_block_max_energy", float64),
-        ("deficit_block_min_energy", float64),
-        ("trickling_flag", boolean),
-        ("trickling_reserves", float64),
-        ("remaining_trickling_reserves", float64),
+        ("heat_base_consumption", float64),
     ]
 else:
     generator_spec = []
@@ -130,6 +172,7 @@ class Generator:
     min_build (float64): Minimum build limit in GW.
     initial_capacity (float64): Installed capacity at model start in GW.
     unit_type (unicode_type): Type of Generator (e.g., 'solar', 'wind', 'baseload', 'flexible').
+    is_flexible (unicode_type): Whether Generator is flexible (e.g. ccgt).
     near_optimum_check (boolean): Flag to perform near-optimum optimisation.
     node (Node_InstanceType): The Network Node where the Generator is located.
     fuel (Fuel_InstanceType): The Fuel consumed by the Generator.
@@ -140,7 +183,6 @@ class Generator:
     data_status (boolean): Status of data loading.
     data (float64[:]): Interval capacity factor trace data. Each value represents the capacity factor of the solar, wind
         or baseload Generator in each time interval of the modelling horizon.
-    annual_constraints_data (float64[:]): Annual generation constraints for flexible Generators, units GWh/year.
     candidate_x_idx (int64): Index of the Generator's decision variable (new build capacity) in the candidate solution vector.
     new_build (float64): Capacity built for the candidate solution, units GW.
     capacity (float64): Current installed capacity, units GW.
@@ -150,16 +192,7 @@ class Generator:
     lt_generation (float64): Long-term total generation over the entire modelling horizon, units GWh.
     unit_lt_hours (float64): Total hours of operation per unit, units hours.
     lt_costs (LTCosts_InstanceType): Endogenously calculated long-term costs of the Generator over the modelling horizon.
-    remaining_energy_temp_reverse (float64): Temporary value for remaining energy when balancing deficit block in reverse time,
-        units GWh.
-    remaining_energy_temp_forward (float64): Temporary value for remaining energy when balancing deficit block in forward time,
-        units GWh.
-    deficit_block_max_energy (float64): Maximum value of remaining energy within a deficit block, units GWh.
-    deficit_block_min_energy (float64): Minimum value of remaining energy within a deficit block, units GWh.
-    trickling_flag (boolean): Flag indicating if flexible Generator is a trickle-charger and can precharge Storage systems.
-    trickling_reserves (float64): Energy that must be retained during precharging so that flexible Generator can dispatch
-        during deficit block, units GWh.
-    remaining_trickling_reserves (float64): Energy remaining for trickle charging in the precharging period, units GWh.
+
     """
 
     def __init__(
@@ -173,6 +206,7 @@ class Generator:
         min_build: float64,
         capacity: float64,
         unit_type: unicode_type,
+        is_flexible: boolean,
         near_optimum_check: boolean,
         node: Node_InstanceType,
         fuel: Fuel_InstanceType,
@@ -202,6 +236,7 @@ class Generator:
         self.min_build = min_build  # GW/year
         self.initial_capacity = capacity  # GW
         self.unit_type = unit_type
+        self.is_flexible = is_flexible
         self.near_optimum_check = near_optimum_check
         self.node = node
         self.fuel = fuel
@@ -211,7 +246,6 @@ class Generator:
 
         self.data_status = False
         self.data = np.empty((0,), dtype=np.float64)
-        self.annual_constraints_data = np.empty((0,), dtype=np.float64)
 
         self.candidate_x_idx = -1
 
@@ -219,29 +253,20 @@ class Generator:
         self.new_build = 0.0  # GW
         self.capacity = capacity  # GW
         self.dispatch_power = np.empty((0,), dtype=np.float64)  # GW
-        self.remaining_energy = np.empty((0,), dtype=np.float64)  # GWh
 
         self.flexible_max_t = 0.0  # GW
         self.lt_generation = 0.0  # GWh
         self.unit_lt_hours = 0.0  # hours/unit
 
-        self.lt_costs = LTCosts()
+        self.heat_base_consumption = 0.0  # MWh/unit/h
 
-        # Precharging
-        self.remaining_energy_temp_reverse = 0.0  # GWh
-        self.remaining_energy_temp_forward = 0.0  # GWh
-        self.deficit_block_max_energy = 0.0  # GWh
-        self.deficit_block_min_energy = 0.0  # GWh
-        self.trickling_flag = False  # Determines whether flexible generator can precharge storage systems
-        self.trickling_reserves = 0.0  # GWh
-        self.remaining_trickling_reserves = 0.0  # GWh
+        self.lt_costs = LTCosts()
 
 
 if JIT_ENABLED:
     Generator_InstanceType = Generator.class_type.instance_type
 else:
     Generator_InstanceType = Generator
-
 
 if JIT_ENABLED:
     storage_spec = [
@@ -396,6 +421,7 @@ if JIT_ENABLED:
         ("static_instance", boolean),
         ("generators", DictType(int64, Generator_InstanceType)),
         ("storages", DictType(int64, Storage_InstanceType)),
+        ("fuels", DictType(int64, Fuel_InstanceType)),
     ]
 else:
     fleet_spec = []
@@ -420,6 +446,7 @@ class Fleet:
         static_instance: boolean,
         generators: DictType(int64, Generator_InstanceType),
         storages: DictType(int64, Storage_InstanceType),
+        fuels: DictType(int64, Fuel_InstanceType),
     ):
         """
         Parameters:
@@ -435,6 +462,7 @@ class Fleet:
         self.static_instance = static_instance
         self.generators = generators
         self.storages = storages
+        self.fuels = fuels
 
 
 if JIT_ENABLED:

@@ -3,6 +3,7 @@ import numpy as np
 
 from firm_ce.common.constants import FASTMATH, TOLERANCE
 from firm_ce.common.exceptions import (
+    raise_getting_unloaded_data_error,
     raise_static_modification_error,
 )
 from firm_ce.common.jit_overload import njit
@@ -72,6 +73,90 @@ def build_capacity(
             storage_instance.energy_capacity += new_build_capacity
             storage_instance.new_build_e += new_build_capacity
     return None
+
+
+@njit(fastmath=FASTMATH)
+def load_data(
+    storage_instance: Storage_InstanceType,
+    inflow_trace: float64[:],
+) -> None:
+    """
+    Load the inflow trace data to the Storage instance. This is done before solving a Scenario.
+
+    Parameters:
+    -------
+    storage_instance (Storage_InstanceType): An instance of the Storage jitclass.
+    inflow_trace (float64[:]): Array containing the time-series inflow trace for the Storage. Each element
+        provides the capacity factor for a time interval.
+    interval_resolutions (float64[:]): A 1-dimensional array containing the resolution for every time interval
+        in the unit committment formulation (hours per time interval). An array is used instead of a single
+        scalar value to allow for variable time step simplified balancing methods to be developed in future.
+
+    Returns:
+    -------
+    None.
+
+    Side-effects:
+    -------
+    Attributes modified for the Storage instance: data_status, data.
+    """
+    storage_instance.data = inflow_trace
+    storage_instance.data_status = True
+
+    return None
+
+
+@njit(fastmath=FASTMATH)
+def unload_data(storage_instance: Storage_InstanceType) -> None:
+    """
+    Unload the inflow data from the Storage instance. This is done after solving a Scenario to reduce memory usage.
+
+    Parameters:
+    -------
+    storage_instance (Storage_InstanceType): An instance of the Storage jitclass.
+
+    Returns:
+    -------
+    None.
+
+    Side-effects:
+    -------
+    Attributes modified for the Storage instance: data_status, data.
+    """
+    storage_instance.data = np.empty((0,), dtype=np.float64)
+    storage_instance.data_status = False
+    return None
+
+
+@njit(fastmath=FASTMATH)
+def get_data(
+    storage_instance: Storage_InstanceType,
+    data_type: unicode_type,
+) -> float64[:]:
+    """
+    Gets the specified data_type from the Storage instance.
+
+    Parameters:
+    -------
+    storage_instance (Storage_InstanceType): An instance of the Storage jitclass.
+    data_type (unicode_type): String associated with the data array.
+
+    Returns:
+    -------
+    float64[:]: The data array associated with data_type.
+
+    Raises:
+    -------
+    RuntimeError: Raised if data_status is False or if data_type does not correspond
+        to any data arrays for the Reservoir jitclass.
+    """
+    if not storage_instance.data_status:
+        raise_getting_unloaded_data_error()
+
+    if data_type == "inflow":
+        return storage_instance.data
+    else:
+        raise RuntimeError("Invalid data_type argument for Storage.get_data(data_type).")
 
 
 @njit(fastmath=FASTMATH)

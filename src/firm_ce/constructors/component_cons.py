@@ -247,7 +247,7 @@ def construct_Fleet_object(
     -------
     Fleet_InstanceType: A static instance of the Fleet jitclass.
     """
-
+    fuels = TypedDict.empty(key_type=int64, value_type=Fuel_InstanceType)
     generators = TypedDict.empty(key_type=int64, value_type=Generator_InstanceType)
     for order, idx in enumerate(generators_imported_dict):
         generators[order] = construct_Generator_object(
@@ -257,6 +257,8 @@ def construct_Fleet_object(
             lines_object_dict,
             order,
         )
+        if generators[order].fuel.id not in fuels:
+            fuels[generators[order].fuel.id] = generators[order].fuel
 
     storages = TypedDict.empty(key_type=int64, value_type=Storage_InstanceType)
     for order, idx in enumerate(storages_imported_dict):
@@ -271,4 +273,5 @@ def construct_Fleet_object(
         True,
         generators,
         storages,
+        fuels,
     )

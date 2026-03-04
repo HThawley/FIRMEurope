@@ -49,6 +49,14 @@ def initialise_interval(
     Attributes modified for the Storage systems referenced in Fleet.storages: discharge_max_t, charge_max_t,
         node.
     """
+    for fuel in fleet.fuels.values():
+        if forward_time_flag and len(fuel.annual_limit) > 0:
+            fuel.remaining_energy[interval] = fuel.remaining_energy[interval - 1]
+        if forward_time_flag:
+            fuel.allocated_energy = fuel.remaining_energy[interval]
+        else:
+            fuel.allocated_energy = fuel.remaining_energy_temp_reverse
+
     for node in network.nodes.values():
         node_m.initialise_netload_t(node, interval)
         node_m.reset_dispatch_max_t(node)
@@ -151,6 +159,8 @@ def balance_with_flexible(
     interval: int64,
     network: Network_InstanceType,
     fleet: Fleet_InstanceType,
+    resolution: float64,
+    forward_time_flag: boolean,
 ) -> None:
     """
     Dispatch flexible Generators according to the merit order at each Node to balance remaining netload.
@@ -181,7 +191,7 @@ def balance_with_flexible(
             continue
         node.flexible_power[interval] = 0
         for idx, flexible_order in enumerate(node.flexible_merit_order):
-            generator_m.dispatch(fleet.generators[flexible_order], interval, idx)
+            generator_m.dispatch(fleet.generators[flexible_order], interval, idx, resolution, forward_time_flag)
     return None
 
 
@@ -249,11 +259,13 @@ def energy_balance_for_interval(
         balance_with_storage(interval, solution.network, solution.fleet)  # Neighbouring and local storage
 
     if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
-        balance_with_flexible(interval, solution.network, solution.fleet)  # Local flexible
+        # Local flexible
+        balance_with_flexible(interval, solution.network, solution.fleet, solution.static.resolution, forward_time_flag)
 
     if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
         balance_with_transmission(interval, solution.network, "flexible", False)
-        balance_with_flexible(interval, solution.network, solution.fleet)  # Neighbouring and local flexible
+        # Neighbouring and local flexible
+        balance_with_flexible(interval, solution.network, solution.fleet, solution.static.resolution, forward_time_flag)
 
     # check suurpluses
     if network_m.check_remaining_netloads(solution.network, interval, "spillage"):
@@ -310,9 +322,10 @@ def balance_for_period(
         energy_balance_for_interval(solution, t, True)
         network_m.calculate_spillage_and_deficit(solution.network, t)
         fleet_m.update_stored_energies(solution.fleet, t, solution.static.interval_resolutions[t], True)
-        fleet_m.update_remaining_flexible_energies(
-            solution.fleet, t, solution.static.interval_resolutions[t], True, False
-        )
+        # This is now handled as a side-effect of generator_m.dispatch
+        # fleet_m.update_remaining_flexible_energies(
+        #     solution.fleet, t, solution.static.interval_resolutions[t], True
+        # )
 
         if not precharging_allowed:
             continue
@@ -368,16 +381,8 @@ def determine_precharge_energies_for_deficit_block(
     Attributes modified for all Line instances Solution.network.lines: temp_leg_flows, flows.
     """
     fleet_m.initialise_deficit_block(solution.fleet, interval)
-    previous_year_flag = False
-    precharging_year = year
-    first_t, _ = static_m.get_year_t_boundaries(solution.static, precharging_year)
 
     while True:
-        if interval == first_t:
-            previous_year_flag = True
-            precharging_year -= 1
-            first_t, _ = static_m.get_year_t_boundaries(solution.static, precharging_year)
-
         interval -= 1
 
         if interval < 0:
@@ -390,9 +395,10 @@ def determine_precharge_energies_for_deficit_block(
         energy_balance_for_interval(solution, interval, False)
 
         fleet_m.update_stored_energies(solution.fleet, interval, solution.static.interval_resolutions[interval], False)
-        fleet_m.update_remaining_flexible_energies(
-            solution.fleet, interval, solution.static.interval_resolutions[interval], False, previous_year_flag
-        )
+        # This is now handled as a side-effect of generator_m.dispatch
+        # fleet_m.update_remaining_flexible_energies(
+        #     solution.fleet, interval, solution.static.interval_resolutions[interval], False
+        # )
         fleet_m.update_deficit_block(solution.fleet)
 
         if network_m.check_precharging_end(solution.network, interval):
@@ -400,8 +406,6 @@ def determine_precharge_energies_for_deficit_block(
                 solution.fleet, interval, solution.static.interval_resolutions[interval], year
             )
             return interval
-
-        previous_year_flag = False
 
 
 @njit(fastmath=FASTMATH)
@@ -435,6 +439,9 @@ def initialise_precharging_interval(
         node.
     """
     fleet_m.update_precharging_flags(fleet, interval)
+
+    for fuel in fleet.fuels.values():
+        fuel.allocated_trickling = fuel.remaining_trickling_reserves
 
     for node in network.nodes.values():
         node_m.set_imports_exports_temp(node, interval)
@@ -735,10 +742,13 @@ def perform_intranode_flexible_transfers(
         intranode_precharge = -intranode_transfer_power
 
         for idx, flexible_order in enumerate(node.flexible_merit_order):
-            if not fleet.generators[flexible_order].trickling_flag:
+            if not fleet.generators[flexible_order].fuel.trickling_flag:
                 continue
-
+            # get live fuel-reserve constraint
+            generator_m.set_live_trickling_max_t(fleet.generators[flexible_order], interval, resolution)
             dispatch_power_update = max(min(intranode_trickle, fleet.generators[flexible_order].flexible_max_t), 0.0)
+            # update fuel-reserve
+            generator_m.update_fuel_reserve(fleet.generators[flexible_order], interval, resolution, dispatch_power_update, True)
             generator_m.update_precharge_dispatch(
                 fleet.generators[flexible_order], interval, resolution, dispatch_power_update, idx
             )
@@ -803,11 +813,13 @@ def perform_internode_flexible_transfers(
 
     for node in network.nodes.values():
         for idx, flexible_order in enumerate(node.flexible_merit_order):
-            if not fleet.generators[flexible_order].trickling_flag:
+            if not fleet.generators[flexible_order].fuel.trickling_flag:
                 continue
-            dispatch_power_update = max(
-                min(node.imports_exports_update, fleet.generators[flexible_order].flexible_max_t), 0.0
-            )
+            # get live fuel-reserve constraint
+            generator_m.set_live_trickling_max_t(fleet.generators[flexible_order], interval, resolution)
+            dispatch_power_update = max(min(node.imports_exports_update, fleet.generators[flexible_order].flexible_max_t), 0.0)
+            # update fuel-reserve
+            generator_m.update_fuel_reserve(fleet.generators[flexible_order], interval, resolution, dispatch_power_update, True)
             generator_m.update_precharge_dispatch(
                 fleet.generators[flexible_order], interval, resolution, dispatch_power_update, idx
             )
@@ -1092,11 +1104,12 @@ def resolve_energy_discontinuities(
             fleet_m.reset_flexible(solution.fleet, interval)
 
             balance_with_transmission(interval, solution.network, "precharging_adjust_storage", False)
-            balance_with_flexible(interval, solution.network, solution.fleet)  # Local flexible
+            balance_with_flexible(interval, solution.network, solution.fleet, solution.static.resolution, True)  # Local flexible
 
             if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
                 balance_with_transmission(interval, solution.network, "flexible", False)
-                balance_with_flexible(interval, solution.network, solution.fleet)  # Neighbouring and local flexible
+                # Neighbouring and local flexible
+                balance_with_flexible(interval, solution.network, solution.fleet, solution.static.resolution, True)
         else:
             infeasible_flag = fleet_m.determine_feasible_flexible_dispatch(solution.fleet, interval)
             if infeasible_flag:
@@ -1113,13 +1126,15 @@ def resolve_energy_discontinuities(
                 )
             else:
                 network_m.update_netloads(solution.network, interval, False)
+                for generator in solution.fleet.generators.values():
+                    if generator.is_flexible:
+                        generator.fuel.remaining_energy[interval] -= (
+                            generator.dispatch_power[interval] * solution.static.resolution
+                        )
 
         network_m.calculate_spillage_and_deficit(solution.network, interval)
 
         fleet_m.update_stored_energies(solution.fleet, interval, solution.static.interval_resolutions[interval], True)
-        fleet_m.update_remaining_flexible_energies(
-            solution.fleet, interval, solution.static.interval_resolutions[interval], True, False
-        )
     return None
 
 

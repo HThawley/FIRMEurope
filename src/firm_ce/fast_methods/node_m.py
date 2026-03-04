@@ -8,7 +8,6 @@ from firm_ce.common.exceptions import (
 )
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import DictType, boolean, float64, int64, unicode_type
-from firm_ce.fast_methods import generator_m
 from firm_ce.system.components import Generator_InstanceType, Storage_InstanceType
 from firm_ce.system.topology import Node, Node_InstanceType
 
@@ -302,7 +301,7 @@ def assign_flexible_merit_order(
 
     idx = 0
     for generator_order, generator in generators_typed_dict.items():
-        if not generator_m.check_unit_type(generator, "flexible"):
+        if not generator.is_flexible:
             continue
 
         if generator.node.order == node_instance.order:
