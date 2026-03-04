@@ -1,7 +1,11 @@
 id,name,emissions,cost,scenarios
-0,solar,0,0,"all"
-1,wind,0,0,"all"
-2,water,0,0,"all"
-3,gas,1,13.5,"Test,Base"
-4,biogas,0,0,"all"
-5,nuclear,1,0,"all"
+0,solar,0,0,all
+1,wind,0,0,all
+2,water,0,0,all
+3,gas,0.202,44.89,"test,base"
+4,biomass,0,6.93,all
+5,re-waste,0,0,all
+6,nre-waste,0.337,0,"test,base"
+7,biogas,0,107.83,all
+8,geothermal,0,0,all
+9,nuclear,0,11.64,all
