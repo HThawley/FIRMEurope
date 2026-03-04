@@ -313,10 +313,6 @@ def validate_generators(generators_dict, scenarios_list, scenario_fuels, scenari
             model_logger.error("'discount_rate' must be float in range [0,1]")
             flag = False
 
-        if not validate_enum(item["unit_type"], ["solar", "wind", "flexible", "baseload", "ror"]):
-            model_logger.error("'unit_type' must be one of ['solar', 'wind', 'flexible', 'baseload', 'ror']")
-            flag = False
-
         if float(item["min_build"]) > float(item["max_build"]):
             model_logger.error("'min_build' must be less than or equal to 'max_build'")
             flag = False

@@ -121,6 +121,7 @@ if JIT_ENABLED:
         ("initial_capacity", float64),
         ("line", Line_InstanceType),
         ("unit_type", unicode_type),
+        ("is_flexible", boolean),
         ("near_optimum_check", boolean),
         ("group", unicode_type),
         ("cost", UnitCost_InstanceType),

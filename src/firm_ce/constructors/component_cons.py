@@ -77,6 +77,7 @@ def construct_Generator_object(
     min_build = float(generator_dict["min_build"])
     capacity = float(generator_dict["initial_capacity"])
     unit_type = str(generator_dict["unit_type"])
+    is_flexible = parse_boolean(generator_dict['is_flexible'])
     near_optimum_check = parse_boolean(generator_dict["near_optimum"])
 
     node = next(node for node in nodes_object_dict.values() if node.name == str(generator_dict["node"]))
@@ -115,6 +116,7 @@ def construct_Generator_object(
         min_build,
         capacity,
         unit_type,
+        is_flexible,
         near_optimum_check,
         node,
         fuel,
