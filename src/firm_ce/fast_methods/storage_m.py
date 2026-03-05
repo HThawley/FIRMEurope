@@ -238,12 +238,15 @@ def set_dispatch_max_t(
             storage_instance.power_capacity,
             storage_instance.stored_energy[interval - 1] * storage_instance.discharge_efficiency / resolution,
         )
-        storage_instance.charge_max_t = min(
-            storage_instance.power_capacity,
-            (storage_instance.energy_capacity - storage_instance.stored_energy[interval - 1])
-            / storage_instance.charge_efficiency
-            / resolution,
-        )
+        if storage_instance.chargeable:
+            storage_instance.charge_max_t = min(
+                storage_instance.power_capacity,
+                (storage_instance.energy_capacity - storage_instance.stored_energy[interval - 1])
+                / storage_instance.charge_efficiency
+                / resolution,
+            )
+        else:
+            storage_instance.charge_max_t = 0.0
     else:
         storage_instance.discharge_max_t = min(
             storage_instance.power_capacity,
@@ -251,10 +254,13 @@ def set_dispatch_max_t(
             * storage_instance.discharge_efficiency
             / resolution,
         )
-        storage_instance.charge_max_t = min(
-            storage_instance.power_capacity,
-            storage_instance.stored_energy_temp_reverse / storage_instance.charge_efficiency / resolution,
-        )
+        if storage_instance.chargeable:
+            storage_instance.charge_max_t = min(
+                storage_instance.power_capacity,
+                storage_instance.stored_energy_temp_reverse / storage_instance.charge_efficiency / resolution,
+            )
+        else:
+            storage_instance.charge_max_t = 0.0
 
     if merit_order_idx == 0:
         storage_instance.node.discharge_max_t[0] = storage_instance.discharge_max_t
@@ -550,7 +556,7 @@ def assign_precharging_reserves(
     -------
     Attributes modified for the Storage instance: precharge_flag, precharge_energy, trickling_reserves.
     """
-    storage_instance.precharge_flag = (
+    storage_instance.precharge_flag = storage_instance.chargeable and (
         storage_instance.deficit_block_max_storage - storage_instance.deficit_block_min_storage
         > storage_instance.stored_energy_temp_forward
     )
@@ -680,7 +686,7 @@ def set_precharging_max_t(
         storage_instance.discharge_max_t = 0.0
 
     # Set charge_max_t for pre-chargers
-    if storage_instance.precharge_flag:
+    if storage_instance.precharge_flag and storage_instance.chargeable:
         discharge_reduction_constraint_power = min(
             storage_instance.precharge_energy * storage_instance.discharge_efficiency / resolution,
             max(storage_instance.dispatch_power[interval], 0.0),
