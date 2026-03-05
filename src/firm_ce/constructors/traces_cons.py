@@ -49,11 +49,9 @@ def select_datafile(
         is returned.
     """
     matching_datafiles = [df for df in datafiles_imported_dict.values() if df.type == datafile_type]
-    print(matching_datafiles)
+    
     trace = np.empty((0,), dtype=np.float64)
     for datafile in matching_datafiles:
-        print(datafile.data.keys())
-        print(object_name)
         if object_name in datafile.data.keys():
             trace = np.array(datafile.data[object_name], dtype=np.float64)
             if limit_timesteps is not None:
@@ -180,7 +178,7 @@ def load_datafiles_to_generators(
                 datafiles_imported_dict,
                 limit_timesteps,
                 yeartuple,
-                ~generator.is_flexible
+                not generator.is_flexible,
             ),
             resolution,
         )
@@ -252,7 +250,6 @@ def load_datafiles_to_network(
     of the demand trace.
     """
     for node in network.nodes.values():
-        print(datafiles_imported_dict)
         node_m.load_data(
             node,
             select_datafile("demand", node.name, datafiles_imported_dict, limit_timesteps, yeartuple),

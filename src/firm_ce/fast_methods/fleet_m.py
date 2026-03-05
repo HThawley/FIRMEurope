@@ -54,7 +54,6 @@ def create_dynamic_copy(
             generator,
             nodes_typed_dict,
             lines_typed_dict,
-            fuels_copy[generator.fuel.id]
         )
 
     for order, storage in fleet_instance.storages.items():

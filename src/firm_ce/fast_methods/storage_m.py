@@ -30,6 +30,8 @@ def create_dynamic_copy(
         storage_instance.power_capacity,
         storage_instance.energy_capacity,
         storage_instance.duration,
+        storage_instance.chargeable,
+        storage_instance.inflows,
         storage_instance.charge_efficiency,
         storage_instance.discharge_efficiency,
         storage_instance.max_build_p,

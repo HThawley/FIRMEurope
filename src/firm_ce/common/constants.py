@@ -2,7 +2,7 @@ import os
 
 import numpy as np
 
-JIT_ENABLED = True
+JIT_ENABLED = False
 SAVE_POPULATION = True
 DEBUG = False
 EPSILON_FLOAT64 = np.finfo(np.float64).eps
@@ -13,3 +13,4 @@ PENALTY_MULTIPLIER = 1e6
 TOLERANCE = 1e-6
 NUM_THREADS = int(os.getenv("NUM_THREADS", os.cpu_count()))
 FASTMATH = True
+LEAPDAYS = False

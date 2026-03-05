@@ -3,7 +3,7 @@ from typing import Dict
 
 import numpy as np
 
-from firm_ce.common.constants import JIT_ENABLED
+from firm_ce.common.constants import JIT_ENABLED, LEAPDAYS
 from firm_ce.common.jit_overload import jitclass
 from firm_ce.common.typing import float64, int64
 from firm_ce.common.helpers import parse_comma_separated, parse_ditherable_hyperparameter
@@ -54,14 +54,17 @@ class ScenarioParameters:
         self.first_year = first_year  # YYYY
         self.final_year = final_year  # YYYY
         self.year_count = year_count
-        self.leap_year_count = leap_year_count
+        self.leap_year_count = leap_year_count if LEAPDAYS else 0
         self.year_first_t = year_first_t
         self.intervals_count = intervals_count
         self.block_lengths = np.ones(intervals_count, dtype=np.int64)
         self.node_count = node_count
-        self.fom_scalar = (
-            year_count + leap_year_count / 365
-        ) / year_count  # Scale average annual fom to account for leap days for PLEXOS consistency
+        if LEAPDAYS:
+            self.fom_scalar = (
+                year_count + leap_year_count / 365
+            ) / year_count  # Scale average annual fom to account for leap days for PLEXOS consistency
+        else: 
+            self.fom_scalar = 1.0
         self.year_float = self.year_count * self.fom_scalar
         self.year_energy_demand = np.zeros(self.year_count, dtype=np.float64)
         self.mean_annual_demand = 0.0

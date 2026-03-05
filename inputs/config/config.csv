@@ -16,5 +16,5 @@ id,name,value
 14,mga_noptimal_abs,0.001
 15,mga_log_freq,1
 16,mga_niche_elitism,selfish
-17,mga_iter,"2,5,5"
+17,mga_iter,"10,10,10"
 18,mga_pop_size,40

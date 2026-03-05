@@ -5,7 +5,7 @@ import numpy as np
 from numpy.typing import NDArray
 from numba.core.types import UniTuple
 
-from firm_ce.common.constants import FASTMATH
+from firm_ce.common.constants import FASTMATH, LEAPDAYS
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import DictType, boolean, float64, int64
 from firm_ce.fast_methods import node_m
@@ -49,7 +49,7 @@ def set_year_first_block(static_instance: ScenarioParameters_InstanceType, block
         static_instance.year_first_t[i] = blocks_per_day * (i * 365 + leap_days)
 
         year = static_instance.first_year + i
-        if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0):
+        if LEAPDAYS and (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)):
             leap_days += 1
     return None
 

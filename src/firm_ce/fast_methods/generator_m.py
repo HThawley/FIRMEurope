@@ -32,6 +32,7 @@ def create_dynamic_copy(
         generator_instance.min_build,
         generator_instance.capacity,
         generator_instance.unit_type,
+        generator_instance.is_flexible,
         generator_instance.near_optimum_check,
         node_copy,
         generator_instance.fuel,  # This does not always remain static but must be updated at the same time as everything else

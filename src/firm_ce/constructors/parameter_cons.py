@@ -5,6 +5,7 @@ from typing import Dict, Tuple
 import numpy as np
 from numpy.typing import NDArray
 
+from firm_ce.common.constants import LEAPDAYS
 from firm_ce.system.parameters import ScenarioParameters, ScenarioParameters_InstanceType
 
 
@@ -37,12 +38,13 @@ def determine_interval_parameters(
         year = first_year + i
         first_t = i * (8760 // resolution)
 
-        leap_days_so_far = calendar.leapdays(first_year, year)
-
-        leap_adjust = leap_days_so_far * (24 // resolution)
-        year_first_t[i] = first_t + leap_adjust
-
-        leap_days += calendar.leapdays(year, year + 1)
+        if LEAPDAYS:
+            leap_days_so_far = calendar.leapdays(first_year, year)
+            leap_adjust = leap_days_so_far * (24 // resolution)
+            year_first_t[i] = first_t + leap_adjust
+            leap_days += calendar.leapdays(year, year + 1)
+        else:
+            year_first_t[i] = first_t
 
     hours_total = year_count * 8760 + leap_days * 24
     intervals_count = int(hours_total // resolution)

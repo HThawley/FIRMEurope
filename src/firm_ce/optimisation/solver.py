@@ -89,6 +89,18 @@ class Solver:
             self.config.fixed_costs_threshold,
         )
         return args
+        
+    def get_mhmga_kwargs(
+        self, 
+    ) -> dict:
+        kwargs = {
+            "static": self.parameters_static,
+            "fleet": self.fleet_static,
+            "network": self.network_static,
+            "balancing_type": self.config.balancing_type,
+            "fixed_costs_threshold": self.config.fixed_costs_threshold,
+        }
+        return kwargs
 
     def run_differential_evolution(self, objective_function: Callable, args: Tuple) -> OptimizeResult:
         result = differential_evolution(
@@ -119,11 +131,12 @@ class Solver:
     def generate_alternatives(self) -> None:
         self.logger.info("[MHMGA] Initialising MGA algorithm. (this may take a while)")
 
-        args = self.get_differential_evolution_args()
+        # fkwargs = self.get_mhmga_kwargs()
+        fargs = self.get_differential_evolution_args()
 
         problem = OptimizationProblem(
             objective=mga_parallel_wrapper,
-            fargs=args,
+            fargs=fargs,
             bounds=(self.lower_bounds, self.upper_bounds),
             maximize=False,
             vectorized=True,
