@@ -774,6 +774,6 @@ def reset_flexible_reserves(fleet_instance: Fleet_InstanceType) -> None:
     -------
     Attributes modified for each flexible Generator instance in Fleet.generators: trickling_reserves.
     """
-    for fuel in fleet_instance.generators.values():
+    for fuel in fleet_instance.fuels.values():
         fuel.trickling_reserves = 0
     return None

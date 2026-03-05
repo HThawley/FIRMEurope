@@ -367,14 +367,7 @@ def mga_parallel_wrapper(
     result = np.zeros((2, n_points), dtype=np.float64)
     for j in prange(n_points):
         xj = xs[j]
-        sol = Solution(
-            x=xj,
-            static=static,
-            fleet=fleet,
-            network=network,
-            balancing_type=balancing_type,
-            fixed_costs_threshold=fixed_costs_threshold,
-        )
+        sol = Solution(xj, static, fleet, network, balancing_type, fixed_costs_threshold)
         sol.evaluate()
         result[0, j] = sol.lcoe
         result[1, j] = sol.penalties
