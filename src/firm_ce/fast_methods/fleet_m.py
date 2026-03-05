@@ -527,12 +527,15 @@ def assign_precharging_values(
 
     for storage in fleet_instance.storages.values():
         # After reverse charging, the stored energy is discontinuous in the forward and reverse directions
-        storage.stored_energy_temp_forward = (
-            storage.stored_energy[interval - 1]
-            - max(storage.dispatch_power[interval], 0) / storage.discharge_efficiency * resolution
-            - min(storage.dispatch_power[interval], 0) * storage.charge_efficiency * resolution
+        dispatched_energy = (
+            max(storage.dispatch_power[interval], 0.0) / storage.discharge_efficiency * resolution
+            + min(storage.dispatch_power[interval], 0.0) * storage.charge_efficiency * resolution
         )
-        storage.stored_energy_temp_forward = min(max(storage.stored_energy_temp_forward, 0.0), storage.energy_capacity)
+        soc_forward = storage.stored_energy[interval - 1] - dispatched_energy
+        if storage.inflows:
+            soc_forward += max(min(storage.data[interval], storage.energy_capacity - soc_forward), 0.0)
+
+        storage.stored_energy_temp_forward = min(max(soc_forward, 0.0), storage.energy_capacity)
         storage_m.update_deficit_block_bounds(storage, storage.stored_energy_temp_forward)
         storage_m.assign_precharging_reserves(storage)
     return None

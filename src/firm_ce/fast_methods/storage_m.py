@@ -233,31 +233,34 @@ def set_dispatch_max_t(
     merit_order_idx: int64,
     forward_time_flag: boolean,
 ) -> None:
+    inflow_energy = 0.0
+    if storage_instance.inflows:
+        inflow_energy = storage_instance.data[interval]
+
     if forward_time_flag:
         storage_instance.discharge_max_t = min(
             storage_instance.power_capacity,
-            storage_instance.stored_energy[interval - 1] * storage_instance.discharge_efficiency / resolution,
+            (storage_instance.stored_energy[interval - 1] + inflow_energy) * storage_instance.discharge_efficiency / resolution,
         )
         if storage_instance.chargeable:
             storage_instance.charge_max_t = min(
                 storage_instance.power_capacity,
-                (storage_instance.energy_capacity - storage_instance.stored_energy[interval - 1])
-                / storage_instance.charge_efficiency
-                / resolution,
+                max(storage_instance.energy_capacity - storage_instance.stored_energy[interval - 1] - inflow_energy, 0.0)
+                / storage_instance.charge_efficiency / resolution,
             )
         else:
             storage_instance.charge_max_t = 0.0
     else:
         storage_instance.discharge_max_t = min(
             storage_instance.power_capacity,
-            (storage_instance.energy_capacity - storage_instance.stored_energy_temp_reverse)
-            * storage_instance.discharge_efficiency
-            / resolution,
+            max(storage_instance.energy_capacity - storage_instance.stored_energy_temp_reverse - inflow_energy, 0)
+            * storage_instance.discharge_efficiency / resolution,
         )
         if storage_instance.chargeable:
             storage_instance.charge_max_t = min(
                 storage_instance.power_capacity,
-                storage_instance.stored_energy_temp_reverse / storage_instance.charge_efficiency / resolution,
+                max(storage_instance.stored_energy_temp_reverse - inflow_energy, 0.0)
+                / storage_instance.charge_efficiency / resolution,
             )
         else:
             storage_instance.charge_max_t = 0.0
@@ -349,17 +352,34 @@ def update_stored_energy(
     resolution: float64,
     forward_time_flag: boolean,
 ) -> None:
+    dispatched_energy = (
+        max(storage_instance.dispatch_power[interval], 0) / storage_instance.discharge_efficiency * resolution
+        + min(storage_instance.dispatch_power[interval], 0) * storage_instance.charge_efficiency * resolution
+    )
+
     if forward_time_flag:
-        storage_instance.stored_energy[interval] = (
-            storage_instance.stored_energy[interval - 1]
-            - max(storage_instance.dispatch_power[interval], 0) / storage_instance.discharge_efficiency * resolution
-            - min(storage_instance.dispatch_power[interval], 0) * storage_instance.charge_efficiency * resolution
-        )
+        soc = storage_instance.stored_energy[interval - 1] - dispatched_energy
+        if storage_instance.inflows:
+            soc += max(min(storage_instance.data[interval], storage_instance.energy_capacity - soc), 0.0)
+
+        storage_instance.stored_energy[interval] = soc
     else:
-        storage_instance.stored_energy_temp_reverse += (
-            max(storage_instance.dispatch_power[interval], 0) / storage_instance.discharge_efficiency * resolution
-            + min(storage_instance.dispatch_power[interval], 0) * storage_instance.charge_efficiency * resolution
-        )
+        storage_instance.stored_energy_temp_reverse += dispatched_energy
+
+        if storage_instance.inflows:
+            actual_inflow = max(
+                min(
+                    storage_instance.data[interval],
+                    storage_instance.energy_capacity - storage_instance.stored_energy_temp_reverse
+                ),
+                0.0
+            )
+
+            storage_instance.stored_energy_temp_reverse = max(
+                storage_instance.stored_energy_temp_reverse - actual_inflow,
+                0.0
+            )
+
     return None
 
 
