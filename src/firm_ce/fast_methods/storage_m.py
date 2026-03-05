@@ -364,7 +364,7 @@ def update_stored_energy(
 
 
 @njit(fastmath=FASTMATH)
-def calculate_lt_discharge(
+def calculate_lt_generation(
     storage_instance: Storage_InstanceType,
     interval_resolutions: float64[:],
 ) -> None:
@@ -384,10 +384,10 @@ def calculate_lt_discharge(
 
     Side-effects:
     -------
-    Attributes modified for the Storage instance: lt_discharge, line.
+    Attributes modified for the Storage instance: lt_generation, line.
     Attributes modified for the referenced Storage.line: lt_flows.
     """
-    storage_instance.lt_discharge = sum(np.maximum(storage_instance.dispatch_power, 0) * interval_resolutions)
+    storage_instance.lt_generation = sum(np.maximum(storage_instance.dispatch_power, 0) * interval_resolutions)
 
     storage_instance.line.lt_flows += sum(np.abs(storage_instance.dispatch_power) * interval_resolutions)
     return None
@@ -417,15 +417,15 @@ def calculate_variable_costs(
     """
     ltcosts_m.calculate_vom(
         storage_instance.lt_costs,
-        storage_instance.lt_discharge,
+        storage_instance.lt_generation,
         year_float,
         storage_instance.cost
     )
     ltcosts_m.calculate_fuel(
         storage_instance.lt_costs,
-        storage_instance.lt_discharge,
+        storage_instance.lt_generation,
         year_float,
-        0,
+        0.0,
         storage_instance.cost
     )
     return ltcosts_m.get_variable(storage_instance.lt_costs)
