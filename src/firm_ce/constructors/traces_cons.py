@@ -49,7 +49,7 @@ def select_datafile(
         is returned.
     """
     matching_datafiles = [df for df in datafiles_imported_dict.values() if df.type == datafile_type]
-    
+
     trace = np.empty((0,), dtype=np.float64)
     for datafile in matching_datafiles:
         if object_name in datafile.data.keys():

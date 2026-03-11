@@ -203,8 +203,3 @@ def calculate_fixed_costs(line_instance: Line_InstanceType) -> float64:
         "line"
     )
     return ltcosts_m.get_fixed(line_instance.lt_costs)
-
-
-@njit(fastmath=FASTMATH)
-def get_lt_losses(line_instance: Line_InstanceType) -> float64:
-    return line_instance.lt_flows * line_instance.loss_factor * line_instance.length / 1000

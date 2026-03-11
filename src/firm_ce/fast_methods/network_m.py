@@ -681,30 +681,6 @@ def calculate_lt_flows(
 
 
 @njit(fastmath=FASTMATH)
-def calculate_lt_line_losses(
-    network_instance: Network_InstanceType,
-) -> float64:
-    """
-    Estimates the total long-term transmission losses over the modelling horizon for both major and minor
-    Lines. Assumes a simplified linear loss factor applied to the line flows.
-
-    Parameters:
-    -------
-    network_instance (Network_InstanceType): An instance of the Network jitclass.
-
-    Returns:
-    -------
-    float64: Total power losses [GW] across all Lines over the entire modelling horizon.
-    """
-    total_line_losses = 0.0
-    for line in network_instance.major_lines.values():
-        total_line_losses += line_m.get_lt_losses(line)
-    for line in network_instance.minor_lines.values():
-        total_line_losses += line_m.get_lt_losses(line)
-    return total_line_losses
-
-
-@njit(fastmath=FASTMATH)
 def reset_flexible(
     network_instance: Network_InstanceType,
     interval: int64,

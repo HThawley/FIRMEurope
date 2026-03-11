@@ -105,15 +105,16 @@ def get_max_flow_update(
     float64: The maximum flow for the Route for this transmission action [GW], accounting for the capacity
         of Lines along the Route that has already been committed for transmission.
     """
-    max_flow = NP_FLOAT_MAX
+    max_flow_delivered = NP_FLOAT_MAX
     for leg in range(route_instance.legs + 1):
-        max_flow = min(
-            max_flow,
+        live_line_capacity = (
             route_instance.lines[leg].capacity
             - route_instance.line_directions[leg]
-            * (route_instance.lines[leg].flows[interval] + route_instance.lines[leg].temp_leg_flows),
+            * (route_instance.lines[leg].flows[interval] + route_instance.lines[leg].temp_leg_flows)
         )
-    return max_flow
+        max_flow_delivered = min(max_flow_delivered, live_line_capacity * route_instance.cumulative_eff[leg])
+
+    return max_flow_delivered
 
 
 @njit(fastmath=FASTMATH)
@@ -149,17 +150,19 @@ def calculate_flow_update(
     Attributes modified for all Line instances referenced in Route.lines: temp_leg_flows.
     """
     route_instance.flow_update = min(
-        route_instance.nodes[-1].temp_surplus, get_max_flow_update(route_instance, interval)
+        route_instance.nodes[-1].temp_surplus * route_instance.efficiency,  # maximum deliverable (surplus energy)
+        get_max_flow_update(route_instance, interval)  # maximum deliverable (line hosting capacity)
     )
 
     route_instance.initial_node.available_imports += route_instance.flow_update
 
     # If multiple routes on the same leg end with the same node, they must be constrained by surplus committed for that leg
-    route_instance.nodes[-1].temp_surplus -= route_instance.flow_update
+    route_instance.nodes[-1].temp_surplus -= route_instance.flow_update / route_instance.efficiency
 
     # If multiple routes on the same leg use the same lines, they must be constrained by capacity committed for that leg
     for leg in range(route_instance.legs + 1):
-        route_instance.lines[leg].temp_leg_flows += route_instance.line_directions[leg] * route_instance.flow_update
+        leg_flow = route_instance.flow_update / route_instance.efficiency[leg]
+        route_instance.lines[leg].temp_leg_flows += route_instance.line_directions[leg] * leg_flow
     return None
 
 
@@ -192,9 +195,11 @@ def update_exports(
         surplus.
     Attributes modified for all Line instances referenced in Route.lines: flows.
     """
-    route_instance.nodes[-1].imports_exports[interval] -= route_instance.flow_update
-    route_instance.nodes[-1].surplus -= route_instance.flow_update
+    source_deduction = route_instance.flow_update / route_instance.efficiency
+    route_instance.nodes[-1].imports_exports[interval] -= source_deduction
+    route_instance.nodes[-1].surplus -= source_deduction
 
     for leg in range(route_instance.legs + 1):
-        route_instance.lines[leg].flows[interval] += route_instance.line_directions[leg] * route_instance.flow_update
+        leg_flow = route_instance.flow_update / route_instance.efficiency[leg]
+        route_instance.lines[leg].flows[interval] += route_instance.line_directions[leg] * leg_flow
     return None

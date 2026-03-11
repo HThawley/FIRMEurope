@@ -322,9 +322,8 @@ class Solution:
         if not reliability_check:
             return self.lcoe, self.penalties  # End early if reliability constraint breached
         total_costs += self.calculate_variable_costs()
-        total_line_losses = network_m.calculate_lt_line_losses(self.network)
 
-        lcoe = total_costs / np.abs(sum(self.static.year_energy_demand) - total_line_losses) / 1000  # $/MWh
+        lcoe = total_costs / sum(self.static.year_energy_demand) / 1000  # $/MWh
         return lcoe, self.penalties
 
     def evaluate(self):

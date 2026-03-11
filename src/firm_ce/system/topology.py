@@ -172,6 +172,7 @@ if JIT_ENABLED:
         ("node_start", Node_InstanceType),
         ("node_end", Node_InstanceType),
         ("loss_factor", float64),
+        ("efficiency", float64),
         ("max_build", float64),
         ("min_build", float64),
         ("initial_capacity", float64),
@@ -291,6 +292,7 @@ class Line:
         self.node_start = node_start  # Starting node
         self.node_end = node_end  # Ending node
         self.loss_factor = loss_factor  # Transmission losses % per 1000 km
+        self.efficiency = 1 - (self.loss_factor * self.length / 1000)
         self.max_build = max_build  # GW/year
         self.min_build = min_build  # GW/year
         self.initial_capacity = capacity  # GW
@@ -327,6 +329,8 @@ if JIT_ENABLED:
         ("line_directions", int64[:]),
         ("legs", int64),
         ("flow_update", float64),
+        ("efficiency", float64),
+        ("cumulative_eff", float64[:])
     ]
 else:
     route_spec = []
@@ -392,6 +396,11 @@ class Route:
         self.lines = lines_typed_list
         self.line_directions = line_directions
         self.legs = legs
+        self.efficiency = 1.0
+        self.cumulative_eff = np.ones(legs, np.float64)
+        for i, line in enumerate(self.lines):
+            self.efficiency *= line.efficiency
+            self.cumulative_eff[i:] *= line.efficiency
 
         # Dynamic
         self.flow_update = 0.0
