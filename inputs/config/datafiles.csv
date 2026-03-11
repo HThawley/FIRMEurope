@@ -2,8 +2,8 @@ id,scenarios,filename,datafile_type,units
 0,all,load.csv,demand,GW
 1,all,solar_fixed.csv,generation,CF
 2,all,solar_sat.csv,generation,CF
-3,all,windoff.csv,generation,CF
-4,all,windon.csv,generation,CF
+3,all,wind_offshore.csv,generation,CF
+4,all,wind_onshore.csv,generation,CF
 5,all,run_of_river_cf.csv,generation,CF
 6,all,pondage_inflows.csv,inflow,MWh
 7,all,reservoir_inflows.csv,inflow,MWh
