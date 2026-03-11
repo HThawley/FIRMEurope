@@ -161,7 +161,7 @@ def calculate_flow_update(
 
     # If multiple routes on the same leg use the same lines, they must be constrained by capacity committed for that leg
     for leg in range(route_instance.legs + 1):
-        leg_flow = route_instance.flow_update / route_instance.efficiency[leg]
+        leg_flow = route_instance.flow_update / route_instance.cumulative_eff[leg]
         route_instance.lines[leg].temp_leg_flows += route_instance.line_directions[leg] * leg_flow
     return None
 
@@ -200,6 +200,6 @@ def update_exports(
     route_instance.nodes[-1].surplus -= source_deduction
 
     for leg in range(route_instance.legs + 1):
-        leg_flow = route_instance.flow_update / route_instance.efficiency[leg]
+        leg_flow = route_instance.flow_update / route_instance.cumulative_eff[leg]
         route_instance.lines[leg].flows[interval] += route_instance.line_directions[leg] * leg_flow
     return None
