@@ -14,7 +14,7 @@ from firm_ce.common.helpers import safe_divide, safe_divide_array
 from firm_ce.fast_methods import ltcosts_m, network_m, static_m
 from firm_ce.analysis.accessor import Accessor
 from firm_ce.io.file_manager import ResultFile
-from firm_ce.optimisation.single_time import Solution
+from firm_ce.optimisation.single_time import Solution, evaluate
 from firm_ce.system.components import Fleet_InstanceType
 from firm_ce.system.parameters import ScenarioParameters_InstanceType
 from firm_ce.system.topology import Network_InstanceType
@@ -38,7 +38,7 @@ class Statistics:
         )
 
         start_time = time.time()
-        self.solution.evaluate()
+        evaluate(self.solution)
         end_time = time.time()
         print(f"Statistics solution evaluation time: {end_time - start_time:.4f} seconds")
         print(f"{scenario_name} LCOE: {self.solution.lcoe} [$/MWh], " f"Penalties: {self.solution.penalties}")
@@ -58,10 +58,10 @@ class Statistics:
         self.statistics_generated = False
 
     def _build_master_tables(self):
-        accessor = Accessor(self.solution, "MW")
+        accessor = Accessor(self.solution, "GW")
         static_data = []
         temporal_data = {}
-        asset_classes = ["nodes", "generators", "reservoirs", "storages", "major_lines"]  # , "minor_lines"]
+        asset_classes = ["nodes", "generators", "storages", "major_lines"]  # , "minor_lines"]
         meta_data_names = ("Asset ID", "Asset Name", "Asset Type", "Asset Class", "Unit Type", "Node")
 
         for asset_class in asset_classes:
@@ -113,23 +113,21 @@ class Statistics:
                     temporal_data[(*meta_data, "Flow")] = accessor.get_transmission_trace(asset)
 
                 else:
-                    # For Generators, Reservoirs, and Storage
+                    # For Generators, and Storage
                     temporal_data[(*meta_data, "Dispatch")] = accessor.get_power_trace(asset)
 
                     # Flexible Generators (fuel limited)
                     if accessor.is_flexible(asset):
                         temporal_data[(*meta_data, "Energy_Remaining")] = accessor.get_remaining_energy_trace(asset)
 
-                    # Hydro Reservoirs
-                    if accessor.is_reservoir(asset):
-                        temporal_data[(*meta_data, "Inflow")] = accessor.get_inflow_trace(asset)
-                        temporal_data[(*meta_data, "Stored_Energy")] = accessor.get_storage_level_trace(asset)
-
                     # Batteries / Storage
                     if accessor.is_storage(asset):
                         temporal_data[(*meta_data, "Stored_Energy")] = accessor.get_storage_level_trace(asset)
                         temporal_data[(*meta_data, "Charge")] = accessor.get_charge_trace(asset)
                         temporal_data[(*meta_data, "Discharge")] = accessor.get_discharge_trace(asset)
+
+                    if accessor.has_inflows(asset):
+                        temporal_data[(*meta_data, "Inflows")] = accessor.get_inflow_trace(asset)
 
         df_static = pd.DataFrame(static_data)
         if not df_static.empty:
@@ -141,7 +139,7 @@ class Statistics:
                            "Min Build Energy", "Max Build Energy", "Annualised Build",
                            "Fixed O&M", "Variable O&M", "Fuel Cost"):
                 nodal_values = df_static[
-                    df_static["Asset Type"].isin(("Generator", "Reservoir", "Storage"))
+                    df_static["Asset Type"].isin(("Generator", "Storage"))
                 ].fillna(0.0).groupby("Node")[column].sum()
 
                 df_static.loc[node_mask, column] = df_static.loc[node_mask, "Asset Name"].map(nodal_values)
@@ -301,12 +299,12 @@ class Statistics:
         elif aggregation == "nodes":
             # Group columns by Node and Variable, then Sum
             # We group by levels [5, 6] -> [Node, Variable]
-            df = df.groupby(level=["Node", "Variable"], axis=1).sum()
+            df = df.T.groupby(level=["Node", "Variable"]).sum()
 
         elif aggregation == "network":
             # Group columns by Variable only, then Sum
             # We group by level [6] -> [Variable]
-            df = df.groupby(level="Variable", axis=1).sum()
+            df = df.T.groupby(level="Variable").sum()
 
         # Flatten columns for writing to CSV (ResultFile expects simple header usually)
         # Note: If ResultFile supports MultiIndex headers, you can skip this.
@@ -339,9 +337,9 @@ class Statistics:
 
         # 4. Filter and Scale (MWh -> GWh)
         numeric_cols = df_summary.select_dtypes(include=[np.number]).columns
-        df_summary[numeric_cols] = df_summary[numeric_cols] / 1000.0
+        df_summary[numeric_cols] = df_summary[numeric_cols]
 
-        return ResultFile("summary", self.results_directory, df_summary, decimals=3)
+        return ResultFile("summary", self.results_directory, df_summary.T, decimals=3)
 
     def _view_levelised_costs(self) -> ResultFile:
         """
@@ -352,10 +350,6 @@ class Statistics:
         # 1. Calculate System Total Energy
         # Sum demand across all nodes
         total_demand_mwh = self.df_temporal.xs("Demand", level="Variable", axis=1).sum().sum() * resolution
-
-        # Calculate Line Losses
-        line_losses_mwh = network_m.calculate_lt_line_losses(self.solution.network) * 1000
-        total_system_energy = total_demand_mwh - line_losses_mwh
 
         # 2. Get Asset Totals
         # Sum time dimension * resolution -> Results in Series with MultiIndex
@@ -399,8 +393,8 @@ class Statistics:
 
         # 5. Calculate Metrics
         # LCOE (System Level contribution)
-        if total_system_energy > 0:
-            df_lcoe["LCOE [$/MWh]"] = df_lcoe["Discounted Cost [$]"].to_numpy() / total_system_energy
+        if total_demand_mwh > 0:
+            df_lcoe["LCOE [$/MWh]"] = df_lcoe["Discounted Cost [$]"].to_numpy() / total_demand_mwh
 
         # LCOG (Asset Level)
         df_lcoe["LCOG [$/MWh]"] = safe_divide_array(df_lcoe["Discounted Cost [$]"].to_numpy(),
@@ -410,7 +404,7 @@ class Statistics:
         mask = (df_lcoe["Discounted Cost [$]"] > 1e-6) | (df_lcoe["Generation [MWh]"] > 1e-6)
         df_lcoe = df_lcoe[mask]
 
-        return ResultFile("levelised_costs", self.results_directory, df_lcoe, decimals=2)
+        return ResultFile("levelised_costs", self.results_directory, df_lcoe.T, decimals=2)
 
     def generate_capacities_file(self) -> ResultFile:
         """Generates the capacities CSV"""
@@ -475,8 +469,6 @@ class Statistics:
             ]
         )
         df = append_asset(df, "generators", "power")
-        df = append_asset(df, "reservoirs", "power")
-        df = append_asset(df, "reservoirs", "energy")
         df = append_asset(df, "storages", "power")
         df = append_asset(df, "storages", "energy")
         df = append_asset(df, "major_lines", "power")
@@ -536,7 +528,6 @@ class Statistics:
             ]
         )
         df = append_asset(df, "generators")
-        df = append_asset(df, "reservoirs")
         df = append_asset(df, "storages")
         df = append_asset(df, "major_lines")
         df = append_asset(df, "minor_lines")
@@ -638,7 +629,6 @@ class Statistics:
             case "assets":
                 df = append_series(df, "asset", "nodes", "Demand", "[MW]", accessor.get_power_trace)
                 df = append_series(df, "asset", "generators", "Dispatch", "[MW]", accessor.get_power_trace)
-                df = append_series(df, "asset", "reservoirs", "Reservoir Dispatch", "[MW]", accessor.get_power_trace)
                 df = append_series(df, "asset", "storages", "Storage Dispatch", "[MW]", accessor.get_power_trace)
                 df = append_series(
                     df,
@@ -649,11 +639,7 @@ class Statistics:
                     accessor.get_remaining_energy_trace,
                     condition=Accessor.is_flexible,
                 )
-                df = append_series(
-                    df, "asset", "reservoirs", "Reservoir Energy", "[MWh]", accessor.get_storage_level_trace
-                )
                 df = append_series(df, "asset", "storages", "Stored Energy", "[MWh]", accessor.get_storage_level_trace)
-                df = append_series(df, "asset", "reservoirs", "Inflow", "[MWh]", accessor.get_inflow_trace)
                 df = append_series(df, "asset", "nodes", "Spillage", "[MW]", accessor.get_spillage_trace)
                 df = append_series(df, "asset", "nodes", "Deficit", "[MW]", accessor.get_deficit_trace)
                 df = append_series(df, "asset", "major_lines", "Flow", "[MW]", accessor.get_transmission_trace)
@@ -693,7 +679,6 @@ class Statistics:
                     accessor.get_power_trace,
                     condition=Accessor.is_flexible,
                 )
-                df = append_series(df, "node", "reservoirs", "Reservoir Dispatch", "[MW]", accessor.get_power_trace)
                 df = append_series(df, "node", "storages", "Storage Dispatch", "[MW]", accessor.get_power_trace)
                 df = append_series(
                     df,
@@ -704,11 +689,8 @@ class Statistics:
                     accessor.get_remaining_energy_trace,
                     condition=Accessor.is_flexible,
                 )
-                df = append_series(
-                    df, "node", "reservoirs", "Reservoir Energy", "[MWh]", accessor.get_storage_level_trace
-                )
                 df = append_series(df, "node", "storages", "Stored Energy", "[MWh]", accessor.get_storage_level_trace)
-                df = append_series(df, "node", "reservoirs", "Reservoir Inflow", "[MWh]", accessor.get_inflow_trace)
+                df = append_series(df, "node", "storages", "Reservoir Inflow", "[MWh]", accessor.get_inflow_trace, condition=Accessor.has_inflows)
                 df = append_series(df, "asset", "nodes", "Spillage", "[MW]", accessor.get_spillage_trace)
                 df = append_series(df, "asset", "nodes", "Deficit", "[MW]", accessor.get_deficit_trace)
                 df = append_series(df, "asset", "major_lines", "Flow", "[MW]", accessor.get_transmission_trace)
@@ -742,7 +724,6 @@ class Statistics:
                     accessor.get_power_trace,
                     condition=Accessor.is_flexible,
                 )
-                df = append_series(df, "network", "reservoirs", "Reservoir Dispatch", "[MW]", accessor.get_power_trace)
                 df = append_series(df, "network", "storages", "Storage Dispatch", "[MW]", accessor.get_power_trace)
                 df = append_series(
                     df,
@@ -754,12 +735,9 @@ class Statistics:
                     condition=Accessor.is_flexible,
                 )
                 df = append_series(
-                    df, "network", "reservoirs", "Reservoir Energy", "[MWh]", accessor.get_storage_level_trace
-                )
-                df = append_series(
                     df, "network", "storages", "Stored Energy", "[MWh]", accessor.get_storage_level_trace
                 )
-                df = append_series(df, "network", "reservoirs", "Reservoir Inflow", "[MWh]", accessor.get_inflow_trace)
+                df = append_series(df, "network", "storages", "Reservoir Inflow", "[MWh]", accessor.get_inflow_trace, Accessor.has_inflows)
                 df = append_series(df, "network", "nodes", "Spillage", "[MW]", accessor.get_spillage_trace)
                 df = append_series(df, "network", "nodes", "Deficit", "[MW]", accessor.get_deficit_trace)
 
@@ -844,7 +822,7 @@ class Statistics:
             * sum(
                 sum(generator.dispatch_power)
                 for generator in self.solution.fleet.generators.values()
-                if generator.unit_type == "flexible"
+                if generator.is_flexible
             )
         )  # MWh
         total_generation += (
@@ -853,24 +831,13 @@ class Statistics:
             * sum(
                 sum(generator.data * generator.capacity)
                 for generator in self.solution.fleet.generators.values()
-                if generator.unit_type != "flexible"
+                if not generator.is_flexible
             )
-        )  # MWh
-        total_generation += (
-            1000
-            * self.solution.static.resolution
-            * sum(sum(reservoir.dispatch_power) for reservoir in self.solution.fleet.reservoirs.values())
         )  # MWh
         df = append_system_placeholder(df)
         df = append_asset(
             df,
             "generators",
-            generation_getter=accessor.get_energy_net,
-            curtailment_getter=accessor.get_nominal_curtailment_net,
-        )
-        df = append_asset(
-            df,
-            "reservoirs",
             generation_getter=accessor.get_energy_net,
             curtailment_getter=accessor.get_nominal_curtailment_net,
         )
@@ -973,9 +940,8 @@ class Statistics:
 
         df = append_asset(df, "nodes", "Annual Demand", accessor.get_power_trace)
         df = append_asset(df, "generators", "Annual Generation", accessor.get_power_trace)
-        df = append_asset(df, "reservoirs", "Annual Generation", accessor.get_power_trace)
         df = append_asset(df, "storages", "Annual Dispatch", accessor.get_discharge_trace)
-        df = append_asset(df, "reservoirs", "Annual Inflow", accessor.get_inflow_trace)
+        df = append_asset(df, "storages", "Annual Inflows", accessor.get_inflow_trace, condition=Accessor.has_inflows)
         df = append_asset(df, "nodes", "Node", accessor.get_spillage_trace)
         df = append_asset(df, "nodes", "Node", accessor.get_deficit_trace)
         df = append_asset(df, "major_lines", "Flow", accessor.get_transmission_trace)

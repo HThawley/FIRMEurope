@@ -46,6 +46,11 @@ def create_dynamic_copy(
         storage_instance.cost,  # This remains static
     )
 
+    if storage_instance.inflows:
+        storage_copy.data_status = storage_instance.data_status
+        storage_copy.data = storage_instance.data
+    storage_copy.lt_generation = storage_instance.lt_generation
+
     storage_copy.candidate_p_x_idx = storage_instance.candidate_p_x_idx
     storage_copy.candidate_e_x_idx = storage_instance.candidate_e_x_idx
 
@@ -104,7 +109,7 @@ def load_data(
     """
     storage_instance.data = inflow_trace
     storage_instance.data_status = True
-
+    
     return None
 
 

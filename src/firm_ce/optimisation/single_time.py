@@ -139,7 +139,7 @@ else:
     Solution_InstanceType = Solution
 
 
-@njit(FASTMATH)
+@njit(fastmath=FASTMATH)
 def balance_residual_load(solution: Solution_InstanceType) -> boolean:
     """
     Evaluate the unit committment business rules over the entire modelling horizon.
@@ -184,7 +184,7 @@ def balance_residual_load(solution: Solution_InstanceType) -> boolean:
     return True
 
 
-@njit(FASTMATH)
+@njit(fastmath=FASTMATH)
 def calculate_fixed_costs(solution: Solution_InstanceType) -> float64:
     """
     Calculate total fixed costs for all assets. Based upon the annualised build costs and fixed O&M costs
@@ -227,7 +227,7 @@ def calculate_fixed_costs(solution: Solution_InstanceType) -> float64:
     return total_costs
 
 
-@njit(FASTMATH)
+@njit(fastmath=FASTMATH)
 def calculate_variable_costs(solution: Solution_InstanceType) -> float64:
     """
     Calculate total variable costs based on dispatch and flows derived through unit committment
@@ -274,7 +274,7 @@ def calculate_variable_costs(solution: Solution_InstanceType) -> float64:
     return total_costs
 
 
-@njit(FASTMATH)
+@njit(fastmath=FASTMATH)
 def check_fixed_costs(solution: Solution_InstanceType, fixed_costs: float64) -> boolean:
     """
     Check the fixed cost constraint against the configured threshold.
@@ -295,7 +295,7 @@ def check_fixed_costs(solution: Solution_InstanceType, fixed_costs: float64) -> 
     return (fixed_costs / sum(solution.static.year_energy_demand) / 1000) < solution.fixed_costs_threshold  # $/MWh_demand
 
 
-@njit(FASTMATH)
+@njit(fastmath=FASTMATH)
 def objective(solution: Solution_InstanceType) -> tuple[float]:
     """
     Evaluates the long-term energy planning system, through the calculation of investment and unit committment
@@ -339,11 +339,11 @@ def objective(solution: Solution_InstanceType) -> tuple[float]:
         return solution.lcoe, solution.penalties  # End early if reliability constraint breached
     total_costs += calculate_variable_costs(solution)
 
-    lcoe = total_costs / sum(solution.static.year_energy_demand) / 1000  # $/MWh
+    lcoe = total_costs * solution.static.year_count / sum(solution.static.year_energy_demand) / 1000  # $/MWh
     return lcoe, solution.penalties
 
 
-@njit(FASTMATH)
+@njit(fastmath=FASTMATH)
 def evaluate(solution: Solution_InstanceType) -> Solution_InstanceType:
     """
     Wrapper that evaluates the objective function and updates the evaluation state.
@@ -357,7 +357,7 @@ def evaluate(solution: Solution_InstanceType) -> Solution_InstanceType:
     -------
     Attributes modified for Solution instance: lcoe, penalties, evaluated.
     """
-    solution.lcoe, solution.penalties = solution.objective()
+    solution.lcoe, solution.penalties = objective(solution)
     solution.evaluated = True
     return solution
 
@@ -378,10 +378,10 @@ def mga_parallel_wrapper(
     result = np.zeros((2, n_points), dtype=np.float64)
     for j in prange(n_points):
         xj = xs[j]
-        sol = Solution(xj, static, fleet, network, balancing_type, fixed_costs_threshold)
-        sol.evaluate()
-        result[0, j] = sol.lcoe
-        result[1, j] = sol.penalties
+        solution = Solution(xj, static, fleet, network, balancing_type, fixed_costs_threshold)
+        evaluate(solution)
+        result[0, j] = solution.lcoe
+        result[1, j] = solution.penalties
     return result
 
 
@@ -423,11 +423,11 @@ def parallel_wrapper(
     result = np.zeros((3, n_points), dtype=np.float64)
     for j in prange(n_points):
         xj = xs[:, j]
-        sol = Solution(xj, static, fleet, network, balancing_type, fixed_costs_threshold)
-        sol.evaluate()
-        result[0, j] = sol.lcoe + sol.penalties * PENALTY_MULTIPLIER
-        result[1, j] = sol.lcoe
-        result[2, j] = sol.penalties
+        solution = Solution(xj, static, fleet, network, balancing_type, fixed_costs_threshold)
+        evaluate(solution)
+        result[0, j] = solution.lcoe + solution.penalties * PENALTY_MULTIPLIER
+        result[1, j] = solution.lcoe
+        result[2, j] = solution.penalties
     return result
 
 

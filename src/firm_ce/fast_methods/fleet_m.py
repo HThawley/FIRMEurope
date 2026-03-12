@@ -47,13 +47,15 @@ def create_dynamic_copy(
     storages_copy = TypedDict.empty(key_type=int64, value_type=Storage_InstanceType)
     fuels_copy = TypedDict.empty(key_type=int64, value_type=Fuel_InstanceType)
 
+    for order, fuel in fleet_instance.fuels.items():
+        fuels_copy[order] = fuel_m.create_dynamic_copy(fuel)
+
     for order, generator in fleet_instance.generators.items():
-        if generator.fuel.id not in fuels_copy:
-            fuels_copy[generator.fuel.id] = fuel_m.create_dynamic_copy(generator.fuel)
         generators_copy[order] = generator_m.create_dynamic_copy(
             generator,
             nodes_typed_dict,
             lines_typed_dict,
+            fuels_copy[generator.fuel.id],
         )
 
     for order, storage in fleet_instance.storages.items():

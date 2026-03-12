@@ -7,7 +7,6 @@ from firm_ce.common.helpers import safe_divide_array
 
 asset_class_to_display = {
     "generators": "Generator",
-    "reservoirs": "Reservoir",
     "storages": "Storage",
     "major_lines": "Major Line",
     "minor_lines": "Minor Line",
@@ -41,11 +40,21 @@ class Accessor:
 
     @staticmethod
     def is_flexible(asset: Any) -> bool:
-        return asset.unit_type == "flexible"
+        if hasattr(asset, "is_flexible"):
+            return asset.is_flexible
+        return False
 
     @staticmethod
     def is_not_flexible(asset: Any) -> bool:
-        return asset.unit_type != "flexible"
+        if hasattr(asset, "is_flexible"):
+            return not asset.is_flexible
+        return True
+
+    @staticmethod
+    def has_inflows(asset: Any) -> bool:
+        if hasattr(asset, "inflows"):
+            return asset.inflows
+        return False
 
     @staticmethod
     def is_solar(asset: Any) -> bool:
@@ -70,10 +79,6 @@ class Accessor:
     @staticmethod
     def is_storage(asset: Any) -> bool:
         return asset.object_class == "storage"
-
-    @staticmethod
-    def is_reservoir(asset: Any) -> bool:
-        return asset.object_class == "reservoir"
 
     @staticmethod
     def is_line(asset: Any) -> bool:
@@ -104,7 +109,7 @@ class Accessor:
     def get_assets_from_solution(solution, asset_class: str) -> dict[str, Any]:
         """Static method version of get_assets."""
         match asset_class:
-            case "generators" | "reservoirs" | "storages":
+            case "generators" | "storages":
                 return getattr(solution.fleet, asset_class)
             case "major_lines" | "minor_lines" | "nodes":
                 return getattr(solution.network, asset_class)
@@ -126,7 +131,7 @@ class Accessor:
         match asset.object_class:
             case "generator" | "line":
                 return asset.capacity
-            case "storage" | "reservoir":
+            case "storage":
                 return asset.power_capacity
             case _:
                 if errors == 'raise':
@@ -145,7 +150,7 @@ class Accessor:
                 elif errors == 'coerce':
                     return np.nan
                 raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
-            case "storage" | "reservoir":
+            case "storage":
                 return asset.energy_capacity
             case _:
                 if errors == 'raise':
@@ -170,7 +175,7 @@ class Accessor:
         match asset.object_class:
             case "generator" | "line":
                 return asset.new_build
-            case "storage" | "reservoir":
+            case "storage":
                 return asset.new_build_p
             case _:
                 if errors == 'raise':
@@ -189,7 +194,7 @@ class Accessor:
                 elif errors == 'coerce':
                     return np.nan
                 raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
-            case "storage" | "reservoir":
+            case "storage":
                 return asset.new_build_e
             case _:
                 if errors == 'raise':
@@ -213,7 +218,7 @@ class Accessor:
         match asset.object_class:
             case "generator" | "line":
                 return asset.initial_capacity
-            case "storage" | "reservoir":
+            case "storage":
                 return asset.initial_power_capacity
             case _:
                 if errors == 'raise':
@@ -232,8 +237,8 @@ class Accessor:
                 elif errors == 'coerce':
                     return np.nan
                 raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
-            case "storage" | "reservoir":
-                return asset.initial_energy_capacity
+            case "storage":
+                return asset.initial_power_capacity
             case _:
                 if errors == 'raise':
                     raise ValueError("Unknown asset type for existing capacity (energy) retrieval:"
@@ -257,7 +262,7 @@ class Accessor:
         match asset.object_class:
             case "generator" | "line":
                 return asset.initial_capacity, asset.new_build, asset.min_build, asset.max_build
-            case "storage" | "reservoir":
+            case "storage":
                 return asset.initial_power_capacity, asset.new_build_p, asset.min_build_p, asset.max_build_p
             case _:
                 if errors == 'raise':
@@ -270,7 +275,7 @@ class Accessor:
     def get_build_energy(asset: Any, errors: str = 'raise') -> tuple[float, float, float]:
         """Returns the build limits for energy capacity (new_build, min_build, max_build)."""
         match asset.object_class:
-            case "storage" | "reservoir":
+            case "storage":
                 return asset.initial_energy_capacity, asset.new_build_e, asset.min_build_e, asset.max_build_e
             case "generator" | "line":
                 if errors == 'raise':
@@ -312,7 +317,7 @@ class Accessor:
                     if not hasattr(asset, "capacity"):
                         raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have 'capacity' attribute.")
                     return asset.data * asset.capacity * self.factor
-            case "storage" | "reservoir":
+            case "storage":
                 # Positive = Generation, Negative = Load
                 if not hasattr(asset, "dispatch_power"):
                     raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have 'dispatch_power' attribute.")
@@ -371,20 +376,24 @@ class Accessor:
 
     def get_inflow_trace(self, asset: Any) -> NDArray[np.float64]:
         """
-        Return the inflow energy time series (MWh) for reservoirs.
+        Return the inflow energy time series (MWh) for reservoir Storages.
         """
-        if not hasattr(asset, "data"):
-            raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have 'data' attribute.")
-        if not asset.data_status:
-            raise ValueError(f"Asset {asset.name} ({asset.object_class}) has data_status=False, data not loaded.")
-        return asset.data * self.factor
+        if not hasattr(asset, "inflows"):
+            raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have inflows flag")
+        if asset.inflows:
+            if not hasattr(asset, "data"):
+                raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have 'data' attribute.")
+            if not asset.data_status:
+                raise ValueError(f"Asset {asset.name} ({asset.object_class}) has data_status=False, data not loaded.")
+            return asset.data * self.factor
+        raise ValueError(f"Asset {asset.name} ({asset.object_class}) has inflows flag =False")
 
     def get_storage_level_trace(self, asset: Any) -> NDArray[np.float64]:
         """
         Returns the storage level time series (MWh) for storage units and reservoirs.
         """
         if not (self.is_storage(asset) or self.is_reservoir(asset)):
-            raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not Storage/Reservoir and has no 'stored_energy' attr.")
+            raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not Storage and has no 'stored_energy' attr.")
         return asset.stored_energy * self.factor
 
     def get_remaining_energy_trace(self, asset: Any) -> NDArray[np.float64]:
@@ -394,7 +403,7 @@ class Accessor:
         if not self.is_generator(asset) or not self.is_flexible(asset):
             raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a flexible Generator "
                              "and has no 'remaining_energy' attr.")
-        return asset.remaining_energy * self.factor
+        return asset.fuel.remaining_energy * self.factor
 
     def get_nodal_generation_trace(self, asset: Any) -> NDArray[np.float64]:
         """
@@ -404,9 +413,6 @@ class Accessor:
         """
         node_generation = sum(
             (self.get_power_trace(_asset) for _asset in self.solution.fleet.generators.values() if _asset.node.id == asset.node.id)
-        )
-        node_generation += sum(
-            (self.get_power_trace(_asset) for _asset in self.solution.fleet.reservoirs.values() if _asset.node.id == asset.node.id)
         )
 
         # in principle, when spillage occurs this is zero - but calculated for robustness
@@ -528,7 +534,6 @@ class Accessor:
         Curtailment merit order:
             1. Storage and flexibles (in theory, they should not be dispathcing anyway, but included for robustness)
             2. solar, wind, ror
-            3. Reservoirs
             4. Others
         """
         if self.is_storage(asset) or self.is_flexible(asset):
@@ -536,9 +541,6 @@ class Accessor:
 
         if self.is_solar(asset) or self.is_wind(asset) or self.is_ror(asset):
             return 2
-
-        if self.is_reservoir(asset):
-            return 3
 
         return 4
 
@@ -548,7 +550,7 @@ class Accessor:
             return self._curtailment_cache[cache_key]
 
         assets = []
-        for asset_class in ("generators", "reservoirs", "storages"):
+        for asset_class in ("generators", "storages"):
             for asset in getattr(self.solution.fleet, asset_class).values():
                 if asset.node.id == node_id:
                     assets.append(asset)

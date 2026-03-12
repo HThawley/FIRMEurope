@@ -467,7 +467,7 @@ def validate_initial_guess(
             + scenario_storages[scenario]
             + scenario_lines[scenario]
         ) - len(scenario_minor_lines[scenario])
-        print(scenario, bound_length)
+        
         if x0 and not (len(x0) == bound_length):
             print(x0)
             model_logger.error(

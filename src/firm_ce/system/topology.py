@@ -397,7 +397,7 @@ class Route:
         self.line_directions = line_directions
         self.legs = legs
         self.efficiency = 1.0
-        self.cumulative_eff = np.ones(legs, np.float64)
+        self.cumulative_eff = np.ones(legs + 1, np.float64)
         for i, line in enumerate(self.lines):
             self.efficiency *= line.efficiency
             self.cumulative_eff[i:] *= line.efficiency

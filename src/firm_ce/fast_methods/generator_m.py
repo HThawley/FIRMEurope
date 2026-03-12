@@ -9,7 +9,7 @@ from firm_ce.common.exceptions import (
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import DictType, boolean, float64, int64, unicode_type
 from firm_ce.fast_methods import ltcosts_m, node_m
-from firm_ce.system.components import Generator, Generator_InstanceType
+from firm_ce.system.components import Generator, Generator_InstanceType, Fuel_InstanceType
 from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
 
 
@@ -18,6 +18,7 @@ def create_dynamic_copy(
     generator_instance: Generator_InstanceType,
     nodes_typed_dict: DictType(int64, Node_InstanceType),
     lines_typed_dict: DictType(int64, Line_InstanceType),
+    fuel_dynamic_copy: Fuel_InstanceType,
 ) -> Generator_InstanceType:
     node_copy = nodes_typed_dict[generator_instance.node.order]
     line_copy = lines_typed_dict[generator_instance.line.order]
@@ -35,7 +36,7 @@ def create_dynamic_copy(
         generator_instance.is_flexible,
         generator_instance.near_optimum_check,
         node_copy,
-        generator_instance.fuel,  # This does not always remain static but must be updated at the same time as everything else
+        fuel_dynamic_copy,  # This does not always remain static but must be updated at the same time as everything else
         line_copy,
         generator_instance.group,
         generator_instance.cost,  # This remains static
