@@ -3,7 +3,7 @@ import time
 
 import numpy as np
 
-from firm_ce.common.constants import JIT_ENABLED, NUM_THREADS, PENALTY_MULTIPLIER
+from firm_ce.common.constants import JIT_ENABLED, NUM_THREADS, PENALTY_MULTIPLIER, FASTMATH
 from firm_ce.common.jit_overload import jitclass, njit, prange
 from firm_ce.common.typing import boolean, float64, unicode_type
 from firm_ce.fast_methods import fleet_m, generator_m, line_m, network_m, static_m, storage_m
@@ -132,222 +132,234 @@ class Solution:
         network_m.assign_storage_merit_orders(self.network, self.fleet.storages)
         network_m.assign_flexible_merit_orders(self.network, self.fleet.generators)
 
-    def balance_residual_load(self) -> boolean:
-        """
-        Evaluate the unit committment business rules over the entire modelling horizon.
-
-        Notes:
-        -------
-        - At the end of each calendar year, the reliability constraint is evaluated. The method returns early
-        if the reliability constraint is breached for any year.
-        - Stored energy in Storage systems is initialised at the start of the modelling period.
-        Annual generation limits for flexible Generators are initialised at the start of each calendar year.
-
-        Parameters:
-        -------
-        None.
-
-        Returns:
-        -------
-        boolean: Returns True if reliability constraint is satisfied for all years in the modelling horizon.
-            Otherwise, False.
-
-        Side-effects:
-        -------
-        Dynamic jitlass instances are substantially modified within this method. The stored energy of Storage systems
-        and remaining energy for flexible Generators are initialised using Fleet pseudo-methods. The
-        endogenous time-series data and temporary values are modified throughout the balance_for_period function.
-        Attributes that are modified are marked using *Dynamic* or *Precharging* comments in the relevant jitclass
-        definitions.
-        """
-        fleet_m.initialise_stored_energies(self.fleet)
-        for year in range(self.static.year_count):
-            first_t, last_t = static_m.get_year_t_boundaries(self.static, year)
-            fleet_m.initialise_annual_limits(self.fleet, year, first_t)
-            balance_for_period(first_t, last_t, self.balancing_type == "full", self, year)
-            annual_unserved_energy = network_m.calculate_period_unserved_energy(
-                self.network, first_t, last_t, self.static.interval_resolutions
-            )
-
-            # End early if reliability constraint breached for any year
-            if not static_m.check_reliability_constraint(self.static, year, annual_unserved_energy):
-                self.penalties += (self.static.year_count - year) * annual_unserved_energy
-                return False
-        return True
-
-    def calculate_fixed_costs(self) -> float64:
-        """
-        Calculate total fixed costs for all assets. Based upon the annualised build costs and fixed O&M costs
-        incurred over the modelling horizon.
-
-        Notes:
-        -------
-        - A years_float value is used to ensure leap days incur fixed O&M costs. This is consistent with the
-        PLEXOS formulation.
-        - Can be calculated before the unit committment evaluation, since these costs are independent of dispatch.
-
-        Parameters:
-        -------
-        None.
-
-        Returns:
-        -------
-        float64: Total fixed costs over the modelling horizon, units $.
-
-        Side-effects:
-        -------
-        Attributes modified for values in Solution.fleet.generators, Solution.fleet.storages,
-            Solution.network.major_lines, Solution.network.minor_lines: lt_costs.
-        Attributes modified for LTCosts instances referenced in the lt_costs attributes: fom, annualised_build.
-        """
-        total_costs = 0.0
-
-        for generator in self.fleet.generators.values():
-            total_costs += generator_m.calculate_fixed_costs(generator)
-
-        for storage in self.fleet.storages.values():
-            total_costs += storage_m.calculate_fixed_costs(storage)
-
-        for line in self.network.major_lines.values():
-            total_costs += line_m.calculate_fixed_costs(line)
-
-        for line in self.network.minor_lines.values():
-            total_costs += line_m.calculate_fixed_costs(line)
-
-        return total_costs
-
-    def calculate_variable_costs(self) -> float64:
-        """
-        Calculate total variable costs based on dispatch and flows derived through unit committment
-        business rules.
-
-        Notes:
-        -----
-        - This method should not be called before complete evaluation of the unit committment business
-        rules over the modelling horizon.
-
-        Returns:
-        -------
-        float64: Total variable costs over the modelling horizon, units $.
-
-        Side-effects:
-        -------
-        Attributes modified for values in Solution.fleet.generators, Solution.fleet.storages,
-            Solution.network.major_lines, Solution.network.minor_lines: lt_costs.
-        Attributes modified for LTCosts instances referenced in the lt_costs attributes: vom, fuel.
-        """
-        total_costs = 0.0
-
-        fleet_m.calculate_lt_generations(
-            self.fleet,
-            self.static.interval_resolutions,
-        )
-        network_m.calculate_lt_flows(
-            self.network,
-            self.static.interval_resolutions,
-        )
-
-        for generator in self.fleet.generators.values():
-            total_costs += generator_m.calculate_variable_costs(generator, self.static.year_float)
-
-        for storage in self.fleet.storages.values():
-            total_costs += storage_m.calculate_variable_costs(storage, self.static.year_float)
-
-        for line in self.network.major_lines.values():
-            total_costs += line_m.calculate_variable_costs(line, self.static.year_float)
-
-        for line in self.network.minor_lines.values():
-            total_costs += line_m.calculate_variable_costs(line, self.static.year_float)
-
-        return total_costs
-
-    def check_fixed_costs(self, fixed_costs: float64) -> boolean:
-        """
-        Check the fixed cost constraint against the configured threshold.
-
-        Notes:
-        -----
-        - Fixed costs are evaluated relative to total operational demand. This provides consistency with the
-        system-level LCOE, making it easier for users to set the fixed cost threshold.
-
-        Parameters:
-        -------
-        fixed_costs (float64): Total fixed costs over the modelling horizon, units $.
-
-        Returns:
-        -------
-        boolean: True if fixed cost constraint is satisfied. Otherwise, False.
-        """
-        return (fixed_costs / sum(self.static.year_energy_demand) / 1000) < self.fixed_costs_threshold  # $/MWh_demand
-
-    def objective(self):
-        """
-        Evaluates the long-term energy planning system, through the calculation of investment and unit committment
-        costs. Penalty functions are used to soft-constrain fixed costs and reliability.
-
-        Notes:
-        -------
-        - Fixed costs are calculated first, allowing the fixed cost constraint to be evaluated before unit committment.
-        This allows low-quality solutions to be rapidly discarded and penalised.
-        - Variable costs require complete evaluation of the unit committment business rules.
-        - If the fixed cost or reliability constraint is breached, then self.lcoe will return as $0/MWh. If the soft
-        constraints are satisfied, then self.penalties will return as 0. The self.lcoe and self.penalties are summed
-        together to provide the differential evolution energy (cost) of the candidate solution.
-
-        Parameters:
-        -------
-        None.
-
-        Returns:
-        -------
-        UniTuple(float64, 2): A UniTuple containing two float64 values. The first value is the LCOE and the second value
-            is the penalties for penalty function violations.
-
-        Side-effects:
-        -------
-        Attributes modified for Solution instance: lcoe, penalties.
-        Attributes modified for values in Solution.fleet.generators, Solution.fleet.storages, Solution.network.major_lines,
-            Solution.network.minor_lines: lt_costs.
-        Attributes modified for LTCosts instances referenced in the lt_costs attributes: fom, annualised_build, vom, fuel.
-
-        Dynamic jitlass instances are substantially modified within this method. The endogenous time-series data and temporary
-        values are modified throughout the balance_residual_load method. Attributes that are modified are marked using
-        *Dynamic* or *Precharging* comments in the relevant jitclass definitions.
-        """
-
-        total_costs = self.calculate_fixed_costs()
-        if not self.check_fixed_costs(total_costs):
-            return self.lcoe, total_costs  # End early if fixed cost constraint breached
-        reliability_check = self.balance_residual_load()
-        if not reliability_check:
-            return self.lcoe, self.penalties  # End early if reliability constraint breached
-        total_costs += self.calculate_variable_costs()
-
-        lcoe = total_costs / sum(self.static.year_energy_demand) / 1000  # $/MWh
-        return lcoe, self.penalties
-
-    def evaluate(self):
-        """
-        Wrapper that evaluates the objective function and updates the evaluation state.
-
-        Returns:
-        -------
-        Solution: The evaluated Solution instance with calculated LCOE, penalties, and endogenous time-series and cost
-            data.
-
-        Side-effects:
-        -------
-        Attributes modified for Solution instance: lcoe, penalties, evaluated.
-        """
-        self.lcoe, self.penalties = self.objective()
-        self.evaluated = True
-        return self
-
 
 if JIT_ENABLED:
     Solution_InstanceType = Solution.class_type.instance_type
 else:
     Solution_InstanceType = Solution
+
+
+@njit(FASTMATH)
+def balance_residual_load(solution: Solution_InstanceType) -> boolean:
+    """
+    Evaluate the unit committment business rules over the entire modelling horizon.
+
+    Notes:
+    -------
+    - At the end of each calendar year, the reliability constraint is evaluated. The method returns early
+    if the reliability constraint is breached for any year.
+    - Stored energy in Storage systems is initialised at the start of the modelling period.
+    Annual generation limits for flexible Generators are initialised at the start of each calendar year.
+
+    Parameters:
+    -------
+    None.
+
+    Returns:
+    -------
+    boolean: Returns True if reliability constraint is satisfied for all years in the modelling horizon.
+        Otherwise, False.
+
+    Side-effects:
+    -------
+    Dynamic jitlass instances are substantially modified within this method. The stored energy of Storage systems
+    and remaining energy for flexible Generators are initialised using Fleet pseudo-methods. The
+    endogenous time-series data and temporary values are modified throughout the balance_for_period function.
+    Attributes that are modified are marked using *Dynamic* or *Precharging* comments in the relevant jitclass
+    definitions.
+    """
+    fleet_m.initialise_stored_energies(solution.fleet)
+    for year in range(solution.static.year_count):
+        first_t, last_t = static_m.get_year_t_boundaries(solution.static, year)
+        fleet_m.initialise_annual_limits(solution.fleet, year, first_t)
+        balance_for_period(first_t, last_t, solution.balancing_type == "full", solution, year)
+        annual_unserved_energy = network_m.calculate_period_unserved_energy(
+            solution.network, first_t, last_t, solution.static.interval_resolutions
+        )
+
+        # End early if reliability constraint breached for any year
+        if not static_m.check_reliability_constraint(solution.static, year, annual_unserved_energy):
+            solution.penalties += (solution.static.year_count - year) * annual_unserved_energy
+            return False
+    return True
+
+
+@njit(FASTMATH)
+def calculate_fixed_costs(solution: Solution_InstanceType) -> float64:
+    """
+    Calculate total fixed costs for all assets. Based upon the annualised build costs and fixed O&M costs
+    incurred over the modelling horizon.
+
+    Notes:
+    -------
+    - A years_float value is used to ensure leap days incur fixed O&M costs. This is consistent with the
+    PLEXOS formulation.
+    - Can be calculated before the unit committment evaluation, since these costs are independent of dispatch.
+
+    Parameters:
+    -------
+    None.
+
+    Returns:
+    -------
+    float64: Total fixed costs over the modelling horizon, units $.
+
+    Side-effects:
+    -------
+    Attributes modified for values in Solution.fleet.generators, Solution.fleet.storages,
+        Solution.network.major_lines, Solution.network.minor_lines: lt_costs.
+    Attributes modified for LTCosts instances referenced in the lt_costs attributes: fom, annualised_build.
+    """
+    total_costs = 0.0
+
+    for generator in solution.fleet.generators.values():
+        total_costs += generator_m.calculate_fixed_costs(generator)
+
+    for storage in solution.fleet.storages.values():
+        total_costs += storage_m.calculate_fixed_costs(storage)
+
+    for line in solution.network.major_lines.values():
+        total_costs += line_m.calculate_fixed_costs(line)
+
+    for line in solution.network.minor_lines.values():
+        total_costs += line_m.calculate_fixed_costs(line)
+
+    return total_costs
+
+
+@njit(FASTMATH)
+def calculate_variable_costs(solution: Solution_InstanceType) -> float64:
+    """
+    Calculate total variable costs based on dispatch and flows derived through unit committment
+    business rules.
+
+    Notes:
+    -----
+    - This method should not be called before complete evaluation of the unit committment business
+    rules over the modelling horizon.
+
+    Returns:
+    -------
+    float64: Total variable costs over the modelling horizon, units $.
+
+    Side-effects:
+    -------
+    Attributes modified for values in Solution.fleet.generators, Solution.fleet.storages,
+        Solution.network.major_lines, Solution.network.minor_lines: lt_costs.
+    Attributes modified for LTCosts instances referenced in the lt_costs attributes: vom, fuel.
+    """
+    total_costs = 0.0
+
+    fleet_m.calculate_lt_generations(
+        solution.fleet,
+        solution.static.interval_resolutions,
+    )
+    network_m.calculate_lt_flows(
+        solution.network,
+        solution.static.interval_resolutions,
+    )
+
+    for generator in solution.fleet.generators.values():
+        total_costs += generator_m.calculate_variable_costs(generator, solution.static.year_float)
+
+    for storage in solution.fleet.storages.values():
+        total_costs += storage_m.calculate_variable_costs(storage, solution.static.year_float)
+
+    for line in solution.network.major_lines.values():
+        total_costs += line_m.calculate_variable_costs(line, solution.static.year_float)
+
+    for line in solution.network.minor_lines.values():
+        total_costs += line_m.calculate_variable_costs(line, solution.static.year_float)
+
+    return total_costs
+
+
+@njit(FASTMATH)
+def check_fixed_costs(solution: Solution_InstanceType, fixed_costs: float64) -> boolean:
+    """
+    Check the fixed cost constraint against the configured threshold.
+
+    Notes:
+    -----
+    - Fixed costs are evaluated relative to total operational demand. This provides consistency with the
+    system-level LCOE, making it easier for users to set the fixed cost threshold.
+
+    Parameters:
+    -------
+    fixed_costs (float64): Total fixed costs over the modelling horizon, units $.
+
+    Returns:
+    -------
+    boolean: True if fixed cost constraint is satisfied. Otherwise, False.
+    """
+    return (fixed_costs / sum(solution.static.year_energy_demand) / 1000) < solution.fixed_costs_threshold  # $/MWh_demand
+
+
+@njit(FASTMATH)
+def objective(solution: Solution_InstanceType) -> tuple[float]:
+    """
+    Evaluates the long-term energy planning system, through the calculation of investment and unit committment
+    costs. Penalty functions are used to soft-constrain fixed costs and reliability.
+
+    Notes:
+    -------
+    - Fixed costs are calculated first, allowing the fixed cost constraint to be evaluated before unit committment.
+    This allows low-quality solutions to be rapidly discarded and penalised.
+    - Variable costs require complete evaluation of the unit committment business rules.
+    - If the fixed cost or reliability constraint is breached, then self.lcoe will return as $0/MWh. If the soft
+    constraints are satisfied, then self.penalties will return as 0. The self.lcoe and self.penalties are summed
+    together to provide the differential evolution energy (cost) of the candidate solution.
+
+    Parameters:
+    -------
+    None.
+
+    Returns:
+    -------
+    UniTuple(float64, 2): A UniTuple containing two float64 values. The first value is the LCOE and the second value
+        is the penalties for penalty function violations.
+
+    Side-effects:
+    -------
+    Attributes modified for Solution instance: lcoe, penalties.
+    Attributes modified for values in Solution.fleet.generators, Solution.fleet.storages, Solution.network.major_lines,
+        Solution.network.minor_lines: lt_costs.
+    Attributes modified for LTCosts instances referenced in the lt_costs attributes: fom, annualised_build, vom, fuel.
+
+    Dynamic jitlass instances are substantially modified within this method. The endogenous time-series data and temporary
+    values are modified throughout the balance_residual_load method. Attributes that are modified are marked using
+    *Dynamic* or *Precharging* comments in the relevant jitclass definitions.
+    """
+
+    total_costs = calculate_fixed_costs(solution)
+    if not check_fixed_costs(solution, total_costs):
+        return solution.lcoe, total_costs  # End early if fixed cost constraint breached
+    reliability_check = balance_residual_load(solution)
+    if not reliability_check:
+        return solution.lcoe, solution.penalties  # End early if reliability constraint breached
+    total_costs += calculate_variable_costs(solution)
+
+    lcoe = total_costs / sum(solution.static.year_energy_demand) / 1000  # $/MWh
+    return lcoe, solution.penalties
+
+
+@njit(FASTMATH)
+def evaluate(solution: Solution_InstanceType) -> Solution_InstanceType:
+    """
+    Wrapper that evaluates the objective function and updates the evaluation state.
+
+    Returns:
+    -------
+    Solution: The evaluated Solution instance with calculated LCOE, penalties, and endogenous time-series and cost
+        data.
+
+    Side-effects:
+    -------
+    Attributes modified for Solution instance: lcoe, penalties, evaluated.
+    """
+    solution.lcoe, solution.penalties = solution.objective()
+    solution.evaluated = True
+    return solution
 
 
 @njit(parallel=True)

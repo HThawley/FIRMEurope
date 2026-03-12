@@ -63,7 +63,7 @@ class ScenarioParameters:
             self.fom_scalar = (
                 year_count + leap_year_count / 365
             ) / year_count  # Scale average annual fom to account for leap days for PLEXOS consistency
-        else: 
+        else:
             self.fom_scalar = 1.0
         self.year_float = self.year_count * self.fom_scalar
         self.year_energy_demand = np.zeros(self.year_count, dtype=np.float64)
