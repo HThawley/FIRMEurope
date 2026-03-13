@@ -241,9 +241,9 @@ def validate_lines(lines_dict, scenarios_list, scenario_nodes, model_logger):
                 if "discount_rate" == field:
                     if not (0 <= val <= 1):
                         raise ValueError
-                elif "loss_factor" == field:
-                    if not (0 <= val < 1):
-                        raise ValueError
+                # elif "loss_factor" == field:
+                #     if not (0 <= val < 1):
+                #         raise ValueError
                 else:
                     if val < 0:
                         raise ValueError
