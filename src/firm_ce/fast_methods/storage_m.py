@@ -109,7 +109,7 @@ def load_data(
     """
     storage_instance.data = inflow_trace
     storage_instance.data_status = True
-    
+
     return None
 
 
@@ -459,6 +459,7 @@ def calculate_variable_costs(
 @njit(fastmath=FASTMATH)
 def calculate_fixed_costs(
     storage_instance: Storage_InstanceType,
+    include_existing: bool,
 ) -> float64:
     """
     Calculate the total fixed costs for a Storage system.
@@ -476,14 +477,24 @@ def calculate_fixed_costs(
     Attributes modified for the Storage instance: lt_costs.
     Attributes modified for the referenced Storage.lt_costs: annualised_build, fom.
     """
-    ltcosts_m.calculate_annualised_build(
-        storage_instance.lt_costs,
-        storage_instance.new_build_e,
-        storage_instance.new_build_p,
-        0.0,
-        storage_instance.cost,
-        "storage",
-    )
+    if include_existing:
+        ltcosts_m.calculate_annualised_build(
+            storage_instance.lt_costs,
+            storage_instance.energy_capacity,
+            storage_instance.power_capacity,
+            0.0,
+            storage_instance.cost,
+            "storage",
+        )
+    else:
+        ltcosts_m.calculate_annualised_build(
+            storage_instance.lt_costs,
+            storage_instance.new_build_e,
+            storage_instance.new_build_p,
+            0.0,
+            storage_instance.cost,
+            "storage",
+        )
     ltcosts_m.calculate_fom(
         storage_instance.lt_costs,
         storage_instance.power_capacity,

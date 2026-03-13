@@ -478,6 +478,7 @@ def calculate_variable_costs(
 @njit(fastmath=FASTMATH)
 def calculate_fixed_costs(
     generator_instance: Generator_InstanceType,
+    include_existing: bool,
 ) -> float64:
     """
     Calculate the total fixed costs for a Generator system.
@@ -495,14 +496,24 @@ def calculate_fixed_costs(
     Attributes modified for the Generator instance: lt_costs.
     Attributes modified for the referenced Generator.lt_costs: annualised_build, fom.
     """
-    ltcosts_m.calculate_annualised_build(
-        generator_instance.lt_costs,
-        0.0,
-        generator_instance.new_build,
-        0.0,
-        generator_instance.cost,
-        "generator",
-    )
+    if include_existing:
+        ltcosts_m.calculate_annualised_build(
+            generator_instance.lt_costs,
+            0.0,
+            generator_instance.capacity,
+            0.0,
+            generator_instance.cost,
+            "generator",
+        )
+    else:
+        ltcosts_m.calculate_annualised_build(
+            generator_instance.lt_costs,
+            0.0,
+            generator_instance.new_build,
+            0.0,
+            generator_instance.cost,
+            "generator",
+        )
     ltcosts_m.calculate_fom(
         generator_instance.lt_costs,
         generator_instance.capacity,

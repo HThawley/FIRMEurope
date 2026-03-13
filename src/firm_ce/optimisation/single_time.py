@@ -185,7 +185,10 @@ def balance_residual_load(solution: Solution_InstanceType) -> boolean:
 
 
 @njit(fastmath=FASTMATH)
-def calculate_fixed_costs(solution: Solution_InstanceType) -> float64:
+def calculate_fixed_costs(
+    solution: Solution_InstanceType,
+    include_existing: bool,
+) -> float64:
     """
     Calculate total fixed costs for all assets. Based upon the annualised build costs and fixed O&M costs
     incurred over the modelling horizon.
@@ -213,16 +216,16 @@ def calculate_fixed_costs(solution: Solution_InstanceType) -> float64:
     total_costs = 0.0
 
     for generator in solution.fleet.generators.values():
-        total_costs += generator_m.calculate_fixed_costs(generator)
+        total_costs += generator_m.calculate_fixed_costs(generator, include_existing)
 
     for storage in solution.fleet.storages.values():
-        total_costs += storage_m.calculate_fixed_costs(storage)
+        total_costs += storage_m.calculate_fixed_costs(storage, include_existing)
 
     for line in solution.network.major_lines.values():
-        total_costs += line_m.calculate_fixed_costs(line)
+        total_costs += line_m.calculate_fixed_costs(line, include_existing)
 
     for line in solution.network.minor_lines.values():
-        total_costs += line_m.calculate_fixed_costs(line)
+        total_costs += line_m.calculate_fixed_costs(line, include_existing)
 
     return total_costs
 
@@ -331,7 +334,7 @@ def objective(solution: Solution_InstanceType) -> tuple[float]:
     *Dynamic* or *Precharging* comments in the relevant jitclass definitions.
     """
 
-    total_costs = calculate_fixed_costs(solution)
+    total_costs = calculate_fixed_costs(solution, True)
     if not check_fixed_costs(solution, total_costs):
         return solution.lcoe, total_costs  # End early if fixed cost constraint breached
     reliability_check = balance_residual_load(solution)

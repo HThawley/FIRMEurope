@@ -170,7 +170,10 @@ def calculate_variable_costs(
 
 
 @njit(fastmath=FASTMATH)
-def calculate_fixed_costs(line_instance: Line_InstanceType) -> float64:
+def calculate_fixed_costs(
+    line_instance: Line_InstanceType,
+    include_existing: bool,
+) -> float64:
     """
     Calculate the total fixed costs for a Line system.
 
@@ -187,14 +190,25 @@ def calculate_fixed_costs(line_instance: Line_InstanceType) -> float64:
     Attributes modified for the Line instance: lt_costs.
     Attributes modified for the referenced Line.lt_costs: annualised_build, fom.
     """
-    ltcosts_m.calculate_annualised_build(
-        line_instance.lt_costs,
-        0.0,
-        line_instance.new_build,
-        line_instance.length,
-        line_instance.cost,
-        "line",
-    )
+    if include_existing:
+        ltcosts_m.calculate_annualised_build(
+            line_instance.lt_costs,
+            0.0,
+            line_instance.capacity,
+            line_instance.length,
+            line_instance.cost,
+            "line",
+        )
+    else:
+        ltcosts_m.calculate_annualised_build(
+            line_instance.lt_costs,
+            0.0,
+            line_instance.new_build,
+            line_instance.length,
+            line_instance.cost,
+            "line",
+        )
+
     ltcosts_m.calculate_fom(
         line_instance.lt_costs,
         line_instance.capacity,
