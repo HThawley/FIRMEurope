@@ -212,7 +212,7 @@ def calculate_fixed_costs(
     ltcosts_m.calculate_fom(
         line_instance.lt_costs,
         line_instance.capacity,
-        0.0,
+        line_instance.length,
         line_instance.cost,
         "line"
     )
