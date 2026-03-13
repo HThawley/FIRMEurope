@@ -7,11 +7,9 @@ from re import sub
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
-from typing import List, Callable, Any
 
 from firm_ce.common.constants import SAVE_POPULATION
-from firm_ce.common.helpers import safe_divide, safe_divide_array
-from firm_ce.fast_methods import ltcosts_m, network_m, static_m
+from firm_ce.fast_methods import static_m
 from firm_ce.analysis.accessor import Accessor
 from firm_ce.io.file_manager import ResultFile
 from firm_ce.optimisation.single_time import Solution, evaluate
@@ -65,6 +63,7 @@ class Statistics:
         meta_data_names = ("Asset ID", "Asset Name", "Asset Type", "Asset Class", "Unit Type", "Node")
 
         for asset_class in asset_classes:
+            is_node = asset_class == "nodes"
             assets = accessor.get_assets(asset_class)
             for asset in assets.values():
                 meta_data = (
@@ -72,8 +71,8 @@ class Statistics:
                     asset.name,
                     accessor.get_display_name(asset_class),
                     asset_class,
-                    getattr(asset, "unit_type", None),
-                    asset.node.name if hasattr(asset, "node") else None,
+                    getattr(asset, "unit_type", "node" if is_node else None),
+                    asset.node.name if hasattr(asset, "node") else (asset.name if is_node else None),
                 )
                 row = dict(zip(meta_data_names, meta_data))
 
@@ -116,10 +115,6 @@ class Statistics:
                     # For Generators, and Storage
                     temporal_data[(*meta_data, "Dispatch")] = accessor.get_power_trace(asset)
 
-                    # Flexible Generators (fuel limited)
-                    if accessor.is_flexible(asset):
-                        temporal_data[(*meta_data, "Energy_Remaining")] = accessor.get_remaining_energy_trace(asset)
-
                     # Batteries / Storage
                     if accessor.is_storage(asset):
                         temporal_data[(*meta_data, "Stored_Energy")] = accessor.get_storage_level_trace(asset)
@@ -129,10 +124,20 @@ class Statistics:
                     if accessor.has_inflows(asset):
                         temporal_data[(*meta_data, "Inflows")] = accessor.get_inflow_trace(asset)
 
+        for asset in accessor.get_assets('fuels').values():
+            meta_data = (
+                asset.id,
+                asset.name,
+                accessor.get_display_name(asset_class),
+                asset_class,
+                "fuel",
+                "network",
+            )
+            row = dict(zip(meta_data_names, meta_data))
+            temporal_data[(*meta_data, "Fuel_Remaining")] = accessor.get_remaining_energy_trace(asset)
+
         df_static = pd.DataFrame(static_data)
         if not df_static.empty:
-            df_static.loc[df_static["Asset Type"] == "Node", "Unit Type"] = "Node"
-
             node_mask = df_static["Asset Class"] == "nodes"
             for column in ("Power Capacity", "Energy Capacity", "Existing Power", "Existing Energy",
                            "New Build Power", "Min Build Power", "Max Build Power", "New Build Energy",
@@ -227,13 +232,15 @@ class Statistics:
         string_cols = [
             "Asset Name",
             "Asset Type",
-            "Asset Class",
+            "Unit Type",
             "Node",
         ]
 
         numeric_cols = [
             "Power Capacity",
             "Energy Capacity",
+            "Existing Power",
+            "Existing Energy",
             "New Build Power",
             "New Build Energy",
             "Min Build Power",
@@ -244,8 +251,7 @@ class Statistics:
 
         df = self.df_static.loc[:, string_cols + numeric_cols].copy()
 
-        # Convert MW -> GW
-        df[numeric_cols] = df[numeric_cols] / 1000.0
+        df[numeric_cols] = df[numeric_cols]
         df[numeric_cols] = df[numeric_cols].round(3)
         df = df.T
 
@@ -259,7 +265,7 @@ class Statistics:
         string_cols = [
             "Asset Name",
             "Asset Type",
-            "Asset Class",
+            "Unit Type",
             "Node",
         ]
 
@@ -274,680 +280,324 @@ class Statistics:
         df = self.df_static.loc[:, string_cols + numeric_columns].copy()
         df["Total Cost"] = df[numeric_columns].sum(axis=1)
 
+        all_numeric_columns = ["Total Cost"] + numeric_columns
         # Reorder to put Total Cost first
-        df = df[string_cols + ['Total Cost'] + numeric_columns]
-        df[["Total Cost"] + numeric_columns] = df[["Total Cost"] + numeric_columns].round(2)
+        df = df[string_cols + all_numeric_columns]
+        df[all_numeric_columns] = (df[all_numeric_columns] / 1e6).round(3)
+
+        for col in all_numeric_columns:
+            df[f"{col} ($/kW/year)"] = (df[col] / self.df_static["Power Capacity"]).round(3)
 
         # Filter out zero-cost rows (like Nodes)
         df = df.loc[df["Total Cost"] > 1e-6, :]
+        df = df.rename(columns=dict(zip(all_numeric_columns, [col + " (M$/year)" for col in all_numeric_columns])))
         df = df.T
 
-        return ResultFile("component_costs-proto", self.results_directory, df)
+        return ResultFile("component_costs", self.results_directory, df)
 
     def _view_energy_balance(self, aggregation: str) -> ResultFile:
         """
         View: Time Series Energy Balance.
         Units: MW (Maintained from Master)
         """
-        df = self.df_temporal.copy()
+        string_cols = [
+            "Asset Name",
+            "Asset Type",
+            "Unit Type",
+            "Node",
+            "Variable"
+        ]
 
-        if aggregation == "assets":
-            # Return full detail (flattened MultiIndex for CSV readability)
-            # You might want to sort columns by Asset Class for cleaner viewing
-            df = df.sort_index(axis=1, level="Asset Class")
+        df_t = self.df_temporal.copy().T
+        time_cols = [c for c in df_t.columns if c not in self.df_temporal.columns.names]
+
+        # Isolate Fuel_Remaining before aggregation
+        is_fuel_rem = df_t.index.get_level_values("Variable") == "Fuel_Remaining"
+        if aggregation in ("assets", "nodes"):
+            df_fuel_rem = df_t[is_fuel_rem].reset_index()
+            if not df_fuel_rem.empty:
+                df_fuel_rem = df_fuel_rem.loc[:, string_cols + time_cols].copy()
+            df_t = df_t[~is_fuel_rem]
+        else:
+            df_fuel_rem = pd.DataFrame()
+
+        if aggregation.lower() == "assets":
+            df_t = df_t.reset_index()
+            df_t = df_t.loc[:, string_cols + time_cols].copy()
 
         elif aggregation == "nodes":
-            # Group columns by Node and Variable, then Sum
-            # We group by levels [5, 6] -> [Node, Variable]
-            df = df.T.groupby(level=["Node", "Variable"]).sum()
+            is_flow = df_t.index.get_level_values("Variable") == "Flow"
+            # Group single-node variables, ignoring lines (NaN nodes drop automatically)
+            df_base = df_t[~is_flow].groupby(level=["Node", "Variable"]).sum()
 
-        elif aggregation == "network":
-            # Group columns by Variable only, then Sum
-            # We group by level [6] -> [Variable]
-            df = df.T.groupby(level="Variable").sum()
+            df_flows = df_t[is_flow]
+            if not df_flows.empty:
+                asset_names = df_flows.index.get_level_values("Asset Name")
+                # Send nodes: Negate flow (- negative values become positive)
+                df_send = pd.DataFrame(-df_flows.values, columns=df_flows.columns)
+                df_send["Node"] = [name.split("-")[0] for name in asset_names]
+                df_send["Variable"] = "Flow"
 
-        # Flatten columns for writing to CSV (ResultFile expects simple header usually)
-        # Note: If ResultFile supports MultiIndex headers, you can skip this.
-        # Otherwise, this maps the tuple headers to a string.
-        # df.columns = ["_".join(map(str, col)).strip() for col in df.columns]
+                # Receive nodes: Maintain original flow
+                df_rec = pd.DataFrame(df_flows.values, columns=df_flows.columns)
+                df_rec["Node"] = [name.split("-")[1] for name in asset_names]
+                df_rec["Variable"] = "Flow"
 
-        return ResultFile(f"energy_balance_{aggregation.upper()}", self.results_directory, df, decimals=3)
+                # Combine node base data with directional flows and sum by Node
+                df_t = pd.concat([
+                    df_base,
+                    df_send.groupby(["Node", "Variable"]).sum(),
+                    df_rec.groupby(["Node", "Variable"]).sum()
+                ]).groupby(level=["Node", "Variable"]).sum()
+            else:
+                df_t = df_base
+
+            df_t = df_t.reset_index()
+            df_t["Asset Name"] = df_t["Node"]
+            df_t["Asset Type"] = "Node"
+            df_t["Unit Type"] = "Node"
+            df_t = df_t.loc[:, string_cols + time_cols].copy()
+
+        elif aggregation.lower() == "network":
+            df_t = df_t.replace(np.inf, 0).groupby(level="Variable").sum()
+            df_t = df_t.reset_index()
+            df_t["Asset Name"] = "Network"
+            df_t["Asset Type"] = "Network"
+            df_t["Unit Type"] = "Network"
+            df_t["Node"] = "System"
+            df_t = df_t.loc[:, string_cols + time_cols].copy()
+            df_t = df_t[df_t["Variable"] != "Flow"]
+
+        var_order = [
+            'Demand', 'Deficit', 'Spillage', 'Dispatch', 'Flow', 'Discharge',
+            'Charge', 'Inflows', 'Stored_Energy', 'Fuel_Remaining'
+        ]
+        sort_map = {var: i for i, var in enumerate(var_order)}
+        df_t['_var_sort'] = df_t['Variable'].map(lambda x: sort_map.get(x, 9999))
+        asset_order = {"Node": 1, "Generator": 2, "Storage": 3}
+        df_t['_asset_sort'] = df_t['Asset Type'].map(lambda x: asset_order.get(x, 999))
+        df_t['_node_sort'] = df_t['Node'].fillna('zzzz_lines')
+
+        df_t = df_t.sort_values(['_node_sort', '_asset_sort', 'Asset Name', '_var_sort']).drop(
+            columns=['_node_sort', '_asset_sort', '_var_sort']
+        )
+
+        if not df_fuel_rem.empty:
+            df_t = pd.concat([df_t, df_fuel_rem], ignore_index=True)
+
+        df_out = df_t.rename(columns={"Variable": "Timestep"}).T
+
+        return ResultFile(f"energy_balance_{aggregation.upper()}", self.results_directory, df_out, decimals=3)
 
     def _view_summary(self) -> ResultFile:
-        """
-        View: Annual Energy Summaries.
-        Units: MWh -> GWh
-        """
         resolution = self.solution.static.resolution
 
-        # 1. Sum Energy over the full horizon
-        # Results in Series with MultiIndex
-        total_energy_mwh = self.df_temporal.sum(axis=0) * resolution
+        string_cols = [
+            "Asset Name",
+            "Asset Type",
+            "Unit Type",
+            "Node",
+            "Variable"
+        ]
 
-        # 2. Pivot to get variables as columns
-        df_sums = total_energy_mwh.unstack(level="Variable")
+        df_t = self.df_temporal.copy().T
+        df_t = df_t[~(df_t.index.get_level_values("Variable") == "Fuel_Remaining")]
+        time_cols = [c for c in df_t.columns if c not in self.df_temporal.columns.names]
+        df_t = df_t.reset_index().loc[:, string_cols + time_cols].copy()
 
-        # --- FIX: FLATTEN INDEX ---
-        # Strip the extra metadata levels so the index matches df_static ("Asset ID")
-        df_sums.index = df_sums.index.get_level_values("Asset ID")
+        df_t["Total_GWh"] = (df_t[time_cols].abs().sum(axis=1) * resolution)
+        index_cols = [col for col in string_cols if col != "Variable"]
+        df_summary = df_t.pivot_table(
+            index=index_cols,
+            columns="Variable",
+            values="Total_GWh",
+            aggfunc="sum",
+        ).fillna(0.0)
 
-        # 3. Join with Static Metadata
-        # Now the indices match perfectly (both are "Asset ID")
-        df_summary = self.df_static[["Asset Name", "Asset Type", "Asset Class"]].join(df_sums)
+        cols_to_drop = [c for c in ['Fuel_Remaining', 'Stored_Energy'] if c in df_summary.columns]
+        df_summary = df_summary.drop(columns=cols_to_drop)
 
-        # 4. Filter and Scale (MWh -> GWh)
-        numeric_cols = df_summary.select_dtypes(include=[np.number]).columns
-        df_summary[numeric_cols] = df_summary[numeric_cols]
+        if 'Inflows' in df_summary.columns:
+            # inflows is already an energy
+            df_summary['Inflows'] /= resolution
 
-        return ResultFile("summary", self.results_directory, df_summary.T, decimals=3)
+        # Reset index to bring metadata into columns
+        df_summary = df_summary.reset_index()
+
+        asset_order = {"Node": 1, "Generator": 2, "Storage": 3}
+        df_summary['_asset_sort'] = df_summary['Asset Type'].map(lambda x: asset_order.get(x, 999))
+        df_summary['_node_sort'] = df_summary['Node'].fillna('zzzz_lines')
+        df_summary = df_summary.sort_values(['_node_sort', '_asset_sort', 'Asset Name']).drop(
+            columns=['_node_sort', '_asset_sort']
+        )
+        var_order = [
+            'Demand', 'Deficit', 'Spillage', 'Dispatch', 'Flow', 'Discharge',
+            'Charge', 'Inflows'
+        ]
+        ordered_vars = [v for v in var_order if v in df_summary.columns]
+        ordered_vars += [v for v in df_summary.columns if v not in ordered_vars and v not in index_cols]
+        df_summary = df_summary[index_cols + ordered_vars].T
+
+        return ResultFile("summary", self.results_directory, df_summary, decimals=3)
 
     def _view_levelised_costs(self) -> ResultFile:
-        """
-        View: LCOE Calculations.
-        """
         resolution = self.solution.static.resolution
+        year_count = self.solution.static.year_count
 
-        # 1. Calculate System Total Energy
-        # Sum demand across all nodes
-        total_demand_mwh = self.df_temporal.xs("Demand", level="Variable", axis=1).sum().sum() * resolution
+        # Calculate Total Demand for System LCOE
+        if "Demand" in self.df_temporal.columns.get_level_values("Variable"):
+            total_demand_mwh = self.df_temporal.xs("Demand", level="Variable", axis=1).sum().sum() * resolution * 1000
+        else:
+            total_demand_mwh = 0.0
 
-        # 2. Get Asset Totals
-        # Sum time dimension * resolution -> Results in Series with MultiIndex
-        df_sums = self.df_temporal.sum(axis=0) * resolution
+        string_cols = ["Asset ID", "Asset Name", "Asset Type", "Asset Class", "Unit Type", "Node"]
 
-        # Unstack "Variable" to get columns (Dispatch, Demand, etc.)
-        # The Index is still a MultiIndex: (Asset ID, Name, Type, Class, Unit, Node)
-        df_totals = df_sums.unstack(level="Variable")
+        # 1. Temporal Aggregations (GWh)
+        df_t = self.df_temporal.copy()
+        # Take absolute value before summing (critical for capturing transmission flow correctly)
+        df_totals = (df_t.abs().sum(axis=0) * resolution).reset_index(name="Total_GWh")
 
-        # --- FIX: FLATTEN INDEX ---
-        # We strip the extra metadata levels so the index matches df_static ("Asset ID")
-        df_totals.index = df_totals.index.get_level_values("Asset ID")
+        for c in string_cols:
+            df_totals[c] = df_totals[c].fillna("None")
 
-        # 3. Merge with Costs
-        # Note: Ensure these keys match exactly what you defined in _build_master_tables.
-        # I am using the keys defined in my previous response.
-        # If your traceback showed "Annualised Build" (without Cost), update these strings to match your static keys.
-        cost_cols = [
-            "Asset Name", "Asset Type",
-            "Annualised Build", "Fixed O&M", "Variable O&M", "Fuel Cost"
-        ]
+        df_totals_pivot = df_totals.pivot_table(
+            index=string_cols,
+            columns="Variable",
+            values="Total_GWh",
+            aggfunc="sum"
+        ).fillna(0.0).reset_index()
 
-        # Now the join works because both frames are indexed strictly by "Asset ID"
-        df_lcoe = self.df_static[cost_cols].join(df_totals)
+        df_costs = self.df_static.copy().reset_index()
+        for c in string_cols:
+            if c in df_costs.columns:
+                df_costs[c] = df_costs[c].fillna("None")
 
-        # Calculate Total Discounted Cost
-        cost_numeric_cols = ["Annualised Build", "Fixed O&M", "Variable O&M", "Fuel Cost"]
-        df_lcoe["Discounted Cost [$]"] = df_lcoe[cost_numeric_cols].sum(axis=1)
+        cost_cols = ["Annualised Build", "Fixed O&M", "Variable O&M", "Fuel Cost"]
+        for c in cost_cols:
+            if c not in df_costs.columns:
+                df_costs[c] = 0.0
+            df_costs[c] = df_costs[c] / 1e6  # Convert to M$
 
-        # 4. Map standardized variables to report columns
-        # Use .get() to handle cases where a column (like "Stored Energy") might not exist in the slice
+        # 3. Merge Static and Temporal
+        df_merged = pd.merge(df_costs, df_totals_pivot, on=string_cols, how="outer").fillna(0.0)
+
         def get_col(name):
-            return df_lcoe[name] if name in df_lcoe else 0.0
+            return df_merged[name] if name in df_merged.columns else pd.Series(0.0, index=df_merged.index)
 
-        df_lcoe["Generation [MWh]"] = get_col("Dispatch")
-        # For storage, LCOB usually looks at Discharge (Dispatch) or Charge depending on definition.
-        # Assuming Dispatch (Discharge) here:
-        df_lcoe["Storage [MWh]"] = get_col("Dispatch")
-        df_lcoe["Transmission [MWh]"] = get_col("Flow").abs()
-        df_lcoe["Curtailment [MWh]"] = 0.0  # Placeholder
+        dispatch = get_col("Dispatch")
+        inflows = get_col("Inflows")
+        spillage = get_col("Spillage")
+        flow = get_col("Flow")
 
-        # 5. Calculate Metrics
-        # LCOE (System Level contribution)
-        if total_demand_mwh > 0:
-            df_lcoe["LCOE [$/MWh]"] = df_lcoe["Discounted Cost [$]"].to_numpy() / total_demand_mwh
+        # 4. Energy and Cost Metrics Mapping
+        df_merged["Generation [GWh]"] = dispatch
+        stor_mask = df_merged["Asset Type"].astype(str).str.lower() == "storage"
+        df_merged.loc[stor_mask, "Generation [GWh]"] = inflows[stor_mask]
 
-        # LCOG (Asset Level)
-        df_lcoe["LCOG [$/MWh]"] = safe_divide_array(df_lcoe["Discounted Cost [$]"].to_numpy(),
-                                                    df_lcoe["Generation [MWh]"].to_numpy())
+        df_merged["Storage [GWh]"] = 0.0
+        df_merged.loc[stor_mask, "Storage [GWh]"] = dispatch[stor_mask]
 
-        # Filter out assets with no cost AND no generation (e.g. Nodes)
-        mask = (df_lcoe["Discounted Cost [$]"] > 1e-6) | (df_lcoe["Generation [MWh]"] > 1e-6)
-        df_lcoe = df_lcoe[mask]
+        df_merged["Transmission [GWh]"] = flow
+        df_merged["Curtailment [GWh]"] = spillage
 
-        return ResultFile("levelised_costs", self.results_directory, df_lcoe.T, decimals=2)
+        df_merged.rename(columns={
+            "Annualised Build": "Annualised Build [M$/yr]",
+            "Fixed O&M": "Fixed O&M [$M/yr]",
+            "Variable O&M": "Variable O&M [M$/yr]",
+            "Fuel Cost": "Fuel Cost [M$/yr]"
+        }, inplace=True)
 
-    def generate_capacities_file(self) -> ResultFile:
-        """Generates the capacities CSV"""
-        accessor = Accessor(self.solution, "GW")
+        mapped_costs = [
+            "Annualised Build [M$/yr]", "Fixed O&M [$M/yr]",
+            "Variable O&M [M$/yr]", "Fuel Cost [M$/yr]"
+        ]
+        node_mask = df_merged["Asset Class"].astype(str).str.lower() == "nodes"
+        df_merged.loc[node_mask, mapped_costs] = 0.0
 
-        def _construct_column(asset, asset_class, column_name, column_units, attribute, index) -> pd.Series:
-            capacity = accessor.get_capacity(asset, attribute)
-            new_build, min_build, max_build = accessor.get_build_limits(asset, attribute)
+        df_merged["Total Cost [M$/yr]"] = df_merged[mapped_costs].sum(axis=1)
 
-            return pd.Series(
-                [
-                    asset.name,
-                    accessor.get_display_name(asset_class),
-                    asset.id,
-                    column_name,
-                    column_units,
-                    round(capacity, 3),
-                    round(new_build, 3),
-                    round(min_build, 3),
-                    round(max_build, 3),
-                ],
-                index=index,
-            )
+        # Helper to calculate Levelised Cost ($/MWh = M$ * 1000 / GWh)
+        def calc_lco(cost_m, energy_gwh):
+            return np.where(energy_gwh > 1e-6, (cost_m * 1000) / energy_gwh, 0.0)
 
-        def append_asset(df: pd.DataFrame, asset_class: str, attribute: str) -> pd.DataFrame:
-            """Add all assets in an asset class (generators, reservoirs, ...) to the capacities DataFrame"""
+        df_merged["LCOG [$/MWh]"] = calc_lco(df_merged["Total Cost [M$/yr]"] * year_count, df_merged["Generation [GWh]"])
+        df_merged["LCOS [$/MWh]"] = calc_lco(df_merged["Total Cost [M$/yr]"] * year_count, df_merged["Storage [GWh]"])
+        df_merged["LCOT [$/MWh]"] = calc_lco(df_merged["Total Cost [M$/yr]"] * year_count, df_merged["Transmission [GWh]"])
+        df_merged["LCOE [$/MWh]"] = 0.0
 
-            match attribute.lower():
-                case "power":
-                    column_name, column_units = "Power Capacity", "[GW]"
-                case "energy":
-                    column_name, column_units = "Energy Capacity", "[GWh]"
-                case _:
-                    raise ValueError(f"'attribute should be 'energy' or 'power'. Got '{attribute}'.")
-
-            df = pd.concat(
-                (
-                    df,
-                    pd.concat(
-                        (
-                            _construct_column(asset, asset_class, column_name, column_units, attribute, df.index)
-                            for asset in accessor.get_assets(asset_class).values()
-                        ),
-                        axis=1,
-                    ),
-                ),
-                axis=1,
-            )
-            return df
-
-        df = pd.DataFrame(
-            index=[
-                "Asset Name",
-                "Asset Type",
-                "Asset ID",
-                "Column Name",
-                "Column Units",
-                "Total Capacity",
-                "New Build Capacity",
-                "Min Build",
-                "Max Build",
+        # 5. Build Aggregations (Nodal & System)
+        def aggregate_rows(df_sub, name, asset_type, unit_type, node, is_system=False):
+            agg = {
+                "Asset Name": name, "Asset Type": asset_type,
+                "Unit Type": unit_type, "Node": node
+            }
+            cols_to_sum = mapped_costs + [
+                "Generation [GWh]", "Storage [GWh]", "Transmission [GWh]", "Curtailment [GWh]", "Total Cost [M$/yr]"
             ]
-        )
-        df = append_asset(df, "generators", "power")
-        df = append_asset(df, "storages", "power")
-        df = append_asset(df, "storages", "energy")
-        df = append_asset(df, "major_lines", "power")
-        df = append_asset(df, "minor_lines", "power")
+            for c in cols_to_sum:
+                agg[c] = df_sub[c].sum()
 
-        result_file = ResultFile("capacities", self.results_directory, df, decimals=3)
-        return result_file
+            gen, stor, trans = agg["Generation [GWh]"], agg["Storage [GWh]"], agg["Transmission [GWh]"]
 
-    def generate_component_costs_file(self) -> ResultFile:
-        def _construct_column(asset: Any, asset_class: str, index: pd.Index) -> pd.Series:
-            return pd.Series(
-                [
-                    asset.name,
-                    Accessor.get_display_name(asset_class),
-                    asset.id,
-                    "Total Cost",
-                    "[$]",
-                    round(asset.lt_costs.annualised_build, 3),
-                    round(asset.lt_costs.fom, 3),
-                    round(asset.lt_costs.vom, 3),
-                    round(asset.lt_costs.fuel, 3),
-                ],
-                index=index,
-            )
+            # Weighted sums for Levelised Costs
+            agg["LCOG [$/MWh]"] = (df_sub["LCOG [$/MWh]"] * df_sub["Generation [GWh]"]).sum() / gen if gen > 1e-6 else 0.0
+            agg["LCOS [$/MWh]"] = (df_sub["LCOS [$/MWh]"] * df_sub["Storage [GWh]"]).sum() / stor if stor > 1e-6 else 0.0
+            agg["LCOT [$/MWh]"] = (df_sub["LCOT [$/MWh]"] * df_sub["Transmission [GWh]"]).sum() / trans if trans > 1e-6 else 0.0
 
-        def append_asset(
-            df: pd.DataFrame,
-            asset_class: str,
-        ) -> pd.DataFrame:
-            """Add all assets of an asset class to the DataFrame"""
-            df = pd.concat(
-                (
-                    df,
-                    pd.concat(
-                        (
-                            _construct_column(asset, asset_class, df.index)
-                            for asset in Accessor.get_assets_from_solution(self.solution, asset_class).values()
-                        ),
-                        axis=1,
-                    ),
-                ),
-                axis=1,
-            )
-            return df
+            if is_system:
+                agg["LCOE [$/MWh]"] = (
+                    (agg["Total Cost [M$/yr]"] * 1e6 * year_count) / total_demand_mwh
+                    if total_demand_mwh > 1e-6 else 0.0
+                )
+            else:
+                agg["LCOE [$/MWh]"] = 0.0
 
-        df = pd.DataFrame(
-            index=[
-                "Asset Name",
-                "Asset Type",
-                "Asset ID",
-                "Column Name",
-                "Column Units",
-                "Annualised Build",
-                "Fixed O&M",
-                "Variable O&M",
-                "Fuel",
-            ]
-        )
-        df = append_asset(df, "generators")
-        df = append_asset(df, "storages")
-        df = append_asset(df, "major_lines")
-        df = append_asset(df, "minor_lines")
+            return pd.Series(agg)
 
-        result_file = ResultFile("component_costs", self.results_directory, df, decimals=2)
-        return result_file
+        nodes_list = []
+        for node_val, group in df_merged.groupby("Node"):
+            if pd.notna(node_val) and str(node_val).lower() not in ("system", "network"):
+                nodes_list.append(aggregate_rows(group, node_val, "Node", "Node", node_val))
 
-    def generate_energy_balance_file(self, aggregation_type: str) -> List[ResultFile]:
-        accessor = Accessor(self.solution, "MW")
+        df_nodes = pd.DataFrame(nodes_list) if nodes_list else pd.DataFrame()
+        df_system = pd.DataFrame([aggregate_rows(df_merged, "System", "System", "System", "System", is_system=True)])
 
-        def _construct_column(
-            asset: Any,
-            asset_class: str,
-            column_name: str,
-            column_units: str,
-            time_series_getter: Callable,
-            index: pd.Index,
-        ) -> pd.Series:
-            series = pd.concat(
-                (
-                    pd.Series(
-                        [asset.name, accessor.get_display_name(asset_class), asset.id, column_name, column_units]
-                    ),
-                    pd.Series(time_series_getter(asset)),
-                ),
-                ignore_index=True,
-            )
-            series.index = index
-            return series
+        # Remove the base node assets to prevent duplication (we use df_nodes instead)
+        mask_non_base_node = df_merged["Asset Class"].astype(str).str.lower() != "nodes"
+        df_assets = df_merged[mask_non_base_node].copy()
 
-        def append_series(
-            df: pd.DataFrame,
-            aggregation: str,
-            asset_class: str,
-            column_name: str,
-            column_units: str,
-            time_series_getter: Callable,
-            condition: Callable = Accessor.is_any,
-        ) -> pd.DataFrame:
-            """
-            Add an (aggregated) time series feature (power trace, etc.) of all assets of an asset class
-            to the DataFrame
-            """
-            match aggregation:
-                case "asset":
-                    for asset in accessor.get_assets(asset_class).values():
-                        if not condition(asset):
-                            continue
-                        df = pd.concat(
-                            (
-                                df,
-                                _construct_column(
-                                    asset, asset_class, column_name, column_units, time_series_getter, df.index
-                                ),
-                            ),
-                            axis=1,
-                        )
-                    return df
+        df_final = pd.concat([df_system, df_nodes, df_assets], ignore_index=True)
 
-                case "node":
-                    for node in accessor.get_assets("nodes").values():
-                        column = pd.Series(0, index=df.index, dtype=object)
-                        column.iloc[:5] = (
-                            node.name,
-                            accessor.get_display_name(asset_class),
-                            node.id,
-                            column_name,
-                            column_units,
-                        )
-                        for asset in accessor.get_assets(asset_class).values():
-                            if not condition(asset) or asset.node.id != node.id:
-                                continue
-                            column.iloc[5:] += _construct_column(
-                                asset, asset_class, column_name, column_units, time_series_getter, df.index
-                            ).iloc[5:]
-                        df = pd.concat((df, column), axis=1)
-                    return df
+        # Force Left-to-Right layout: System (0), Nodal aggregates (1), Assets (2), Lines (3)
+        def get_sort_category(row):
+            if row["Asset Name"] == "System":
+                return 0
+            elif str(row["Asset Class"]).lower() == "major_lines" or str(row["Asset Type"]).lower() in ("line", "major line"):
+                return 3
+            elif row["Asset Type"] == "Node":
+                return 1
+            else:
+                return 2
 
-                case "network":
-                    column = pd.Series(0, index=df.index, dtype=object)
-                    column.iloc[:5] = "Network", "Network", 0, column_name, column_units
-                    for asset in accessor.get_assets(asset_class).values():
-                        if not condition(asset):
-                            continue
-                        column.iloc[5:] += _construct_column(
-                            asset, asset_class, column_name, column_units, time_series_getter, df.index
-                        ).iloc[5:]
-                    df = pd.concat((df, column), axis=1)
-                    return df
+        df_final['_sort_cat'] = df_final.apply(get_sort_category, axis=1)
+        df_final['_node_val'] = df_final['Node'].replace("None", "zzzz")
+        df_final['_asset_type'] = df_final['Asset Type']
+        df_final['_asset_name'] = df_final['Asset Name']
 
-        df = pd.concat(
-            (
-                pd.DataFrame(index=["Asset Name", "Asset Type", "Asset ID", "Column Name", "Column Units"]),
-                pd.DataFrame(index=pd.RangeIndex(self.full_intervals_count)),
-            )
+        df_final = df_final.sort_values(['_sort_cat', '_node_val', '_asset_type', '_asset_name']).drop(
+            columns=['_sort_cat', '_node_val', '_asset_type', '_asset_name']
         )
 
-        match aggregation_type:
-            case "assets":
-                df = append_series(df, "asset", "nodes", "Demand", "[MW]", accessor.get_power_trace)
-                df = append_series(df, "asset", "generators", "Dispatch", "[MW]", accessor.get_power_trace)
-                df = append_series(df, "asset", "storages", "Storage Dispatch", "[MW]", accessor.get_power_trace)
-                df = append_series(
-                    df,
-                    "asset",
-                    "generators",
-                    "Flexible Remaining",
-                    "[MWh]",
-                    accessor.get_remaining_energy_trace,
-                    condition=Accessor.is_flexible,
-                )
-                df = append_series(df, "asset", "storages", "Stored Energy", "[MWh]", accessor.get_storage_level_trace)
-                df = append_series(df, "asset", "nodes", "Spillage", "[MW]", accessor.get_spillage_trace)
-                df = append_series(df, "asset", "nodes", "Deficit", "[MW]", accessor.get_deficit_trace)
-                df = append_series(df, "asset", "major_lines", "Flow", "[MW]", accessor.get_transmission_trace)
-
-            case "nodes":
-                df = append_series(df, "asset", "nodes", "Demand", "[MW]", accessor.get_power_trace)
-                df = append_series(
-                    df, "node", "generators", "Solar", "[MW]", accessor.get_power_trace, condition=Accessor.is_solar
-                )
-                df = append_series(
-                    df, "node", "generators", "Wind", "[MW]", accessor.get_power_trace, condition=Accessor.is_wind
-                )
-                df = append_series(
-                    df,
-                    "node",
-                    "generators",
-                    "Run-of-river",
-                    "[MW]",
-                    accessor.get_power_trace,
-                    condition=Accessor.is_ror,
-                )
-                df = append_series(
-                    df,
-                    "node",
-                    "generators",
-                    "Baseload",
-                    "[MW]",
-                    accessor.get_power_trace,
-                    condition=Accessor.is_baseload,
-                )
-                df = append_series(
-                    df,
-                    "node",
-                    "generators",
-                    "Flexible Dispatch",
-                    "[MW]",
-                    accessor.get_power_trace,
-                    condition=Accessor.is_flexible,
-                )
-                df = append_series(df, "node", "storages", "Storage Dispatch", "[MW]", accessor.get_power_trace)
-                df = append_series(
-                    df,
-                    "node",
-                    "generators",
-                    "Flexible Remaining",
-                    "[MWh]",
-                    accessor.get_remaining_energy_trace,
-                    condition=Accessor.is_flexible,
-                )
-                df = append_series(df, "node", "storages", "Stored Energy", "[MWh]", accessor.get_storage_level_trace)
-                df = append_series(df, "node", "storages", "Reservoir Inflow", "[MWh]", accessor.get_inflow_trace, condition=Accessor.has_inflows)
-                df = append_series(df, "asset", "nodes", "Spillage", "[MW]", accessor.get_spillage_trace)
-                df = append_series(df, "asset", "nodes", "Deficit", "[MW]", accessor.get_deficit_trace)
-                df = append_series(df, "asset", "major_lines", "Flow", "[MW]", accessor.get_transmission_trace)
-
-            case "network":
-                df = append_series(df, "network", "nodes", "Demand", "[MW]", accessor.get_power_trace)
-                df = append_series(
-                    df, "network", "generators", "Solar", "[MW]", accessor.get_power_trace, condition=Accessor.is_solar
-                )
-                df = append_series(
-                    df, "network", "generators", "Wind", "[MW]", accessor.get_power_trace, condition=Accessor.is_wind
-                )
-                df = append_series(
-                    df, "network", "generators", "Ror", "[MW]", accessor.get_power_trace, condition=Accessor.is_ror
-                )
-                df = append_series(
-                    df,
-                    "network",
-                    "generators",
-                    "Baseload",
-                    "[MW]",
-                    accessor.get_power_trace,
-                    condition=Accessor.is_baseload,
-                )
-                df = append_series(
-                    df,
-                    "network",
-                    "generators",
-                    "Flexible Dispatch",
-                    "[MW]",
-                    accessor.get_power_trace,
-                    condition=Accessor.is_flexible,
-                )
-                df = append_series(df, "network", "storages", "Storage Dispatch", "[MW]", accessor.get_power_trace)
-                df = append_series(
-                    df,
-                    "network",
-                    "generators",
-                    "Flexible Remaining",
-                    "[MWh]",
-                    accessor.get_remaining_energy_trace,
-                    condition=Accessor.is_flexible,
-                )
-                df = append_series(
-                    df, "network", "storages", "Stored Energy", "[MWh]", accessor.get_storage_level_trace
-                )
-                df = append_series(df, "network", "storages", "Reservoir Inflow", "[MWh]", accessor.get_inflow_trace, Accessor.has_inflows)
-                df = append_series(df, "network", "nodes", "Spillage", "[MW]", accessor.get_spillage_trace)
-                df = append_series(df, "network", "nodes", "Deficit", "[MW]", accessor.get_deficit_trace)
-
-        result_file = ResultFile(f"energy_balance_{aggregation_type.upper()}", self.results_directory, df, decimals=3)
-
-        return result_file
-
-    def generate_levelised_costs_file(self) -> ResultFile:
-
-        accessor = Accessor(self.solution, "GW")
-
-        def get_ltcost(asset):
-            return ltcosts_m.get_total(asset.lt_costs)  # $
-
-        def append_asset(
-            df: pd.DataFrame,
-            asset_class: str,
-            cost_getter: Callable = get_ltcost,
-            generation_getter: Callable = Accessor.get_zero,
-            storage_getter: Callable = Accessor.get_zero,
-            transmission_getter: Callable = Accessor.get_zero,
-            curtailment_getter: Callable = Accessor.get_zero,
-            loss_getter: Callable = Accessor.get_zero,
-            condition: Callable = Accessor.is_any,
-        ) -> pd.DataFrame:
-            for asset in accessor.get_assets(asset_class).values():
-                if not condition(asset):
-                    continue
-                column = pd.Series(index=df.index, dtype=object)
-                column["Asset Name"] = asset.name
-                column["Asset Type"] = accessor.get_display_name(asset_class)
-                column["Asset ID"] = asset.id
-                column["Discounted Cost [$]"] = cost_getter(asset)
-                column["Generation [MWh]"] = generation_getter(asset)
-                column["Storage [MWh]"] = storage_getter(asset)
-                column["Transmission [MWh]"] = transmission_getter(asset)
-                column["Curtailment [MWh]"] = curtailment_getter(asset)
-                column["Loss [MWh]"] = loss_getter(asset)
-                column["LCOE [$/MWh]"] = safe_divide(column["Discounted Cost [$]"], total_energy)
-                column["LCOG [$/MWh]"] = safe_divide(column["Discounted Cost [$]"], column["Generation [MWh]"])
-                column["LCOB storage"] = safe_divide(column["Discounted Cost [$]"], column["Storage [MWh]"])
-                column["LCOB transmission"] = safe_divide(column["Discounted Cost [$]"], column["Transmission [MWh]"])
-                column["LCOB spillage & loss"] = 0.0
-                column["LCOB [$/MWh]"] = (
-                    column["LCOB storage"] + column["LCOB transmission"] + column["LCOB spillage & loss"]
-                )
-                df = pd.concat((df, column), axis=1)
-            return df
-
-        def append_system_placeholder(df: pd.DataFrame) -> pd.DataFrame:
-            df_to_join = pd.DataFrame(["System", "", "", *(0,) * 12], index=df.index)
-            df = pd.concat((df, df_to_join), axis=1)
-            return df
-
-        df = pd.DataFrame(
-            index=[
-                "Asset Name",
-                "Asset Type",
-                "Asset ID",
-                "Discounted Cost [$]",
-                "Generation [MWh]",
-                "Storage [MWh]",
-                "Transmission [MWh]",
-                "Curtailment [MWh]",
-                "Loss [MWh]",
-                "LCOE [$/MWh]",
-                "LCOG [$/MWh]",
-                "LCOB [$/MWh]",
-                "LCOB storage",
-                "LCOB transmission",
-                "LCOB spillage & loss",
-            ],
-            dtype=object,
-        )
-
-        total_energy = 1000 * abs(
-            sum(self.solution.static.year_energy_demand) - network_m.calculate_lt_line_losses(self.solution.network)
-        )  # MWh
-        total_generation = (
-            1000
-            * self.solution.static.resolution
-            * sum(
-                sum(generator.dispatch_power)
-                for generator in self.solution.fleet.generators.values()
-                if generator.is_flexible
-            )
-        )  # MWh
-        total_generation += (
-            1000
-            * self.solution.static.resolution
-            * sum(
-                sum(generator.data * generator.capacity)
-                for generator in self.solution.fleet.generators.values()
-                if not generator.is_flexible
-            )
-        )  # MWh
-        df = append_system_placeholder(df)
-        df = append_asset(
-            df,
-            "generators",
-            generation_getter=accessor.get_energy_net,
-            curtailment_getter=accessor.get_nominal_curtailment_net,
-        )
-        df = append_asset(
-            df,
-            "storages",
-            storage_getter=accessor.get_discharge_net,
-            curtailment_getter=accessor.get_nominal_curtailment_net,
-            loss_getter=accessor.get_storage_losses,
-        )
-        df = append_asset(df, "major_lines", transmission_getter=accessor.get_line_use_net)
-        df = append_asset(df, "major_lines", transmission_getter=accessor.get_line_use_net)
-
-        df.columns = pd.RangeIndex(len(df.columns))
-        for row in (
-            "Discounted Cost [$]",
-            "Generation [MWh]",
-            "Storage [MWh]",
-            "Transmission [MWh]",
-            "Curtailment [MWh]",
-            "Loss [MWh]",
-        ):
-            df.loc[row, 0] = sum(df.loc[row, :])
-
-        first_mask = np.ones(len(df.columns), dtype=bool)
-        first_mask[0] = False
-        df.loc["LCOE [$/MWh]", 0] = safe_divide(df.loc["Discounted Cost [$]", 0], total_energy)
-        df.loc["LCOG [$/MWh]", 0] = safe_divide(
-            sum(df.loc["Discounted Cost [$]", (df.loc["Generation [MWh]"] > 0) & first_mask]),
-            df.loc["Generation [MWh]", 0],
-        )
-        df.loc["LCOB [$/MWh]", 0] = df.loc["LCOE [$/MWh]", 0] - df.loc["LCOG [$/MWh]", 0]
-        df.loc["LCOB storage", 0] = safe_divide(
-            sum(df.loc["Discounted Cost [$]", (df.loc["Storage [MWh]"] > 0) & first_mask]),
-            total_energy,
-        )
-        df.loc["LCOB transmission", 0] = safe_divide(
-            sum(df.loc["Discounted Cost [$]", (df.loc["Transmission [MWh]"] > 0) & first_mask]),
-            total_energy,
-        )
-        df.loc["LCOB spillage & loss", 0] = (
-            df.loc["LCOB [$/MWh]", 0] - df.loc["LCOB storage", 0] - df.loc["LCOB transmission", 0]
-        )
-
-        result_file = ResultFile("levelised_costs", self.results_directory, df, decimals=2)
-        return result_file
-
-    def generate_summary_file(self) -> ResultFile:
-        accessor = Accessor(self.solution, "GW")
-        year_indices = [
-            static_m.get_year_t_boundaries(self.solution.static, year)
-            for year in range(self.solution.static.year_count)
+        keep_cols = [
+            "Asset Name", "Asset Type", "Unit Type", "Node", "Total Cost [M$/yr]",
+            "Annualised Build [M$/yr]", "Fixed O&M [$M/yr]", "Variable O&M [M$/yr]", "Fuel Cost [M$/yr]",
+            "Generation [GWh]", "Storage [GWh]", "Transmission [GWh]", "Curtailment [GWh]",
+            "LCOG [$/MWh]", "LCOS [$/MWh]", "LCOT [$/MWh]", "LCOE [$/MWh]"
         ]
 
-        def _construct_column(
-            asset: Any, asset_class: str, column_name: str, time_series_getter: Callable, index: pd.Index
-        ) -> pd.Series:
-            full_trace = time_series_getter(asset)
-            return pd.Series(
-                [
-                    asset.name,
-                    accessor.get_display_name(asset_class),
-                    asset.id,
-                    column_name,
-                    "[GWh]",
-                    *tuple(sum(full_trace[slice(*idx)]) for idx in year_indices),
-                    sum(full_trace),
-                ],
-                index=index,
-            )
+        df_final = df_final[keep_cols].T
 
-        def append_asset(
-            df: pd.DataFrame,
-            asset_class: str,
-            column_name: str,
-            time_series_getter: Callable,
-            condition: Callable = Accessor.is_any,
-        ) -> pd.DataFrame:
-            """Add all assets of an asset class to the DataFrame"""
-            for asset in accessor.get_assets(asset_class).values():
-                if not condition(asset):
-                    continue
-                df = pd.concat(
-                    (df, _construct_column(asset, asset_class, column_name, time_series_getter, df.index)), axis=1
-                )
-
-            return df
-
-        df = pd.DataFrame(
-            index=[
-                "Asset Name",
-                "Asset Type",
-                "Asset ID",
-                "Column Name",
-                "Column Units",
-                *tuple(range(self.solution.static.first_year, self.solution.static.final_year + 1)),
-                "Total",
-            ]
-        )
-
-        df = append_asset(df, "nodes", "Annual Demand", accessor.get_power_trace)
-        df = append_asset(df, "generators", "Annual Generation", accessor.get_power_trace)
-        df = append_asset(df, "storages", "Annual Dispatch", accessor.get_discharge_trace)
-        df = append_asset(df, "storages", "Annual Inflows", accessor.get_inflow_trace, condition=Accessor.has_inflows)
-        df = append_asset(df, "nodes", "Node", accessor.get_spillage_trace)
-        df = append_asset(df, "nodes", "Node", accessor.get_deficit_trace)
-        df = append_asset(df, "major_lines", "Flow", accessor.get_transmission_trace)
-
-        result_file = ResultFile("summary", self.results_directory, df, decimals=3)
-        return result_file
+        return ResultFile("levelised_costs", self.results_directory, df_final, decimals=3)
 
     def generate_x_file(self) -> ResultFile:
         result_file = ResultFile(

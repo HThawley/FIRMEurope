@@ -11,6 +11,7 @@ asset_class_to_display = {
     "major_lines": "Major Line",
     "minor_lines": "Minor Line",
     "nodes": "Node",
+    "fuels": "Fuel",
 }
 
 
@@ -55,6 +56,10 @@ class Accessor:
         if hasattr(asset, "inflows"):
             return asset.inflows
         return False
+
+    @staticmethod
+    def is_fuel(asset: Any) -> bool:
+        return asset.object_class == "fuel"
 
     @staticmethod
     def is_solar(asset: Any) -> bool:
@@ -109,7 +114,7 @@ class Accessor:
     def get_assets_from_solution(solution, asset_class: str) -> dict[str, Any]:
         """Static method version of get_assets."""
         match asset_class:
-            case "generators" | "storages":
+            case "generators" | "storages" | "fuels":
                 return getattr(solution.fleet, asset_class)
             case "major_lines" | "minor_lines" | "nodes":
                 return getattr(solution.network, asset_class)
@@ -398,12 +403,12 @@ class Accessor:
 
     def get_remaining_energy_trace(self, asset: Any) -> NDArray[np.float64]:
         """
-        Returns the remaining energy (MWh) for flexible generators with fuel constraints.
+        Returns the remaining energy (GWh) for fuels.
         """
-        if not self.is_generator(asset) or not self.is_flexible(asset):
-            raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a flexible Generator "
+        if not self.is_fuel(asset):
+            raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a fuel "
                              "and has no 'remaining_energy' attr.")
-        return asset.fuel.remaining_energy * self.factor
+        return asset.remaining_energy * self.factor
 
     def get_nodal_generation_trace(self, asset: Any) -> NDArray[np.float64]:
         """

@@ -201,7 +201,7 @@ class ResultFile:
             return self.data
         return self.data.map(self._round_value)
 
-    def write(self):
+    def write(self, **write_kwargs):
         """
         Write the data to a file based on file type.
 
@@ -218,15 +218,15 @@ class ResultFile:
         <target_directory>/<file_type>.<file_ext> and prints a confirmation message.
         """
         if self.file_ext == "csv":
-            self.write_csv()
+            self.write_csv(**write_kwargs)
         elif self.file_ext == "xlsx":
-            self.write_xlsx()
+            self.write_xlsx(**write_kwargs)
         # elif self.file_ext == "json":
             # self.write_json()
         else:
             raise NotImplementedError("Only 'csv', 'xlsx' are currently supported.")
 
-    def write_csv(self):
+    def write_csv(self, **write_kwargs):
         """
         Write the data to a CSV file.
 
@@ -252,16 +252,19 @@ class ResultFile:
         for k, v in self.write_kwargs.items():
             # overwrite default kwargs with user-supplied kwargs
             default_kwargs[k] = v
+        for k, v in write_kwargs.items():
+            # overwrite __init__ supplied kwargs with user-supplied kwargs
+            default_kwargs[k] = v
 
         if self.decimals is not None:
-            self._round_data()
+            self.data = self._round_data()
 
         self.data.to_csv(self.file_path, **default_kwargs)
 
         print(f"Saved {self.report} to {self.target_directory}")
         return None
 
-    def write_xlsx(self):
+    def write_xlsx(self, **write_kwargs):
         """
         Write the data to an Excel file.
 
@@ -288,9 +291,12 @@ class ResultFile:
         for k, v in self.write_kwargs.items():
             # overwrite default kwargs with user-supplied kwargs
             default_kwargs[k] = v
+        for k, v in write_kwargs.items():
+            # overwrite __init__ supplied kwargs with user-supplied kwargs
+            default_kwargs[k] = v
 
         if self.decimals is not None:
-            self._round_data()
+            self.data = self._round_data()
 
         with pd.ExcelWriter(self.file_path, mode=default_kwargs.pop("mode")) as writer:
             self.data.to_excel(writer, **default_kwargs)
