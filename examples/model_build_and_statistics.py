@@ -39,10 +39,10 @@ for scenario in model.scenarios.values():
     )
     scenario.statistics.generate_result_files()
     scenario.statistics.write_results()
-    break
-    # scenario.validation = Validation(scenario)
-    # scenario.validation.validate(verbose=False)
-    # scenario.validation.write_results()
+
+    scenario.validation = Validation(scenario)
+    scenario.validation.validate(verbose=True)
+    scenario.validation.dum_logs()
 
     # display = Display(scenario, model.config)
     # display.plot_energy_mix(mode="atlas", chart_type="bar", indices=[0, 1, 2])

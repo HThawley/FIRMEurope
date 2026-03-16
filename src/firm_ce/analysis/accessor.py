@@ -286,13 +286,13 @@ class Accessor:
                 if errors == 'raise':
                     raise ValueError(f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity.")
                 elif errors == 'coerce':
-                    return (np.nan, np.nan, np.nan)
+                    return (np.nan, np.nan, np.nan, np.nan)
                 raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
             case _:
                 if errors == 'raise':
                     raise ValueError(f"Unknown asset type for build limits (energy) retrieval: {asset.name} ({asset.object_class})")
                 elif errors == 'coerce':
-                    return (np.nan, np.nan, np.nan)
+                    return (np.nan, np.nan, np.nan, np.nan)
                 raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
 
     def get_build(self, asset: Any, attribute: str, errors: str = 'raise') -> tuple[float, float, float]:
@@ -305,10 +305,55 @@ class Accessor:
             case _:
                 raise ValueError(f"Unknown attribute for build limits retrieval: '{attribute}'")
 
+    # -- Other static attributes --
+    @staticmethod
+    def get_charge_efficiency(asset: Any) -> float:
+        """
+        Returns the charge efficiency for a storage asset.
+        """
+        if hasattr(asset, "charge_efficiency"):
+            return asset.charge_efficiency
+        raise ValueError(f"Unknown asset type for charge efficiency retrival: {asset.name} ({asset.object_class})")
+
+    @staticmethod
+    def get_discharge_efficiency(asset: Any) -> float:
+        """
+        Returns the discharge efficiency for a storage asset.
+        """
+        if hasattr(asset, "discharge_efficiency"):
+            return asset.discharge_efficiency
+        raise ValueError(f"Unknown asset type for discharge efficiency retrival: {asset.name} ({asset.object_class})")
+
+    @staticmethod
+    def get_transm_efficiency(asset: Any) -> float:
+        """
+        Returns the efficiency of a transmission line or route
+        """
+        if hasattr(asset, "efficiency"):
+            return asset.efficiency
+        raise ValueError(f"Unknown asset type for efficiency retrival: {asset.name} ({asset.object_class})")
+
+    def get_efficiency(self, asset: Any, attribute: str = None) -> float:
+        """
+        Returns the efficiency of an asset
+        """
+        match asset.object_class:
+            case "line" | "route":
+                return self.get_transm_efficiency(asset)
+            case "storage":
+                if attribute == "charge":
+                    return self.get_charge_efficiency(asset)
+                elif attribute == "discharge":
+                    return self.get_discharge_efficiency(asset)
+                else:
+                    ValueError("Cannot retreive efficiency of storage object. Supply 'attribute'='charge' or 'discharge' or use"
+                               "dedicated functions 'get_charge_efficiency' and 'get_discharge_efficiency'")
+        raise ValueError(f"Unknown asset type for efficiency retrival: {asset.name} ({asset.object_class})")
+
     # -- Traces --
     def get_power_trace(self, asset: Any) -> NDArray[np.float64]:
         """
-        Returns the power output time series (MW) for an object.
+        Returns the power output time series for an object.
         """
         match asset.object_class:
             case "generator":
