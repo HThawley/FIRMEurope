@@ -45,7 +45,7 @@ class Validation:
     def validate(self, verbose: bool = True) -> None:
         if not self.solution.evaluated:
             raise RuntimeError("Solution must be evaluated before validation")
-        self.verbose = verbose 
+        self.verbose = verbose
         self.result_files = {
             "energy_balance_ASSETS": self.validate_energy_balance("assets"),
             "energy_balance_NODES": self.validate_energy_balance("nodes"),

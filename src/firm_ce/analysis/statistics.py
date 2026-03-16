@@ -128,8 +128,8 @@ class Statistics:
             meta_data = (
                 asset.id,
                 asset.name,
-                accessor.get_display_name(asset_class),
-                asset_class,
+                accessor.get_display_name('fuels'),
+                'fuels',
                 "fuel",
                 "network",
             )
@@ -200,16 +200,15 @@ class Statistics:
             if not hasattr(self, "df_static"):
                 self.df_static, self.df_temporal = self._build_master_tables()
 
-        self.result_files = {
-            "capacities": self._view_capacities(),
-            "component_costs": self._view_component_costs(),
-            "energy_balance_ASSETS": self._view_energy_balance("assets"),
-            "energy_balance_NODES": self._view_energy_balance("nodes"),
-            "energy_balance_NETWORK": self._view_energy_balance("network"),
-            "levelised_costs": self._view_levelised_costs(),
-            "summary": self._view_summary(),
-            "x": self.generate_x_file(),
-        }
+        self.result_files = {}
+        self.result_files["capacities"] = self._view_capacities()
+        self.result_files["component_costs"] = self._view_component_costs()
+        self.result_files["energy_balance_ASSETS"] = self._view_energy_balance("assets")
+        self.result_files["energy_balance_NODES"] = self._view_energy_balance("nodes")
+        self.result_files["energy_balance_NETWORK"] = self._view_energy_balance("network")
+        self.result_files["levelised_costs"] = self._view_levelised_costs()
+        self.result_files["summary"] = self._view_summary()
+        self.result_files["x"] = self.generate_x_file()
 
         self.statistics_generated = True
         return None
@@ -296,84 +295,131 @@ class Statistics:
         return ResultFile("component_costs", self.results_directory, df)
 
     def _view_energy_balance(self, aggregation: str) -> ResultFile:
-        """
-        View: Time Series Energy Balance.
-        Units: MW (Maintained from Master)
-        """
-        string_cols = [
-            "Asset Name",
-            "Asset Type",
-            "Unit Type",
-            "Node",
-            "Variable"
-        ]
+        string_cols = ["Asset Name", "Asset Type", "Unit Type", "Node", "Variable"]
 
-        df_t = self.df_temporal.copy().T
-        time_cols = [c for c in df_t.columns if c not in self.df_temporal.columns.names]
+        df_temporal = self.df_temporal.copy()
+        levels_to_drop = [name for name in df_temporal.columns.names if name not in string_cols]
+        if levels_to_drop:
+            df_temporal.columns = df_temporal.columns.droplevel(levels_to_drop).reorder_levels(string_cols)
 
-        # Isolate Fuel_Remaining before aggregation
-        is_fuel_rem = df_t.index.get_level_values("Variable") == "Fuel_Remaining"
+        cols = df_temporal.columns
+
+        accessor = Accessor(self.solution, "GW")
+        eff_dict = {a.name: getattr(a, 'efficiency', 1.0) for a in accessor.get_assets('major_lines').values()}
+
+        is_fuel_rem = cols.get_level_values("Variable") == "Fuel_Remaining"
+        is_flow = cols.get_level_values("Variable") == "Flow"
+
+        df_flows = df_temporal.loc[:, is_flow]
+        df_base = df_temporal.loc[:, ~(is_flow | is_fuel_rem)]
+
         if aggregation in ("assets", "nodes"):
-            df_fuel_rem = df_t[is_fuel_rem].reset_index()
-            if not df_fuel_rem.empty:
-                df_fuel_rem = df_fuel_rem.loc[:, string_cols + time_cols].copy()
-            df_t = df_t[~is_fuel_rem]
+            df_fuel_rem = df_temporal.loc[:, is_fuel_rem]
         else:
             df_fuel_rem = pd.DataFrame()
 
         if aggregation.lower() == "assets":
-            df_t = df_t.reset_index()
-            df_t = df_t.loc[:, string_cols + time_cols].copy()
+            if not df_flows.empty:
+                asset_names = df_flows.columns.get_level_values("Asset Name")
+                effs = np.array([eff_dict.get(a, 1.0) for a in asset_names])
+
+                f_val = df_flows.values
+                node_A = [str(n).split("-")[0] for n in asset_names]
+                node_B = [str(n).split("-")[1] for n in asset_names]
+
+                # Positive f_val: A -> B. Node A exports (-f_val), Node B imports (+f_val * effs)
+                # Negative f_val: B -> A. Node B exports (f_val), Node A imports (-f_val * effs)
+                val_A = np.where(f_val > 0, -f_val, -f_val * effs)
+                val_B = np.where(f_val > 0, f_val * effs, f_val)
+
+                idx_Node = string_cols.index("Node")
+                idx_Variable = string_cols.index("Variable")
+
+                tuples_A, tuples_B = [], []
+                for i, t in enumerate(df_flows.columns):
+                    t_A, t_B = list(t), list(t)
+                    t_A[idx_Node], t_B[idx_Node] = node_A[i], node_B[i]
+                    t_A[idx_Variable], t_B[idx_Variable] = "Flow", "Flow"
+                    tuples_A.append(tuple(t_A))
+                    tuples_B.append(tuple(t_B))
+
+                df_A = pd.DataFrame(val_A, index=df_temporal.index, columns=pd.MultiIndex.from_tuples(tuples_A, names=string_cols))
+                df_B = pd.DataFrame(val_B, index=df_temporal.index, columns=pd.MultiIndex.from_tuples(tuples_B, names=string_cols))
+
+                df_res = pd.concat([df_base, df_A, df_B], axis=1)
 
         elif aggregation == "nodes":
-            is_flow = df_t.index.get_level_values("Variable") == "Flow"
-            # Group single-node variables, ignoring lines (NaN nodes drop automatically)
-            df_base = df_t[~is_flow].groupby(level=["Node", "Variable"]).sum()
+            df_res = df_base.groupby(level=["Node", "Variable"], axis=1).sum()
 
-            df_flows = df_t[is_flow]
             if not df_flows.empty:
-                asset_names = df_flows.index.get_level_values("Asset Name")
-                # Send nodes: Negate flow (- negative values become positive)
-                df_send = pd.DataFrame(-df_flows.values, columns=df_flows.columns)
-                df_send["Node"] = [name.split("-")[0] for name in asset_names]
-                df_send["Variable"] = "Flow"
+                asset_names = df_flows.columns.get_level_values("Asset Name")
+                effs = np.array([eff_dict[a] for a in asset_names])
 
-                # Receive nodes: Maintain original flow
-                df_rec = pd.DataFrame(df_flows.values, columns=df_flows.columns)
-                df_rec["Node"] = [name.split("-")[1] for name in asset_names]
-                df_rec["Variable"] = "Flow"
+                f_val = df_flows.values
+                node_A = [str(n).split("-")[0] for n in asset_names]
+                node_B = [str(n).split("-")[1] for n in asset_names]
 
-                # Combine node base data with directional flows and sum by Node
-                df_t = pd.concat([
-                    df_base,
-                    df_send.groupby(["Node", "Variable"]).sum(),
-                    df_rec.groupby(["Node", "Variable"]).sum()
-                ]).groupby(level=["Node", "Variable"]).sum()
-            else:
-                df_t = df_base
+                f_pos, f_neg = np.where(f_val > 0, f_val, 0), np.where(f_val < 0, -f_val, 0)
 
-            df_t = df_t.reset_index()
-            df_t["Asset Name"] = df_t["Node"]
-            df_t["Asset Type"] = "Node"
-            df_t["Unit Type"] = "Node"
-            df_t = df_t.loc[:, string_cols + time_cols].copy()
+                # Construct column vectors for accumulation
+                df_A_exp = - pd.DataFrame(f_pos, index=df_temporal.index)
+                df_A_exp.columns = pd.MultiIndex.from_arrays([node_A, ["Net_Exports"]*len(node_A)], names=["Node", "Variable"])
+
+                df_B_imp = pd.DataFrame(f_pos * effs, index=df_temporal.index)
+                df_B_imp.columns = pd.MultiIndex.from_arrays([node_B, ["Net_Imports"]*len(node_B)], names=["Node", "Variable"])
+
+                df_B_exp = - pd.DataFrame(f_neg, index=df_temporal.index)
+                df_B_exp.columns = pd.MultiIndex.from_arrays([node_B, ["Net_Exports"]*len(node_B)], names=["Node", "Variable"])
+
+                df_A_imp = pd.DataFrame(f_neg * effs, index=df_temporal.index)
+                df_A_imp.columns = pd.MultiIndex.from_arrays([node_A, ["Net_Imports"]*len(node_A)], names=["Node", "Variable"])
+
+                df_flow_nodes = pd.concat([df_A_exp, df_A_imp, df_B_exp, df_B_imp], axis=1)
+                df_flow_nodes = df_flow_nodes.groupby(level=["Node", "Variable"], axis=1).sum()
+
+                df_res = pd.concat([df_res, df_flow_nodes], axis=1).groupby(level=["Node", "Variable"], axis=1).sum()
+
+            # Restore expected metadata levels
+            new_cols = []
+            for node, var in df_res.columns:
+                new_cols.append((node, "Node", "Node", node, var))
+            df_res.columns = pd.MultiIndex.from_tuples(new_cols, names=string_cols)
 
         elif aggregation.lower() == "network":
-            df_t = df_t.replace(np.inf, 0).groupby(level="Variable").sum()
-            df_t = df_t.reset_index()
-            df_t["Asset Name"] = "Network"
-            df_t["Asset Type"] = "Network"
-            df_t["Unit Type"] = "Network"
-            df_t["Node"] = "System"
-            df_t = df_t.loc[:, string_cols + time_cols].copy()
-            df_t = df_t[df_t["Variable"] != "Flow"]
+            df_res = df_base.replace(np.inf, 0).groupby(level="Variable", axis=1).sum()
+
+            if not df_flows.empty:
+                asset_names = df_flows.columns.get_level_values("Asset Name")
+                effs = np.array([eff_dict.get(a, 1.0) for a in asset_names])
+                f_abs = np.abs(df_flows.values)
+
+                df_net_flows = pd.DataFrame({
+                    "Power_Into_Lines": f_abs.sum(axis=1),
+                    "Power_Out_Of_Lines": (f_abs * effs).sum(axis=1)
+                }, index=df_temporal.index)
+                df_net_flows.columns.name = "Variable"
+
+                df_res = pd.concat([df_res, df_net_flows], axis=1)
+
+            new_cols = []
+            for var in df_res.columns:
+                new_cols.append(("Network", "Network", "Network", "System", var))
+            df_res.columns = pd.MultiIndex.from_tuples(new_cols, names=string_cols)
+
+        if not df_fuel_rem.empty:
+            df_res = pd.concat([df_res, df_fuel_rem], axis=1)
+
+        df_t = df_res.T.reset_index()
 
         var_order = [
-            'Demand', 'Deficit', 'Spillage', 'Dispatch', 'Flow', 'Discharge',
-            'Charge', 'Inflows', 'Stored_Energy', 'Fuel_Remaining'
+            'Demand', 'Deficit', 'Spillage', 'Dispatch', 'Flow', 'Line_Input_Power',
+            'Line_Output_Power', 'Net_Imports', 'Net_Exports', 'Power_Into_Lines',
+            'Power_Out_Of_Lines', 'Discharge', 'Charge', 'Inflows',
+            'Stored_Energy', 'Fuel_Remaining'
         ]
         sort_map = {var: i for i, var in enumerate(var_order)}
         df_t['_var_sort'] = df_t['Variable'].map(lambda x: sort_map.get(x, 9999))
+
         asset_order = {"Node": 1, "Generator": 2, "Storage": 3}
         df_t['_asset_sort'] = df_t['Asset Type'].map(lambda x: asset_order.get(x, 999))
         df_t['_node_sort'] = df_t['Node'].fillna('zzzz_lines')
@@ -381,9 +427,6 @@ class Statistics:
         df_t = df_t.sort_values(['_node_sort', '_asset_sort', 'Asset Name', '_var_sort']).drop(
             columns=['_node_sort', '_asset_sort', '_var_sort']
         )
-
-        if not df_fuel_rem.empty:
-            df_t = pd.concat([df_t, df_fuel_rem], ignore_index=True)
 
         df_out = df_t.rename(columns={"Variable": "Timestep"}).T
 
@@ -617,3 +660,12 @@ class Statistics:
             ["Intervals per Block"],
             self.solution.static.block_lengths.reshape(-1, 1),
         ).write()
+
+
+def set_level_values_safe(mi, level_name, value):
+    # Helper to map a single value to a specific level in a MultiIndex without dropping others
+    idx = mi.names.index(level_name)
+    new_tuples = [list(t) for t in mi]
+    for t in new_tuples:
+        t[idx] = value
+    return pd.MultiIndex.from_tuples(new_tuples, names=mi.names)
