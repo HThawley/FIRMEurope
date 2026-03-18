@@ -8,6 +8,5 @@ id,scenarios,filename,datafile_type,units
 6,all,pondage_inflows.csv,inflow,MWh
 7,all,reservoir_inflows.csv,inflow,MWh
 8,all,ol-phes_inflows.csv,inflow,MWh
-9,all,nuclear.csv,generation,CF
 10,"test,base",fuel_constraints_base.csv,fuel_constraint,GWh
 11,zerocarbon,fuel_constraints_zc.csv,fuel_constraint,GWh

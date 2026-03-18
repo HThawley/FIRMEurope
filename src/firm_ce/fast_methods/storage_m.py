@@ -317,13 +317,17 @@ def dispatch(
     if merit_order_idx == 0:
         storage_instance.dispatch_power[interval] = max(
             min(
-                storage_instance.node.netload_t - storage_instance.node.flexible_power[interval],
+                storage_instance.node.netload_t
+                - storage_instance.node.loadfollow_power[interval]
+                - storage_instance.node.flexible_power[interval],
                 storage_instance.discharge_max_t,
             ),
             0.0,
         ) + min(
             max(
-                storage_instance.node.netload_t - storage_instance.node.flexible_power[interval],
+                storage_instance.node.netload_t
+                - storage_instance.node.loadfollow_power[interval],
+                - storage_instance.node.flexible_power[interval],
                 -storage_instance.charge_max_t,
             ),
             0.0,
@@ -332,6 +336,7 @@ def dispatch(
         storage_instance.dispatch_power[interval] = max(
             min(
                 storage_instance.node.netload_t
+                - storage_instance.node.loadfollow_power[interval]
                 - storage_instance.node.flexible_power[interval]
                 - storage_instance.node.discharge_max_t[merit_order_idx - 1],
                 storage_instance.discharge_max_t,
@@ -340,6 +345,7 @@ def dispatch(
         ) + min(
             max(
                 storage_instance.node.netload_t
+                - storage_instance.node.loadfollow_power[interval]
                 - storage_instance.node.flexible_power[interval]
                 + storage_instance.node.charge_max_t[merit_order_idx - 1],
                 -storage_instance.charge_max_t,

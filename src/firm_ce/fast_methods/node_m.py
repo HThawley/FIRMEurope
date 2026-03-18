@@ -209,7 +209,8 @@ def update_netload_t(
 
     if precharging_flag:
         node_instance.netload_t -= (
-            node_instance.storage_power[interval]
+            node_instance.loadfollow_power[interval]
+            + node_instance.storage_power[interval]
             + node_instance.flexible_power[interval]
         )
     return None
@@ -291,6 +292,40 @@ def assign_storage_merit_order(
 
 
 @njit(fastmath=FASTMATH)
+def assign_loadfollow_merit_order(
+    node_instance: Node_InstanceType,
+    generators_typed_dict: DictType(int64, Generator_InstanceType),
+) -> None:
+    generators_count = len(generators_typed_dict)
+    temp_orders = np.full(generators_count, -1, dtype=np.int64)
+    temp_marginal_costs = np.full(generators_count, -1, dtype=np.float64)
+
+    idx = 0
+    for generator_order, generator in generators_typed_dict.items():
+        if not generator.is_loadfollow:
+            continue
+
+        if generator.node.order == node_instance.order:
+            temp_orders[idx] = generator_order
+            temp_marginal_costs[idx] = (
+                generator.cost.vom
+                + generator.cost.fuel_cost_mwh
+                + generator.cost.fuel_cost_h * 1000 * generator.unit_size
+            )
+            idx += 1
+
+    if idx == 0:
+        return
+
+    temp_orders = temp_orders[:idx]
+    temp_marginal_costs = temp_marginal_costs[:idx]
+
+    sort_order = np.argsort(temp_marginal_costs)
+    node_instance.loadfollow_merit_order = temp_orders[sort_order]
+    return None
+
+
+@njit(fastmath=FASTMATH)
 def assign_flexible_merit_order(
     node_instance: Node_InstanceType,
     generators_typed_dict: DictType(int64, Generator_InstanceType),
@@ -302,6 +337,8 @@ def assign_flexible_merit_order(
     idx = 0
     for generator_order, generator in generators_typed_dict.items():
         if not generator.is_flexible:
+            continue
+        if generator.is_baseload:
             continue
 
         if generator.node.order == node_instance.order:
@@ -348,6 +385,7 @@ def check_remaining_netload(
     """
     _imbalance = (
         node_instance.netload_t
+        - node_instance.loadfollow_power[interval]
         - node_instance.storage_power[interval]
         - node_instance.flexible_power[interval]
     )
@@ -410,6 +448,11 @@ def reset_dispatch_max_t(
     -------
     Attributes modified for each Node in Network.nodes: discharge_max_t, charge_max_t, flexible_max_t.
     """
+    if len(node_instance.loadfollow_merit_order) > 0:
+        node_instance.loadfollow_max_t = np.zeros(len(node_instance.loadfollow_merit_order), dtype=np.float64)
+    else:
+        node_instance.loadfollow_max_t = np.zeros(1, dtype=np.float64)
+
     if len(node_instance.storage_merit_order) > 0:
         node_instance.discharge_max_t = np.zeros(len(node_instance.storage_merit_order), dtype=np.float64)
         node_instance.charge_max_t = np.zeros(len(node_instance.storage_merit_order), dtype=np.float64)

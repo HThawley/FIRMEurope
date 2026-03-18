@@ -704,6 +704,7 @@ def determine_feasible_storage_dispatch(
 def determine_feasible_flexible_dispatch(
     fleet_instance: Fleet_InstanceType,
     interval: int64,
+    resolution: float64,
 ) -> boolean:
     """
     Determine whether the flexible Generator dispatch_powers for a time interval calculated during reverse time precharging are
@@ -729,8 +730,13 @@ def determine_feasible_flexible_dispatch(
         if not generator.is_flexible:
             continue
         original_dispatch_power = generator.dispatch_power[interval]
-        generator.dispatch_power[interval] = min(original_dispatch_power, generator.flexible_max_t)
-        dispatch_power_adjustment = original_dispatch_power - generator.dispatch_power[interval]
+
+        max_power = min(generator.capacity, generator.fuel.remaining_energy[interval] / resolution)
+        min_power = max(original_dispatch_power, generator.baseload_min_op)
+        new_power = min(min_power, max_power)
+        dispatch_power_adjustment = original_dispatch_power - new_power
+        generator.dispatch_power[interval] = new_power
+
         if abs(dispatch_power_adjustment) > TOLERANCE:
             generator.node.flexible_power[interval] -= dispatch_power_adjustment
             infeasible_flag = True

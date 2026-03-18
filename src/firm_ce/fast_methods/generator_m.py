@@ -34,6 +34,8 @@ def create_dynamic_copy(
         generator_instance.capacity,
         generator_instance.unit_type,
         generator_instance.is_flexible,
+        generator_instance.is_baseload,
+        generator_instance.baseload_min_op_pct,
         generator_instance.near_optimum_check,
         node_copy,
         fuel_dynamic_copy,  # This does not always remain static but must be updated at the same time as everything else
@@ -61,6 +63,8 @@ def build_capacity(
     generator_instance.capacity += new_build_power_capacity
     generator_instance.new_build += new_build_power_capacity
     generator_instance.heat_base_consumption = generator_instance.capacity * generator_instance.cost.heat_rate_base  # GWh/h
+    generator_instance.baseload_min_op = generator_instance.baseload_min_op_pct * generator_instance.capacity
+
     generator_instance.line.capacity += new_build_power_capacity
     generator_instance.line.new_build += new_build_power_capacity
 
@@ -245,8 +249,10 @@ def set_flexible_max_t(
     merit_order_idx: int64,
     forward_time_flag: boolean,
 ) -> None:
-    advertised_limit = min(generator_instance.capacity, generator_instance.fuel.allocated_energy / resolution)
-    generator_instance.flexible_max_t = advertised_limit
+    max_upward = max(generator_instance.capacity - generator_instance.dispatch_power[interval], 0.0)
+    advertised_limit = min(max_upward, generator_instance.fuel.allocated_energy / resolution)
+
+    generator_instance.flexible_max_t = generator_instance.dispatch_power[interval] + advertised_limit
     generator_instance.fuel.allocated_energy -= advertised_limit * resolution
 
     if merit_order_idx == 0:
@@ -259,7 +265,30 @@ def set_flexible_max_t(
 
 
 @njit(fastmath=FASTMATH)
-def set_precharging_max_t(
+def set_loadfollow_max_t(
+    generator_instance: Generator_InstanceType,
+    interval: int64,
+    resolution: float64,
+    merit_order_idx: int64,
+    forward_time_flag: boolean,
+) -> None:
+    max_upward = max(generator_instance.capacity - generator_instance.dispatch_power[interval], 0.0)
+    advertised_limit = min(max_upward, generator_instance.fuel.allocated_energy / resolution)
+
+    generator_instance.loadfollow_max_t = generator_instance.dispatch_power[interval] + advertised_limit
+    generator_instance.fuel.allocated_energy -= advertised_limit * resolution
+
+    if merit_order_idx == 0:
+        generator_instance.node.loadfollow_max_t[0] = generator_instance.loadfollow_max_t
+    else:
+        generator_instance.node.loadfollow_max_t[merit_order_idx] = (
+            generator_instance.node.loadfollow_max_t[merit_order_idx - 1] + generator_instance.loadfollow_max_t
+        )
+    return None
+
+
+@njit(fastmath=FASTMATH)
+def set_precharging_flexible_max_t(
     generator_instance: Generator_InstanceType,
     interval: int64,
     resolution: float64,
@@ -285,6 +314,32 @@ def set_precharging_max_t(
 
 
 @njit(fastmath=FASTMATH)
+def set_precharging_loadfollow_max_t(
+    generator_instance: Generator_InstanceType,
+    interval: int64,
+    resolution: float64,
+    merit_order_idx: int64,
+) -> None:
+    if generator_instance.fuel.trickling_flag:
+        advertised_limit = min(
+            generator_instance.fuel.allocated_trickling / resolution,
+            generator_instance.capacity - generator_instance.dispatch_power[interval],
+        )
+        generator_instance.loadfollow_max_t = advertised_limit
+        generator_instance.fuel.allocated_trickling -= advertised_limit * resolution
+    else:
+        generator_instance.loadfollow_max_t = 0.0
+
+    if merit_order_idx == 0:
+        generator_instance.node.loadfollow_max_t[0] = generator_instance.loadfollow_max_t
+    else:
+        generator_instance.node.loadfollow_max_t[merit_order_idx] = (
+            generator_instance.node.loadfollow_max_t[merit_order_idx - 1] + generator_instance.loadfollow_max_t
+        )
+    return None
+
+
+@njit(fastmath=FASTMATH)
 def set_live_flexible_max_t(
     generator_instance: Generator_InstanceType,
     interval: int64,
@@ -304,7 +359,26 @@ def set_live_flexible_max_t(
 
 
 @njit(fastmath=FASTMATH)
-def set_live_trickling_max_t(
+def set_live_loadfollow_max_t(
+    generator_instance: Generator_InstanceType,
+    interval: int64,
+    resolution: float64,
+    forward_time_flag: boolean,
+) -> None:
+    if forward_time_flag:
+        live_pool = generator_instance.fuel.remaining_energy[interval]
+    else:
+        live_pool = generator_instance.fuel.remaining_energy_temp_reverse
+
+    generator_instance.loadfollow_max_t = min(
+        generator_instance.capacity,
+        generator_instance.dispatch_power[interval] + (live_pool / resolution)
+    )
+    return None
+
+
+@njit(fastmath=FASTMATH)
+def set_live_trickling_flexible_max_t(
     generator_instance: Generator_InstanceType,
     interval: int64,
     resolution: float64,
@@ -316,6 +390,27 @@ def set_live_trickling_max_t(
         )
         # Note: Delta limit for dispatch_power_update
         generator_instance.flexible_max_t = min(
+            generator_instance.capacity - generator_instance.dispatch_power[interval],
+            live_remaining_trickling / resolution
+        )
+    else:
+        generator_instance.flexible_max_t = 0.0
+    return None
+
+
+@njit(fastmath=FASTMATH)
+def set_live_trickling_loadfollow_max_t(
+    generator_instance: Generator_InstanceType,
+    interval: int64,
+    resolution: float64,
+) -> None:
+    if generator_instance.fuel.trickling_flag:
+        live_remaining_trickling = max(
+            generator_instance.fuel.remaining_energy[interval] - generator_instance.fuel.trickling_reserves,
+            0.0
+        )
+        # Note: Delta limit for dispatch_power_update
+        generator_instance.loadfollow_max_t = min(
             generator_instance.capacity - generator_instance.dispatch_power[interval],
             live_remaining_trickling / resolution
         )
@@ -341,7 +436,7 @@ def update_fuel_reserve(
 
 
 @njit(fastmath=FASTMATH)
-def dispatch(
+def dispatch_flexible(
     generator_instance: Generator_InstanceType,
     interval: int64,
     merit_order_idx: int64,
@@ -376,6 +471,7 @@ def dispatch(
         new_power = min(
             max(
                 generator_instance.node.netload_t
+                - generator_instance.node.loadfollow_power[interval]
                 - generator_instance.node.storage_power[interval],
                 0.0
             ),
@@ -385,6 +481,7 @@ def dispatch(
         new_power = min(
             max(
                 generator_instance.node.netload_t
+                - generator_instance.node.loadfollow_power[interval]
                 - generator_instance.node.storage_power[interval]
                 - generator_instance.node.flexible_max_t[merit_order_idx - 1],
                 0.0,
@@ -401,6 +498,70 @@ def dispatch(
     generator_instance.node.flexible_power[interval] += new_power
 
     generator_instance.node.flexible_max_t[merit_order_idx:] -= delta_power
+    update_fuel_reserve(generator_instance, interval, resolution, delta_power, forward_time_flag)
+
+    return None
+
+
+@njit(fastmath=FASTMATH)
+def dispatch_loadfollow(
+    generator_instance: Generator_InstanceType,
+    interval: int64,
+    merit_order_idx: int64,
+    resolution: float64,
+    forward_time_flag: boolean,
+) -> None:
+    """
+    Dispatches the flexible Generator according to its place in the merit order for the Generator.node.
+    The total flexible power at that node is also updated according to the dispatch of the Generator.
+
+    Parameters:
+    -------
+    generator_instance (Generator_InstanceType): An instance of the Generator jitclass.
+    interval (int64): Index for the time interval during unit committment.
+    merit_order_idx (int64): Location of the flexible Generator in the merit order at the Generator.node.
+        Lower merit_order_idx indicates lower variable costs and higher priority in the merit order.
+
+    Returns:
+    -------
+    None.
+
+    Side-effects:
+    -------
+    Attributes modified for the flexible Generator instance: dispatch_power, node.
+    Attributes modified for referenced Generator.node: flexible_power.
+    """
+    prev_power = generator_instance.dispatch_power[interval]
+
+    set_live_loadfollow_max_t(generator_instance, interval, resolution, forward_time_flag)
+
+    if merit_order_idx == 0:
+        new_power = min(
+            max(
+                generator_instance.node.netload_t,
+                0.0
+            ),
+            generator_instance.loadfollow_max_t,
+        )
+    else:
+        new_power = min(
+            max(
+                generator_instance.node.netload_t
+                - generator_instance.node.loadfollow_max_t[merit_order_idx - 1],
+                0.0,
+            ),
+            generator_instance.loadfollow_max_t,
+        )
+
+    delta_power = new_power - prev_power
+
+    if abs(delta_power) <= TOLERANCE:
+        return None
+
+    generator_instance.dispatch_power[interval] = new_power
+    generator_instance.node.loadfollow_power[interval] += new_power
+
+    generator_instance.node.loadfollow_max_t[merit_order_idx:] -= delta_power
     update_fuel_reserve(generator_instance, interval, resolution, delta_power, forward_time_flag)
 
     return None
@@ -526,7 +687,7 @@ def calculate_fixed_costs(
 
 
 @njit(fastmath=FASTMATH)
-def update_precharge_dispatch(
+def update_precharge_flexible_dispatch(
     generator_instance: Generator_InstanceType,
     interval: int64,
     resolution: float64,
@@ -537,6 +698,23 @@ def update_precharge_dispatch(
     generator_instance.node.flexible_power[interval] += dispatch_power_update
 
     generator_instance.node.flexible_max_t[merit_order_idx:] -= dispatch_power_update
+    generator_instance.node.precharge_surplus -= dispatch_power_update
+
+    return None
+
+
+@njit(fastmath=FASTMATH)
+def update_precharge_loadfollow_dispatch(
+    generator_instance: Generator_InstanceType,
+    interval: int64,
+    resolution: float64,
+    dispatch_power_update: float64,
+    merit_order_idx: int64,
+) -> None:
+    generator_instance.dispatch_power[interval] += dispatch_power_update
+    generator_instance.node.loadfollow_power[interval] += dispatch_power_update
+
+    generator_instance.node.loadfollow_max_t[merit_order_idx:] -= dispatch_power_update
     generator_instance.node.precharge_surplus -= dispatch_power_update
 
     return None

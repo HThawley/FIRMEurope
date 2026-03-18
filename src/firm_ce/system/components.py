@@ -122,6 +122,10 @@ if JIT_ENABLED:
         ("line", Line_InstanceType),
         ("unit_type", unicode_type),
         ("is_flexible", boolean),
+        ("is_baseload", boolean),
+        ("is_loadfollow", boolean),
+        ("baseload_min_op_pct", float64),
+        ("baseload_min_op", float64),
         ("near_optimum_check", boolean),
         ("group", unicode_type),
         ("cost", UnitCost_InstanceType),
@@ -133,6 +137,7 @@ if JIT_ENABLED:
         ("capacity", float64),
         ("dispatch_power", float64[:]),
         ("flexible_max_t", float64),
+        ("loadfollow_max_t", float64),
         ("lt_generation", float64),
         ("unit_lt_hours", float64),
         ("lt_costs", LTCosts_InstanceType),
@@ -208,6 +213,8 @@ class Generator:
         capacity: float64,
         unit_type: unicode_type,
         is_flexible: boolean,
+        is_baseload: boolean,
+        baseload_min_op_pct: boolean,
         near_optimum_check: boolean,
         node: Node_InstanceType,
         fuel: Fuel_InstanceType,
@@ -238,6 +245,10 @@ class Generator:
         self.initial_capacity = capacity  # GW
         self.unit_type = unit_type
         self.is_flexible = is_flexible
+        self.is_baseload = is_baseload
+        self.is_loadfollow = is_baseload and is_flexible
+        self.baseload_min_op_pct = baseload_min_op_pct
+        self.baseload_min_op = 0.0
         self.near_optimum_check = near_optimum_check
         self.node = node
         self.fuel = fuel

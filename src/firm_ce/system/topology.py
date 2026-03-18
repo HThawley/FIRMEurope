@@ -21,10 +21,12 @@ if JIT_ENABLED:
         # Dynamic
         ("storage_merit_order", int64[:]),
         ("flexible_merit_order", int64[:]),
+        ("loadfollow_merit_order", int64[:]),
         ("netload_t", float64),
         ("discharge_max_t", float64[:]),
         ("charge_max_t", float64[:]),
         ("flexible_max_t", float64[:]),
+        ("loadfollow_max_t", float64[:]),
         ("fill", float64),
         ("surplus", float64),
         ("temp_surplus", float64),
@@ -33,6 +35,7 @@ if JIT_ENABLED:
         ("deficits", float64[:]),
         ("spillage", float64[:]),
         ("flexible_power", float64[:]),
+        ("loadfollow_power", float64[:]),
         ("storage_power", float64[:]),
         # Precharging
         ("imports_exports_temp", float64),
@@ -130,6 +133,7 @@ class Node:
 
         # Dynamic
         self.flexible_merit_order = np.empty((0,), dtype=np.int64)
+        self.loadfollow_merit_order = np.empty((0,), dtype=np.int64)
         self.storage_merit_order = np.empty((0,), dtype=np.int64)
         self.netload_t = 0.0  # GW
         self.discharge_max_t = np.empty((0,), dtype=np.float64)  # GW

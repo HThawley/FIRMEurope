@@ -1,7 +1,7 @@
 # type: ignore
 from firm_ce.common.constants import FASTMATH, TOLERANCE
 from firm_ce.common.jit_overload import njit
-from firm_ce.common.typing import boolean, float64, int64, unicode_type
+from firm_ce.common.typing import boolean, float64, int64
 from firm_ce.fast_methods import (
     fleet_m,
     generator_m,
@@ -60,13 +60,18 @@ def initialise_interval(
     for node in network.nodes.values():
         node_m.initialise_netload_t(node, interval)
         node_m.reset_dispatch_max_t(node)
-
+        for idx, loadfollow_order in enumerate(node.loadfollow_merit_order):
+            generator_m.set_loadfollow_max_t(
+                fleet.generators[loadfollow_order], interval, resolution, idx, forward_time_flag
+            )
         for idx, flexible_order in enumerate(node.flexible_merit_order):
             generator_m.set_flexible_max_t(
                 fleet.generators[flexible_order], interval, resolution, idx, forward_time_flag
             )
         for idx, storage_order in enumerate(node.storage_merit_order):
-            storage_m.set_dispatch_max_t(fleet.storages[storage_order], interval, resolution, idx, forward_time_flag)
+            storage_m.set_dispatch_max_t(
+                fleet.storages[storage_order], interval, resolution, idx, forward_time_flag
+            )
     return None
 
 
@@ -74,7 +79,6 @@ def initialise_interval(
 def balance_with_transmission(
     interval: int64,
     network: Network_InstanceType,
-    transmission_case: unicode_type,
     precharging_flag: boolean,
 ) -> None:
     """
@@ -105,7 +109,6 @@ def balance_with_transmission(
         route length) contained in Network.routes: flow_update, initial_node, nodes, lines.
     Attributes modified for all Line instances Network.lines: temp_leg_flows, flows.
     """
-    network_m.set_node_fills_and_surpluses(network, transmission_case, interval)
     network_m.fill_with_transmitted_surpluses(network, interval)
     network_m.update_netloads(network, interval, precharging_flag)
 
@@ -191,7 +194,79 @@ def balance_with_flexible(
             continue
         node.flexible_power[interval] = 0
         for idx, flexible_order in enumerate(node.flexible_merit_order):
-            generator_m.dispatch(fleet.generators[flexible_order], interval, idx, resolution, forward_time_flag)
+            generator_m.dispatch_flexible(fleet.generators[flexible_order], interval, idx, resolution, forward_time_flag)
+    return None
+
+
+@njit(fastmath=FASTMATH)
+def balance_with_loadfollow(
+    interval: int64,
+    network: Network_InstanceType,
+    fleet: Fleet_InstanceType,
+    resolution: float64,
+    forward_time_flag: boolean,
+) -> None:
+    """
+    Dispatch loadfollow Generators according to the merit order at each Node to balance remaining netload.
+    Positive netload can be balanced by loadfollow Generators.
+
+    Notes:
+    -----
+    - Nodes that have no remaining power deficits for balancing are skipped.
+    - Nodal loadfollow power is reset before dispatching the loadfollow Generators.
+
+    Parameters:
+    -------
+    interval (int64): Index of the time interval to balance.
+    network (Network_InstanceType): An instance of the Network jitclass.
+    fleet (Fleet_InstanceType): An instance of the Fleet jitclass.
+
+    Returns:
+    -------
+    None.
+
+    Side-effects:
+    -------
+    Attributes modified for Nodes in Network.nodes: loadfollow_power.
+    Attributes modified for the Generators in Fleet.generators: dispatch_power, node.
+    """
+    for node in network.nodes.values():
+        if not node_m.check_remaining_netload(node, interval, "deficit"):
+            continue
+        node.loadfollow_power[interval] = 0
+        for idx, loadfollow_order in enumerate(node.loadfollow_merit_order):
+            generator_m.dispatch_loadfollow(fleet.generators[loadfollow_order], interval, idx, resolution, forward_time_flag)
+    return None
+
+
+@njit(fastmath=FASTMATH)
+def enforce_must_run(
+    interval: int64,
+    network: Network_InstanceType,
+    fleet: Fleet_InstanceType,
+    resolution: float64,
+    forward_time_flag: boolean,
+) -> None:
+    """Enforces minimum load rules for dual-flagged load-following generators."""
+    for node in network.nodes.values():
+        for idx, loadfollow_order in enumerate(node.loadfollow_merit_order):
+            generator = fleet.generators[loadfollow_order]
+            if generator.is_loadfollow:
+                if forward_time_flag:
+                    fuel_avail = generator.fuel.remaining_energy[interval] / resolution
+                else:
+                    fuel_avail = generator.fuel.remaining_energy_temp_reverse / resolution
+
+                actual_must_run = min(generator.baseload_min_op, fuel_avail)
+                if actual_must_run > TOLERANCE:
+                    # Allocate power to the generator
+                    generator.dispatch_power[interval] += actual_must_run
+                    node.loadfollow_power[interval] += actual_must_run
+                    # Deduct the must-run portion directly from the node's netload
+                    node.netload_t -= actual_must_run
+                    # Claim available upward capacity dynamically
+                    node.loadfollow_max_t[idx:] -= actual_must_run
+                    generator_m.update_fuel_reserve(generator, interval, resolution, actual_must_run, forward_time_flag)
     return None
 
 
@@ -247,28 +322,47 @@ def energy_balance_for_interval(
         solution.static.interval_resolutions[interval],
         forward_time_flag,
     )
+
+    enforce_must_run(
+        interval,
+        solution.network,
+        solution.fleet,
+        solution.static.interval_resolutions[interval],
+        forward_time_flag
+    )
+
     # Check deficits
     if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
+        network_m.set_node_fills_and_surpluses(solution.network, "surplus", interval)
         # Transmit energy from nodes in surplus to nodes in deficit
-        balance_with_transmission(interval, solution.network, "surplus", False)
-        balance_with_storage(interval, solution.network, solution.fleet)  # Local storage
+        balance_with_transmission(interval, solution.network, False)
 
     if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
-        # Discharge local storage to balance remaining deficits
-        balance_with_transmission(interval, solution.network, "storage_discharge", False)
-        balance_with_storage(interval, solution.network, solution.fleet)  # Neighbouring and local storage
+        network_m.set_node_fills_and_surpluses(solution.network, "load_follow", interval)
+        # Run local load-following generators to balance remaining deficits
+        balance_with_loadfollow(interval, solution.network, solution.fleet, solution.static.resolution, forward_time_flag)
+        # Run local storages to balance remaining deficits
+        balance_with_storage(interval, solution.network, solution.fleet)
+
+    if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
+        network_m.set_node_fills_and_surpluses(solution.network, "storage_discharge", interval)
+        # Discharge neighbouring storage to balance remaining deficits
+        balance_with_transmission(interval, solution.network, False)
+        balance_with_storage(interval, solution.network, solution.fleet)
         # Local flexible
         balance_with_flexible(interval, solution.network, solution.fleet, solution.static.resolution, forward_time_flag)
 
     if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
-        balance_with_transmission(interval, solution.network, "flexible", False)
+        network_m.set_node_fills_and_surpluses(solution.network, "flexible", interval)
+        balance_with_transmission(interval, solution.network, False)
         # Neighbouring and local flexible
         balance_with_flexible(interval, solution.network, solution.fleet, solution.static.resolution, forward_time_flag)
 
-    # check suurpluses
+    # check surpluses
     if network_m.check_remaining_netloads(solution.network, interval, "spillage"):
+        network_m.set_node_fills_and_surpluses(solution.network, "storage_charge", interval)
         # export surpluses to neighbours who can use it
-        balance_with_transmission(interval, solution.network, "storage_charge", False)
+        balance_with_transmission(interval, solution.network, False)
         balance_with_storage(interval, solution.network, solution.fleet)  # Charge neighbouring storage
 
     return None
@@ -446,10 +540,12 @@ def initialise_precharging_interval(
         node_m.update_netload_t(node, interval, True)
         node_m.reset_dispatch_max_t(node)
 
+        for idx, loadfollow_order in enumerate(node.loadfollow_merit_order):
+            generator_m.set_precharging_loadfollow_max_t(fleet.generators[loadfollow_order], interval, resolution, idx)
         for idx, storage_order in enumerate(node.storage_merit_order):
             storage_m.set_precharging_max_t(fleet.storages[storage_order], interval, resolution, idx)
         for idx, flexible_order in enumerate(node.flexible_merit_order):
-            generator_m.set_precharging_max_t(fleet.generators[flexible_order], interval, resolution, idx)
+            generator_m.set_precharging_flexible_max_t(fleet.generators[flexible_order], interval, resolution, idx)
     return None
 
 
@@ -547,7 +643,8 @@ def perform_transmitted_surplus_transfers(
     if not network_m.check_existing_surplus(network):
         return None
 
-    balance_with_transmission(interval, network, "precharging_surplus", True)
+    network_m.set_node_fills_and_surpluses(network, "precharging_surplus", interval)
+    balance_with_transmission(interval, network, True)
 
     for node in network.nodes.values():
         for idx_reverse, storage_order in enumerate(node.storage_merit_order[::-1]):
@@ -563,6 +660,201 @@ def perform_transmitted_surplus_transfers(
                 fleet.storages[storage_order], interval, resolution, dispatch_power_update, True, idx
             )
             node.imports_exports_update -= dispatch_power_update
+    return None
+
+
+@njit(fastmath=FASTMATH)
+def perform_intranode_loadfollow_transfers(
+    interval: int64,
+    network: Network_InstanceType,
+    fleet: Fleet_InstanceType,
+    resolution: float64,
+) -> None:
+    """
+    Transfer energy within a Node from loadfollowing Generator trickle-chargers to Storage prechargers.
+
+    Notes:
+    -----
+    - The reverse of the storage merit order is used within the precharging period, due to iterating
+    backwards through reverse time (short-duration storage should still discharge earlier than
+    long-duration storage).
+
+    Parameters:
+    -------
+    interval (int64): Index of the time interval within the precharging period.
+    network (Network_InstanceType): An instance of the Network jitclass.
+    fleet (Fleet_InstanceType): An instance of the Fleet jitclass.
+    resolution (float64): Length of the time interval, units hours.
+
+    Returns:
+    -------
+    None.
+
+    Side-effects:
+    -------
+    Attributes modified for the Nodes referenced in Network.nodes: storage_power, charge_max_t,
+        precharge_fill, loadfollow_max_t, precharge_surplus, loadfollow_power.
+    Attributes modified for the Storage systems referenced in Fleet.storages: dispatch_power, node, charge_max_t,
+        precharge_energy.
+    Attributes modified for the loadfollow Generators referenced in Fleet.generators: dispatch_power, node,
+        loadfollow_max_t, trickling_reserves.
+    """
+    for node in network.nodes.values():
+        intranode_transfer_power = min(node.precharge_surplus, node.precharge_fill)
+        intranode_trickle = intranode_transfer_power
+        intranode_precharge = -intranode_transfer_power
+
+        for idx, loadfollow_order in enumerate(node.loadfollow_merit_order):
+            if not fleet.generators[loadfollow_order].fuel.trickling_flag:
+                continue
+            # get live fuel-reserve constraint
+            generator_m.set_live_trickling_loadfollow_max_t(fleet.generators[loadfollow_order], interval, resolution)
+            dispatch_power_update = max(min(intranode_trickle, fleet.generators[loadfollow_order].loadfollow_max_t), 0.0)
+            # update fuel-reserve
+            generator_m.update_fuel_reserve(fleet.generators[loadfollow_order], interval, resolution, dispatch_power_update, True)
+            generator_m.update_precharge_loadfollow_dispatch(
+                fleet.generators[loadfollow_order], interval, resolution, dispatch_power_update, idx
+            )
+            intranode_trickle -= dispatch_power_update
+
+        for idx, storage_order in enumerate(node.storage_merit_order):
+            if not fleet.storages[storage_order].precharge_flag:
+                continue
+
+            dispatch_power_update = min(max(intranode_precharge, -fleet.storages[storage_order].charge_max_t), 0.0)
+            storage_m.update_precharge_dispatch(
+                fleet.storages[storage_order], interval, resolution, dispatch_power_update, True, idx
+            )
+            intranode_precharge -= dispatch_power_update
+    return None
+
+
+@njit(fastmath=FASTMATH)
+def perform_internode_loadfollow_transfers(
+    interval: int64,
+    network: Network_InstanceType,
+    fleet: Fleet_InstanceType,
+    resolution: float64,
+) -> None:
+    """
+    Transfer energy between Nodes from loadfollow Generator trickle-chargers to Storage prechargers.
+
+    Notes:
+    -----
+    - The reverse of the storage merit order is used within the precharging period, due to iterating
+    backwards through reverse time (short-duration storage should still discharge earlier than
+    long-duration storage).
+
+    Parameters:
+    -------
+    interval (int64): Index of the time interval within the precharging period.
+    network (Network_InstanceType): An instance of the Network jitclass.
+    fleet (Fleet_InstanceType): An instance of the Fleet jitclass.
+    resolution (float64): Length of the time interval, units hours.
+
+    Returns:
+    -------
+    None.
+
+    Side-effects:
+    -------
+    Attributes modified for the Nodes referenced in Network.nodes: imports_exports_update, storage_power, charge_max_t,
+        precharge_fill, fill, surplus, available_imports, imports_exports, temp_surplus, netload_t,
+        imports_exports_temp, loadfollow_max_t, precharge_surplus, loadfollow_power.
+    Attributes modified for the Storage systems referenced in Fleet.storages: dispatch_power, node, charge_max_t,
+        precharge_energy.
+    Attributes modified for the loadfollow Generators referenced in Fleet.generators: dispatch_power, node,
+        loadfollow_max_t, trickling_reserves.
+    Attributes modified for each Route instance in the route lists (the lists corresponds to a particular start node and
+        route length) contained in Network.routes: flow_update, initial_node, nodes, lines.
+    Attributes modified for all Line instances Network.lines: temp_leg_flows, flows.
+    """
+    if not (network_m.check_precharge_fill(network) and network_m.check_precharge_surplus(network)):
+        return None
+
+    network_m.set_node_fills_and_surpluses(network, "precharging_transfers", interval)
+    balance_with_transmission(interval, network, True)
+
+    for node in network.nodes.values():
+        for idx, loadfollow_order in enumerate(node.loadfollow_merit_order):
+            if not fleet.generators[loadfollow_order].fuel.trickling_flag:
+                continue
+            # get live fuel-reserve constraint
+            generator_m.set_live_trickling_loadfollow_max_t(fleet.generators[loadfollow_order], interval, resolution)
+            dispatch_power_update = max(min(node.imports_exports_update, fleet.generators[loadfollow_order].loadfollow_max_t), 0.0)
+            # update fuel-reserve
+            generator_m.update_fuel_reserve(fleet.generators[loadfollow_order], interval, resolution, dispatch_power_update, True)
+            generator_m.update_precharge_loadfollow_dispatch(
+                fleet.generators[loadfollow_order], interval, resolution, dispatch_power_update, idx
+            )
+            node.imports_exports_update -= dispatch_power_update
+
+        for idx_reverse, storage_order in enumerate(node.storage_merit_order[::-1]):
+            if not fleet.storages[storage_order].precharge_flag:
+                continue
+            idx = len(node.storage_merit_order) - idx_reverse - 1
+
+            dispatch_power_update = min(
+                max(node.imports_exports_update, -fleet.storages[storage_order].charge_max_t), 0.0
+            )
+            storage_m.update_precharge_dispatch(
+                fleet.storages[storage_order], interval, resolution, dispatch_power_update, True, idx
+            )
+            node.imports_exports_update -= dispatch_power_update
+    return None
+
+
+@njit(fastmath=FASTMATH)
+def perform_loadfollow_precharging(
+    solution,
+    interval: int64,
+) -> None:
+    """
+    Use loadfollowing Generators to trickle-charge Storage prechargers for a given time interval within the
+    precharging period.
+
+    Parameters:
+    -------
+    interval (int64): Index of the time interval within the precharging period.
+    network (Network_InstanceType): An instance of the Network jitclass.
+    fleet (Fleet_InstanceType): An instance of the Fleet jitclass.
+    resolution (float64): Length of the time interval, units hours.
+
+    Returns:
+    -------
+    None.
+
+    Side-effects:
+    -------
+    Attributes modified for the Nodes referenced in Network.nodes: imports_exports_update, storage_power, charge_max_t,
+        precharge_fill, fill, surplus, available_imports, imports_exports, temp_surplus, netload_t,
+        imports_exports_temp, loadfollow_max_t, precharge_surplus, loadfollow_power.
+    Attributes modified for the Storage systems referenced in Fleet.storages: dispatch_power, node, charge_max_t,
+        precharge_energy.
+    Attributes modified for the loadfollow Generators referenced in Fleet.generators: dispatch_power, node,
+        loadfollow_max_t, trickling_reserves.
+    Attributes modified for each Route instance in the route lists (the lists corresponds to a particular start node and
+        route length) contained in Network.routes: flow_update, initial_node, nodes, lines.
+    Attributes modified for all Line instances Network.lines: temp_leg_flows, flows.
+    """
+    for node in solution.network.nodes.values():
+        node_m.set_imports_exports_temp(node, interval)
+    network_m.set_loadfollow_precharge_fills_and_surpluses(solution.network)
+
+    perform_intranode_loadfollow_transfers(
+        interval,
+        solution.network,
+        solution.fleet,
+        solution.static.interval_resolutions[interval],
+    )
+
+    perform_internode_loadfollow_transfers(
+        interval,
+        solution.network,
+        solution.fleet,
+        solution.static.interval_resolutions[interval],
+    )
+
     return None
 
 
@@ -668,7 +960,8 @@ def perform_internode_interstorage_transfers(
     if not (network_m.check_precharge_fill(network) and network_m.check_precharge_surplus(network)):
         return None
 
-    balance_with_transmission(interval, network, "precharging_transfers", True)
+    network_m.set_node_fills_and_surpluses(network, "precharging_transfers", interval)
+    balance_with_transmission(interval, network, True)
 
     for node in network.nodes.values():
 
@@ -743,11 +1036,11 @@ def perform_intranode_flexible_transfers(
             if not fleet.generators[flexible_order].fuel.trickling_flag:
                 continue
             # get live fuel-reserve constraint
-            generator_m.set_live_trickling_max_t(fleet.generators[flexible_order], interval, resolution)
+            generator_m.set_live_trickling_flexible_max_t(fleet.generators[flexible_order], interval, resolution)
             dispatch_power_update = max(min(intranode_trickle, fleet.generators[flexible_order].flexible_max_t), 0.0)
             # update fuel-reserve
             generator_m.update_fuel_reserve(fleet.generators[flexible_order], interval, resolution, dispatch_power_update, True)
-            generator_m.update_precharge_dispatch(
+            generator_m.update_precharge_flexible_dispatch(
                 fleet.generators[flexible_order], interval, resolution, dispatch_power_update, idx
             )
             intranode_trickle -= dispatch_power_update
@@ -807,18 +1100,19 @@ def perform_internode_flexible_transfers(
     if not (network_m.check_precharge_fill(network) and network_m.check_precharge_surplus(network)):
         return None
 
-    balance_with_transmission(interval, network, "precharging_transfers", True)
+    network_m.set_node_fills_and_surpluses(network, "precharging_transfers", interval)
+    balance_with_transmission(interval, network, True)
 
     for node in network.nodes.values():
         for idx, flexible_order in enumerate(node.flexible_merit_order):
             if not fleet.generators[flexible_order].fuel.trickling_flag:
                 continue
             # get live fuel-reserve constraint
-            generator_m.set_live_trickling_max_t(fleet.generators[flexible_order], interval, resolution)
+            generator_m.set_live_trickling_flexible_max_t(fleet.generators[flexible_order], interval, resolution)
             dispatch_power_update = max(min(node.imports_exports_update, fleet.generators[flexible_order].flexible_max_t), 0.0)
             # update fuel-reserve
             generator_m.update_fuel_reserve(fleet.generators[flexible_order], interval, resolution, dispatch_power_update, True)
-            generator_m.update_precharge_dispatch(
+            generator_m.update_precharge_flexible_dispatch(
                 fleet.generators[flexible_order], interval, resolution, dispatch_power_update, idx
             )
             node.imports_exports_update -= dispatch_power_update
@@ -980,6 +1274,8 @@ def determine_power_adjustments_for_precharging_period(
             solution.static.interval_resolutions[interval],
         )
 
+        perform_loadfollow_precharging(solution, interval)
+
         perform_intranode_interstorage_transfers(
             interval,
             solution.network,
@@ -1101,21 +1397,40 @@ def resolve_energy_discontinuities(
             network_m.reset_flexible(solution.network, interval)
             fleet_m.reset_flexible(solution.fleet, interval)
 
-            balance_with_transmission(interval, solution.network, "precharging_adjust_storage", False)
+            enforce_must_run(
+                interval,
+                solution.network,
+                solution.fleet,
+                solution.static.resolution,
+                True,
+            )
+
+            network_m.set_node_fills_and_surpluses(solution.network, "precharging_adjust_loadfollow", interval)
+            balance_with_transmission(interval, solution.network, False)
+
+            network_m.set_node_fills_and_surpluses(solution.network, "precharging_adjust_storage", interval)
+            balance_with_transmission(interval, solution.network, False)
             balance_with_flexible(interval, solution.network, solution.fleet, solution.static.resolution, True)  # Local flexible
 
             if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
-                balance_with_transmission(interval, solution.network, "flexible", False)
+                network_m.set_node_fills_and_surpluses(solution.network, "flexible", interval)
+                balance_with_transmission(interval, solution.network, False)
                 # Neighbouring and local flexible
                 balance_with_flexible(interval, solution.network, solution.fleet, solution.static.resolution, True)
         else:
-            infeasible_flag = fleet_m.determine_feasible_flexible_dispatch(solution.fleet, interval)
+            infeasible_flag = fleet_m.determine_feasible_flexible_dispatch(solution.fleet, interval, solution.static.resolution)
             if infeasible_flag:
                 network_m.reset_transmission(solution.network, interval)
                 fleet_m.calculate_available_storage_dispatch(solution.fleet, interval)
 
-                balance_with_transmission(interval, solution.network, "precharging_adjust_surplus", False)
-                balance_with_transmission(interval, solution.network, "precharging_adjust_flexible", False)
+                network_m.set_node_fills_and_surpluses(solution.network, "precharging_adjust_surplus", interval)
+                balance_with_transmission(interval, solution.network, False)
+
+                network_m.set_node_fills_and_surpluses(solution.network, "precharging_adjust_loadfollow", interval)
+                balance_with_transmission(interval, solution.network, False)
+
+                network_m.set_node_fills_and_surpluses(solution.network, "precharging_adjust_flexible", interval)
+                balance_with_transmission(interval, solution.network, False)
 
                 perform_fill_adjustment(
                     interval,

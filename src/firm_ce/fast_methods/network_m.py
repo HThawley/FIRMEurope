@@ -521,26 +521,44 @@ def set_node_fills_and_surpluses(
 ) -> None:
     if transmission_case == "surplus":
         for node in network_instance.nodes.values():
-            node.fill = max(node.netload_t, 0)
-            node.surplus = -min(node.netload_t, 0)
+            node.fill = max(node.netload_t, 0.0)
+            node.surplus = -min(node.netload_t, 0.0)
+
+    elif transmission_case == "load_follow":
+        for node in network_instance.nodes.values():
+            node.fill = max(node.netload_t - node.loadfollow_power[interval], 0.0)
+            node.surplus = max(node.loadfollow_max_t[-1] - node.loadfollow_power[interval], 0.0)
 
     elif transmission_case == "storage_discharge":
         for node in network_instance.nodes.values():
-            node.fill = max(node.netload_t - node.storage_power[interval], 0)
-            node.surplus = max(node.discharge_max_t[-1] - node.storage_power[interval], 0)
+            node.fill = max(
+                node.netload_t
+                - node.loadfollow_power[interval]
+                - node.storage_power[interval],
+                0.0
+            )
+            node.surplus = max(node.discharge_max_t[-1] - node.storage_power[interval], 0.0)
 
     elif transmission_case == "flexible":
         for node in network_instance.nodes.values():
             node.fill = max(
-                node.netload_t - node.storage_power[interval] - node.flexible_power[interval], 0
+                node.netload_t
+                - node.loadfollow_power[interval]
+                - node.storage_power[interval]
+                - node.flexible_power[interval],
+                0.0
             )
-            node.surplus = max(node.flexible_max_t[-1] - node.flexible_power[interval], 0)
+            node.surplus = max(node.flexible_max_t[-1] - node.flexible_power[interval], 0.0)
 
     elif transmission_case == "storage_charge":
         for node in network_instance.nodes.values():
-            node.fill = max(node.charge_max_t[-1] + node.storage_power[interval], 0)
+            node.fill = max(node.charge_max_t[-1] + node.storage_power[interval], 0.0)
             node.surplus = -min(
-                node.netload_t - node.storage_power[interval] - node.flexible_power[interval], 0.0
+                node.netload_t
+                - node.loadfollow_power[interval]
+                - node.storage_power[interval]
+                - node.flexible_power[interval],
+                0.0
             )
 
     elif transmission_case == "precharging_surplus":
@@ -553,23 +571,42 @@ def set_node_fills_and_surpluses(
             node.fill = node.precharge_fill
             node.surplus = node.precharge_surplus
 
+    elif transmission_case == "precharging_adjust_loadfollow":
+        for node in network_instance.nodes.values():
+            node.fill = max(node.netload_t - min(node.storage_power[interval], 0.0), 0.0)
+            node.surplus = -min(
+                node.netload_t - max(node.storage_power[interval], 0.0) - node.loadfollow_power[interval], 0
+            )
+
     elif transmission_case == "precharging_adjust_storage":
         for node in network_instance.nodes.values():
-            node.fill = max(node.netload_t - max(node.storage_power[interval], 0), 0)
-            node.surplus = -min(node.netload_t - max(node.storage_power[interval], 0), 0)
+            node.fill = max(node.netload_t - max(node.storage_power[interval], 0.0), 0.0)
+            node.surplus = -min(node.netload_t - max(node.storage_power[interval], 0.0), 0.0)
 
     elif transmission_case == "precharging_adjust_surplus":
         for node in network_instance.nodes.values():
-            node.fill = max(node.netload_t - max(node.storage_power[interval], 0.0) - node.flexible_power[interval], 0)
-            node.surplus = -min(
-                node.netload_t - max(node.storage_power[interval], 0.0) - node.flexible_power[interval], 0
+            node.fill = max(
+                node.netload_t
+                - node.loadfollow_power[interval], 0.0
+                - max(node.storage_power[interval], 0.0)
+                - node.flexible_power[interval],
+                0.0
             )
+            node.surplus = -min(
+                node.netload_t
+                - node.loadfollow_power[interval]
+                - max(node.storage_power[interval], 0.0)
+                - node.flexible_power[interval],
+                0.0
+            )
+
     elif transmission_case == "precharging_adjust_flexible":
         for node in network_instance.nodes.values():
             node.fill = -min(node.storage_power[interval], 0.0)
             node.surplus = -min(
                 node.netload_t - max(node.storage_power[interval], 0.0) - node.flexible_power[interval], 0
             )
+
     else:
         raise RuntimeError("set_node_fills_and_surpluses contains incorrect transmission_case argument.")
     return None
@@ -600,6 +637,7 @@ def calculate_spillage_and_deficit(
     for node in network_instance.nodes.values():
         _imbalance = (
             node.netload_t
+            - node.loadfollow_power[interval]
             - node.storage_power[interval]
             - node.flexible_power[interval]
         )
@@ -649,6 +687,16 @@ def assign_flexible_merit_orders(
 ) -> None:
     for node in network_instance.nodes.values():
         node_m.assign_flexible_merit_order(node, generators_typed_dict)
+    return None
+
+
+@njit(fastmath=FASTMATH)
+def assign_loadfollow_merit_orders(
+    network_instance: Network_InstanceType,
+    generators_typed_dict: DictType(int64, Generator_InstanceType),
+) -> None:
+    for node in network_instance.nodes.values():
+        node_m.assign_loadfollow_merit_order(node, generators_typed_dict)
     return None
 
 
@@ -877,6 +925,34 @@ def set_flexible_precharge_fills_and_surpluses(
     for node in network_instance.nodes.values():
         node.precharge_fill = node.charge_max_t[-1]
         node.precharge_surplus = node.flexible_max_t[-1]
+    return None
+
+
+@njit(fastmath=FASTMATH)
+def set_loadfollow_precharge_fills_and_surpluses(
+    network_instance: Network_InstanceType,
+) -> None:
+    """
+    Updates the temporary precharging period fill and surplus values that are used to evaluate
+    loadfollow precharging of Storage systems. The precharge fill and precharge surplus values are used to perform
+    intra-node loadfollow precharging, and then initialise the fill and surplus values used for
+    loadfollow precharging via transmission.
+
+    Parameters:
+    -------
+    network_instance (Network_InstanceType): An instance of the Network jitclass.
+
+    Returns:
+    -------
+    None.
+
+    Side-effects:
+    -------
+    Attributes modified for each Node in Network.nodes: precharge_fill, precharge_surplus.
+    """
+    for node in network_instance.nodes.values():
+        node.precharge_fill = node.charge_max_t[-1]
+        node.precharge_surplus = node.loadfollow_max_t[-1]
     return None
 
 
