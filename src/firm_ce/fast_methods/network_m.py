@@ -1,4 +1,6 @@
 # type: ignore
+import numpy as np
+
 from firm_ce.common.constants import FASTMATH, TOLERANCE
 from firm_ce.common.exceptions import raise_static_modification_error
 from firm_ce.common.jit_overload import njit
@@ -647,6 +649,36 @@ def assign_flexible_merit_orders(
 ) -> None:
     for node in network_instance.nodes.values():
         node_m.assign_flexible_merit_order(node, generators_typed_dict)
+    return None
+
+
+@njit(fastmath=FASTMATH)
+def assign_route_merit_orders(
+    network_instance: Network_InstanceType,
+) -> None:
+    """
+    Sorts the routes within each route list in the network based on cumulative efficiency.
+    Higher efficiency routes are prioritized (placed at the start of the list).
+    """
+    for tuple_key, routes_list in network_instance.routes.items():
+        count = len(routes_list)
+        if count <= 1:
+            continue
+
+        effs = np.zeros(count, dtype=np.float64)
+        for i in range(count):
+            effs[i] = routes_list[i].efficiency
+
+        # Sort descending (highest efficiency first)
+        sort_order = np.argsort(-effs)
+
+        # Create a new typed list and replace the old one
+        sorted_routes = TypedList.empty_list(Route_InstanceType)
+        for i in range(count):
+            sorted_routes.append(routes_list[sort_order[i]])
+
+        network_instance.routes[tuple_key] = sorted_routes
+
     return None
 
 

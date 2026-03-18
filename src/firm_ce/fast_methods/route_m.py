@@ -1,7 +1,7 @@
 # type: ignore
 from typing import Tuple
 
-from firm_ce.common.constants import FASTMATH, NP_FLOAT_MAX
+from firm_ce.common.constants import FASTMATH
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import DictType, TypedList, boolean, float64, int64
 from firm_ce.system.topology import Line_InstanceType, Node_InstanceType, Route, Route_InstanceType
@@ -83,40 +83,6 @@ def check_contains_node(
         if new_node.order == node.order:
             return True
     return False
-
-
-@njit(fastmath=FASTMATH)
-def get_max_flow_update(
-    route_instance: Route_InstanceType,
-    interval: int64,
-) -> float64:
-    """
-    During a transmission action, the maximum flow update for a Route represents the maximum
-    amount of electricity that could be imported to the fill node along that Route. It is constrained
-    by the capacity of the Lines forming the Route, accounting for flows that have already been committed
-    for transmission along the line. The temporary leg flows are flows that could be committed for Routes
-    of the same length to the same fill node that have already been checked for this transmission action.
-
-    Parameters:
-    -------
-    route_instance (Route_InstanceType): A static instance of the Route jitclass.
-    interval (int64): Index for the time interval.
-
-    Returns:
-    -------
-    float64: The maximum flow for the Route for this transmission action [GW], accounting for the capacity
-        of Lines along the Route that has already been committed for transmission.
-    """
-    max_flow_delivered = NP_FLOAT_MAX
-    for leg in range(route_instance.legs + 1):
-        live_line_capacity = (
-            route_instance.lines[leg].capacity
-            - route_instance.line_directions[leg]
-            * (route_instance.lines[leg].flows[interval] + route_instance.lines[leg].temp_leg_flows)
-        )
-        max_flow_delivered = min(max_flow_delivered, live_line_capacity * route_instance.cumulative_eff[leg])
-
-    return max_flow_delivered
 
 
 @njit(fastmath=FASTMATH)

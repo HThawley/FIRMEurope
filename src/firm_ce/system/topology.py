@@ -330,7 +330,6 @@ if JIT_ENABLED:
         ("legs", int64),
         ("flow_update", float64),
         ("efficiency", float64),
-        ("cumulative_eff", float64[:])
     ]
 else:
     route_spec = []
@@ -397,10 +396,8 @@ class Route:
         self.line_directions = line_directions
         self.legs = legs
         self.efficiency = 1.0
-        self.cumulative_eff = np.ones(legs + 1, np.float64)
-        for i, line in enumerate(self.lines):
+        for line in self.lines:
             self.efficiency *= line.efficiency
-            self.cumulative_eff[i:] *= line.efficiency
 
         # Dynamic
         self.flow_update = 0.0

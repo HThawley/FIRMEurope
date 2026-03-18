@@ -131,6 +131,7 @@ class Solution:
 
         network_m.assign_storage_merit_orders(self.network, self.fleet.storages)
         network_m.assign_flexible_merit_orders(self.network, self.fleet.generators)
+        network_m.assign_route_merit_orders(self.network)
 
 
 if JIT_ENABLED:
