@@ -1,7 +1,7 @@
 # type: ignore
 import numpy as np
 
-from firm_ce.common.constants import FASTMATH
+from firm_ce.common.constants import FASTMATH, TOLERANCE
 from firm_ce.common.exceptions import (
     raise_getting_unloaded_data_error,
     raise_static_modification_error,
@@ -393,11 +393,12 @@ def dispatch(
         )
 
     delta_power = new_power - prev_power
-    if delta_power <= 0.0:
+
+    if abs(delta_power) <= TOLERANCE:
         return None
 
     generator_instance.dispatch_power[interval] = new_power
-    generator_instance.node.flexible_power[interval] += delta_power
+    generator_instance.node.flexible_power[interval] += new_power
 
     generator_instance.node.flexible_max_t[merit_order_idx:] -= delta_power
     update_fuel_reserve(generator_instance, interval, resolution, delta_power, forward_time_flag)

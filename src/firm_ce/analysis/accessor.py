@@ -380,6 +380,12 @@ class Accessor:
             case _:
                 raise ValueError(f"Unknown asset type for power retrieval: {asset.name} ({asset.unit_type})")
 
+    def get_imports_exports_trace(self, asset: Any) -> NDArray[np.float64]:
+        """
+        Returns the import/export trace of a node
+        """
+        return asset.imports_exports
+
     def get_discharge_trace(self, asset: Any) -> NDArray[np.float64]:
         """
         Returns only the POSITIVE generation component (clipping pumping/charging).

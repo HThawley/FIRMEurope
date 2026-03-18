@@ -1,4 +1,6 @@
 # type: ignore
+from typing import Tuple
+
 from firm_ce.common.constants import FASTMATH, NP_FLOAT_MAX
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import DictType, TypedList, boolean, float64, int64
@@ -118,6 +120,34 @@ def get_max_flow_update(
 
 
 @njit(fastmath=FASTMATH)
+def get_forward_outflow(current_flow: float64, exist_flow: float64, capacity: float64, l_eff: float64) -> float64:
+    """Helper to determine the constrained outflow during the forward pass."""
+    # maximum flow that may be reversed from pov of recipient
+    max_cancel_inflow = max(0.0, -exist_flow) * l_eff
+
+    # spare power capacity of line in direction
+    avaliable_capacity = max_cancel_inflow + capacity - max(0.0, exist_flow)
+    constrained_inflow = min(current_flow, avaliable_capacity)
+
+    inflow_cancel = min(constrained_inflow, max_cancel_inflow)
+    inflow_new = constrained_inflow - inflow_cancel
+
+    return (inflow_cancel / l_eff) + (inflow_new * l_eff)
+
+
+@njit(fastmath=FASTMATH)
+def get_backward_inflow_and_delta(required_flow: float64, exist_flow: float64, l_eff: float64) -> Tuple[float64, float64]:
+    """Helper to determine the required inflow and line flow delta during the backward pass."""
+    outflow_cancel = min(required_flow, max(0.0, -exist_flow))
+    outflow_new = required_flow - outflow_cancel
+
+    required_inflow = (outflow_cancel * l_eff) + (outflow_new / l_eff)
+    flow_delta = outflow_cancel + (outflow_new / l_eff)
+
+    return required_inflow, flow_delta
+
+
+@njit(fastmath=FASTMATH)
 def calculate_flow_update(
     route_instance: Route_InstanceType,
     interval: int64,
@@ -149,20 +179,33 @@ def calculate_flow_update(
     Attributes modified for Node referenced by Route.nodes[-1]: temp_surplus.
     Attributes modified for all Line instances referenced in Route.lines: temp_leg_flows.
     """
-    route_instance.flow_update = min(
-        route_instance.nodes[-1].temp_surplus * route_instance.efficiency,  # maximum deliverable (surplus energy)
-        get_max_flow_update(route_instance, interval)  # maximum deliverable (line hosting capacity)
-    )
+    # --- FORWARD PASS: Determine max deliverable flow ---
+    current_flow = route_instance.nodes[-1].temp_surplus
 
-    route_instance.initial_node.available_imports += route_instance.flow_update
+    # Iterate from Source leg (N) down to Destination leg (0)
+    for leg in range(route_instance.legs, -1, -1):
+        line = route_instance.lines[leg]
 
-    # If multiple routes on the same leg end with the same node, they must be constrained by surplus committed for that leg
-    route_instance.nodes[-1].temp_surplus -= route_instance.flow_update / route_instance.efficiency
+        exist_flow = (line.flows[interval] + line.temp_leg_flows) * route_instance.line_directions[leg]
+        current_flow = get_forward_outflow(current_flow, exist_flow, line.capacity, line.efficiency)
 
-    # If multiple routes on the same leg use the same lines, they must be constrained by capacity committed for that leg
+    route_instance.flow_update = current_flow
+    route_instance.initial_node.available_imports += current_flow
+
+    # --- BACKWARD PASS: Reserve exact capacities (Destination -> Source) ---
+    required_flow = current_flow
+
+    # Iterate from Destination leg (0) up to Source leg (N)
     for leg in range(route_instance.legs + 1):
-        leg_flow = route_instance.flow_update / route_instance.cumulative_eff[leg]
-        route_instance.lines[leg].temp_leg_flows += route_instance.line_directions[leg] * leg_flow
+        line = route_instance.lines[leg]
+
+        exist_flow = (line.flows[interval] + line.temp_leg_flows) * route_instance.line_directions[leg]
+        required_inflow, flow_delta = get_backward_inflow_and_delta(required_flow, exist_flow, line.efficiency)
+
+        line.temp_leg_flows += route_instance.line_directions[leg] * flow_delta
+        required_flow = required_inflow
+
+    route_instance.nodes[-1].temp_surplus -= required_flow
     return None
 
 
@@ -195,11 +238,19 @@ def update_exports(
         surplus.
     Attributes modified for all Line instances referenced in Route.lines: flows.
     """
-    source_deduction = route_instance.flow_update / route_instance.efficiency
-    route_instance.nodes[-1].imports_exports[interval] -= source_deduction
-    route_instance.nodes[-1].surplus -= source_deduction
+    required_flow = route_instance.flow_update
 
+    # Iterate from Destination leg (0) up to Source leg (N)
     for leg in range(route_instance.legs + 1):
-        leg_flow = route_instance.flow_update / route_instance.cumulative_eff[leg]
-        route_instance.lines[leg].flows[interval] += route_instance.line_directions[leg] * leg_flow
+        line = route_instance.lines[leg]
+
+        exist_flow = line.flows[interval] * route_instance.line_directions[leg]
+        required_inflow, flow_delta = get_backward_inflow_and_delta(required_flow, exist_flow, line.efficiency)
+
+        line.flows[interval] += route_instance.line_directions[leg] * flow_delta
+        required_flow = required_inflow
+
+    route_instance.nodes[-1].imports_exports[interval] -= required_flow
+    route_instance.nodes[-1].surplus -= required_flow
+
     return None

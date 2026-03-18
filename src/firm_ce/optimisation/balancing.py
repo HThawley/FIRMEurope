@@ -257,8 +257,6 @@ def energy_balance_for_interval(
         # Discharge local storage to balance remaining deficits
         balance_with_transmission(interval, solution.network, "storage_discharge", False)
         balance_with_storage(interval, solution.network, solution.fleet)  # Neighbouring and local storage
-
-    if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
         # Local flexible
         balance_with_flexible(interval, solution.network, solution.fleet, solution.static.resolution, forward_time_flag)
 

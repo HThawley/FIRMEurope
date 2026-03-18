@@ -175,7 +175,7 @@ class Validation:
             node_balances[node.id] -= self.accessor.get_power_trace(node)
             # protect against possible future changes to sign convention
             node_balances[node.id] += np.abs(self.accessor.get_deficit_trace(node))
-            node_balances[node.id] += np.abs(self.accessor.get_spillage_trace(node))
+            node_balances[node.id] -= np.abs(self.accessor.get_spillage_trace(node))
 
         for gen in self.solution.fleet.generators.values():
             node_balances[gen.node.id] += self.accessor.get_power_trace(gen)
@@ -206,9 +206,14 @@ class Validation:
             exceedance = np.maximum(np.abs(node_balances[node.id]) - VALIDATION_TOL, 0)
             if np.any(exceedance > 0):
                 max_violation, count, t1, t2 = get_exceedance_stats(exceedance)
+                max_v_p, c_p, t1_p, t2_p = get_exceedance_stats(np.maximum(node_balances[node.id] - VALIDATION_TOL, 0))
+                max_v_n, c_n, t1_n, t2_n = get_exceedance_stats(np.minimum(node_balances[node.id] - VALIDATION_TOL, 0))
+
                 self._log(
                     f"Energy Balance Violation: Node {node.name} failed by up to {max_violation:.4f}. "
                     f"Found: {count} exceedances. First at t={t1}. Largest at t={t2}"
+                    f"\n\tPositive exceedances - Found: {c_p}. First at t={t1_p}. Largest ({max_v_p}) at t={t2_p}"
+                    f"\n\tNegative exceedances - Found: {c_n}. First at t={t1_n}. Largest ({max_v_n}) at t={t2_n}"
                 )
                 passed = False
 
@@ -339,6 +344,9 @@ class Validation:
 def get_exceedance_stats(exceedance):
     max_violation = np.max(exceedance)
     count = (exceedance > 0).sum()
-    t1 = np.where(exceedance > 0)[0][0]
-    t2 = np.argmax(exceedance)
+    try:
+        t1 = np.where(exceedance > 0)[0][0]
+        t2 = np.argmax(exceedance)
+    except IndexError:
+        t1, t2 = np.nan, np.nan
     return max_violation, count, t1, t2
