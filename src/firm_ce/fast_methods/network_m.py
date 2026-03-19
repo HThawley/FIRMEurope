@@ -573,21 +573,38 @@ def set_node_fills_and_surpluses(
 
     elif transmission_case == "precharging_adjust_loadfollow":
         for node in network_instance.nodes.values():
-            node.fill = max(node.netload_t - min(node.storage_power[interval], 0.0), 0.0)
+            node.fill = max(
+                node.netload_t
+                - max(node.storage_power[interval], 0.0)
+                - node.loadfollow_power[interval],
+                0.0
+            )
             node.surplus = -min(
-                node.netload_t - max(node.storage_power[interval], 0.0) - node.loadfollow_power[interval], 0
+                node.netload_t
+                - max(node.storage_power[interval], 0.0)
+                - node.loadfollow_power[interval],
+                0.0
             )
 
     elif transmission_case == "precharging_adjust_storage":
         for node in network_instance.nodes.values():
-            node.fill = max(node.netload_t - max(node.storage_power[interval], 0.0), 0.0)
-            node.surplus = -min(node.netload_t - max(node.storage_power[interval], 0.0), 0.0)
+            node.fill = max(
+                node.netload_t
+                - max(node.storage_power[interval], 0.0),  # add storage discharge to fill
+                0.0
+            )
+            node.surplus = -min(
+                node.netload_t
+                - node.load_follow_power[interval]
+                - max(node.storage_power[interval], 0.0),  # remove committed discharge from surplus
+                0.0
+            )
 
     elif transmission_case == "precharging_adjust_surplus":
         for node in network_instance.nodes.values():
             node.fill = max(
                 node.netload_t
-                - node.loadfollow_power[interval], 0.0
+                - node.loadfollow_power[interval]
                 - max(node.storage_power[interval], 0.0)
                 - node.flexible_power[interval],
                 0.0
@@ -602,9 +619,13 @@ def set_node_fills_and_surpluses(
 
     elif transmission_case == "precharging_adjust_flexible":
         for node in network_instance.nodes.values():
-            node.fill = -min(node.storage_power[interval], 0.0)
+            node.fill = -min(node.storage_power[interval], 0.0)  # storage charge
             node.surplus = -min(
-                node.netload_t - max(node.storage_power[interval], 0.0) - node.flexible_power[interval], 0
+                node.netload_t
+                - node.loadfollow_power  # remove committed loadfollow
+                - max(node.storage_power[interval], 0.0)  # remove committed discharge
+                - node.flexible_power[interval],  # remove committed flex
+                0.0
             )
 
     else:
@@ -761,6 +782,32 @@ def calculate_lt_flows(
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
+def reset_loadfollow(
+    network_instance: Network_InstanceType,
+    interval: int64,
+) -> None:
+    """
+    Resets the nodal flexible power to zero at each Node for a given time interval.
+
+    Parameters:
+    -------
+    network_instance (Network_InstanceType): An instance of the Network jitclass.
+    interval (int64): Index for the time interval.
+
+    Returns:
+    -------
+    None.
+
+    Side-effects:
+    -------
+    Attributes modified for each Node in Network.nodes: flexible_power.
+    """
+    for node in network_instance.nodes.values():
+        node.loadfollow_power[interval] = 0.0
+    return None
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def reset_flexible(
     network_instance: Network_InstanceType,
     interval: int64,
@@ -810,6 +857,7 @@ def reset_dispatch(
     for node in network_instance.nodes.values():
         node.storage_power[interval] = 0.0
         node.flexible_power[interval] = 0.0
+        node.loadfollow_power[interval] = 0.0
     return None
 
 

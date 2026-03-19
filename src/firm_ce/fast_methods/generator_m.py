@@ -415,7 +415,7 @@ def set_live_trickling_loadfollow_max_t(
             live_remaining_trickling / resolution
         )
     else:
-        generator_instance.flexible_max_t = 0.0
+        generator_instance.loadfollow_max_t = 0.0
     return None
 
 

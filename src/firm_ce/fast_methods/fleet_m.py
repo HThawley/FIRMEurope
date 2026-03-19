@@ -417,8 +417,35 @@ def reset_flexible(
     Attributes modified for each flexible Generator instance in Fleet.generators: dispatch_power.
     """
     for generator in fleet_instance.generators.values():
-        if generator.is_flexible:
+        if generator.is_flexible and not generator.is_loadfollow:
             generator.dispatch_power[interval] = 0.0
+    return None
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
+def reset_loadfollow(
+    fleet_instance: Fleet_InstanceType,
+    interval: int64,
+) -> None:
+    """
+    Reset dispatch for all loadfollowing Generator objects in a given time interval.
+
+    Parameters:
+    -------
+    fleet_instance (Fleet_InstanceType): An instance of the Fleet jitclass.
+    interval (int64): Index for the time interval.
+
+    Returns:
+    -------
+    None.
+
+    Side-effects
+    -------
+    Attributes modified for each loadfollow Generator instance in Fleet.generators: dispatch_power.
+    """
+    for generator in fleet_instance.generators.values():
+        if generator.is_loadfollow:
+            generator.dispatch_power[interval] = 0.0  # will be updated to minimum by enforce_min
     return None
 
 
@@ -447,6 +474,7 @@ def reset_dispatch(
     for storage in fleet_instance.storages.values():
         storage.dispatch_power[interval] = 0.0
     reset_flexible(fleet_instance, interval)
+    reset_loadfollow(fleet_instance, interval)
     return None
 
 
@@ -657,10 +685,54 @@ def check_trickling_remaining(
 
     for fuel in fleet_instance.fuels.values():
         for generator in fleet_instance.generators.values():
+            # if is_loadfollow is True, is_flexible is also truee
             if generator.fuel.id == fuel.id and generator.is_flexible and fuel.trickling_flag:
                 return True
 
     return False
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
+def determine_feasible_loadfollow_dispatch(
+    fleet_instance: Fleet_InstanceType,
+    interval: int64,
+    resolution: float64,
+) -> boolean:
+    """
+    Determine whether the loadfollow Generator dispatch_powers for a time interval calculated during reverse time precharging are
+    still feasible when resolving the discontinuity created at the beginning of the precharging period.
+
+    Parameters:
+    -------
+    fleet_instance (Fleet_InstanceType): An instance of the Fleet jitclass.
+    interval (int64): Index for the time interval.
+
+    Returns:
+    -------
+    boolean: True if any original loadfollow Generator.dispatch_power[interval] was found to be infeasible and adjusted.
+
+    Side-effects:
+    -------
+    If an original loadfollow Generator.dispatch_power[interval] would exceed the remaining energy constraints for the system,
+    the power is adjusted for that time interval. The Generator.node.loadfollow_power[interval] is also modified when
+    these adjustments are made.
+    """
+    infeasible_flag = False
+    for generator in fleet_instance.generators.values():
+        if not generator.is_loadfollow:
+            continue
+        original_dispatch_power = generator.dispatch_power[interval]
+
+        max_power = min(generator.capacity, generator.fuel.remaining_energy[interval] / resolution)
+        min_power = max(original_dispatch_power, generator.baseload_min_op)
+        new_power = min(min_power, max_power)
+        dispatch_power_adjustment = original_dispatch_power - new_power
+        generator.dispatch_power[interval] = new_power
+
+        if abs(dispatch_power_adjustment) > TOLERANCE:
+            generator.node.loadfollow_power[interval] -= dispatch_power_adjustment
+            infeasible_flag = True
+    return infeasible_flag
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
@@ -729,6 +801,8 @@ def determine_feasible_flexible_dispatch(
     for generator in fleet_instance.generators.values():
         if not generator.is_flexible:
             continue
+        if generator.is_loadfollow:
+            continue
         original_dispatch_power = generator.dispatch_power[interval]
 
         max_power = min(generator.capacity, generator.fuel.remaining_energy[interval] / resolution)
@@ -768,9 +842,9 @@ def calculate_available_storage_dispatch(fleet_instance: Fleet_InstanceType, int
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def reset_flexible_reserves(fleet_instance: Fleet_InstanceType) -> None:
+def reset_fuel_reserves(fleet_instance: Fleet_InstanceType) -> None:
     """
-    Resets the trickling reserves for all flexible Generators to 0. Required when
+    Resets the trickling reserves for all fuels to 0. Required when
     the precharging period crosses into the previous calendar year.
 
     Parameters:
@@ -783,7 +857,7 @@ def reset_flexible_reserves(fleet_instance: Fleet_InstanceType) -> None:
 
     Side-effects:
     -------
-    Attributes modified for each flexible Generator instance in Fleet.generators: trickling_reserves.
+    Attributes modified for each Fuel instance in Fleet.fuels: trickling_reserves.
     """
     for fuel in fleet_instance.fuels.values():
         fuel.trickling_reserves = 0

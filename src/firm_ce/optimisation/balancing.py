@@ -1,7 +1,7 @@
 # type: ignore
 from firm_ce.common.constants import FASTMATH, TOLERANCE, BOUNDSCHECK
 from firm_ce.common.jit_overload import njit
-from firm_ce.common.typing import boolean, float64, int64
+from firm_ce.common.typing import boolean, float64, int64, unicode_type
 from firm_ce.fast_methods import (
     fleet_m,
     generator_m,
@@ -79,6 +79,7 @@ def initialise_interval(
 def balance_with_transmission(
     interval: int64,
     network: Network_InstanceType,
+    transmission_case: unicode_type,
     precharging_flag: boolean,
 ) -> None:
     """
@@ -109,6 +110,7 @@ def balance_with_transmission(
         route length) contained in Network.routes: flow_update, initial_node, nodes, lines.
     Attributes modified for all Line instances Network.lines: temp_leg_flows, flows.
     """
+    network_m.set_node_fills_and_surpluses(network, transmission_case, interval)
     network_m.fill_with_transmitted_surpluses(network, interval)
     network_m.update_netloads(network, interval, precharging_flag)
 
@@ -333,36 +335,35 @@ def energy_balance_for_interval(
 
     # Check deficits
     if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
-        network_m.set_node_fills_and_surpluses(solution.network, "surplus", interval)
         # Transmit energy from nodes in surplus to nodes in deficit
-        balance_with_transmission(interval, solution.network, False)
+        balance_with_transmission(interval, solution.network, "surplus", False)
 
     if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
-        network_m.set_node_fills_and_surpluses(solution.network, "load_follow", interval)
         # Run local load-following generators to balance remaining deficits
         balance_with_loadfollow(interval, solution.network, solution.fleet, solution.static.resolution, forward_time_flag)
+        # Run neighbouring load-following generators
+        balance_with_transmission(solution.network, "load_follow", interval)
+
+    if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
         # Run local storages to balance remaining deficits
+        balance_with_storage(interval, solution.network, solution.fleet)
+        # Run neighbouring storage to balance remaining deficits
+        balance_with_transmission(interval, solution.network, "storage_discharge", False)
         balance_with_storage(interval, solution.network, solution.fleet)
 
     if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
-        network_m.set_node_fills_and_surpluses(solution.network, "storage_discharge", interval)
-        # Discharge neighbouring storage to balance remaining deficits
-        balance_with_transmission(interval, solution.network, False)
-        balance_with_storage(interval, solution.network, solution.fleet)
         # Local flexible
         balance_with_flexible(interval, solution.network, solution.fleet, solution.static.resolution, forward_time_flag)
 
     if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
-        network_m.set_node_fills_and_surpluses(solution.network, "flexible", interval)
-        balance_with_transmission(interval, solution.network, False)
+        balance_with_transmission(interval, solution.network, "flexible", False)
         # Neighbouring and local flexible
         balance_with_flexible(interval, solution.network, solution.fleet, solution.static.resolution, forward_time_flag)
 
     # check surpluses
     if network_m.check_remaining_netloads(solution.network, interval, "spillage"):
-        network_m.set_node_fills_and_surpluses(solution.network, "storage_charge", interval)
         # export surpluses to neighbours who can use it
-        balance_with_transmission(interval, solution.network, False)
+        balance_with_transmission(interval, solution.network, "storage_charge", False)
         balance_with_storage(interval, solution.network, solution.fleet)  # Charge neighbouring storage
 
     return None
@@ -643,8 +644,7 @@ def perform_transmitted_surplus_transfers(
     if not network_m.check_existing_surplus(network):
         return None
 
-    network_m.set_node_fills_and_surpluses(network, "precharging_surplus", interval)
-    balance_with_transmission(interval, network, True)
+    balance_with_transmission(interval, network, "precharging_surplus", True)
 
     for node in network.nodes.values():
         for idx_reverse, storage_order in enumerate(node.storage_merit_order[::-1]):
@@ -772,8 +772,7 @@ def perform_internode_loadfollow_transfers(
     if not (network_m.check_precharge_fill(network) and network_m.check_precharge_surplus(network)):
         return None
 
-    network_m.set_node_fills_and_surpluses(network, "precharging_transfers", interval)
-    balance_with_transmission(interval, network, True)
+    balance_with_transmission(interval, network, "precharging_transfers", True)
 
     for node in network.nodes.values():
         for idx, loadfollow_order in enumerate(node.loadfollow_merit_order):
@@ -960,8 +959,7 @@ def perform_internode_interstorage_transfers(
     if not (network_m.check_precharge_fill(network) and network_m.check_precharge_surplus(network)):
         return None
 
-    network_m.set_node_fills_and_surpluses(network, "precharging_transfers", interval)
-    balance_with_transmission(interval, network, True)
+    balance_with_transmission(interval, network, "precharging_transfers", True)
 
     for node in network.nodes.values():
 
@@ -1100,8 +1098,7 @@ def perform_internode_flexible_transfers(
     if not (network_m.check_precharge_fill(network) and network_m.check_precharge_surplus(network)):
         return None
 
-    network_m.set_node_fills_and_surpluses(network, "precharging_transfers", interval)
-    balance_with_transmission(interval, network, True)
+    balance_with_transmission(interval, network, "precharging_transfers", True)
 
     for node in network.nodes.values():
         for idx, flexible_order in enumerate(node.flexible_merit_order):
@@ -1244,7 +1241,7 @@ def determine_power_adjustments_for_precharging_period(
         if interval == first_t:
             precharging_year -= 1
             first_t, _ = static_m.get_year_t_boundaries(solution.static, precharging_year)
-            fleet_m.reset_flexible_reserves(solution.fleet)
+            fleet_m.reset_fuel_reserves(solution.fleet)
 
         interval -= 1
 
@@ -1355,7 +1352,7 @@ def resolve_energy_discontinuities(
     Notes:
     -------
     - An infeasible dispatch power likely indicates that the deficit block cannot be resolved through
-    precharging. The operational load is simply to substantial for the system to balance according to
+    precharging. The operational load is simply to0=o substantial for the system to balance according to
     the unit committment business rules.
 
     Parameters:
@@ -1394,7 +1391,9 @@ def resolve_energy_discontinuities(
         infeasible_flag = fleet_m.determine_feasible_storage_dispatch(solution.fleet, interval)
         if infeasible_flag:
             network_m.reset_transmission(solution.network, interval)
+            network_m.reset_loadfollow(solution.network, interval)
             network_m.reset_flexible(solution.network, interval)
+            fleet_m.reset_loadfollow(solution.fleet, interval)
             fleet_m.reset_flexible(solution.fleet, interval)
 
             enforce_must_run(
@@ -1405,32 +1404,25 @@ def resolve_energy_discontinuities(
                 True,
             )
 
-            network_m.set_node_fills_and_surpluses(solution.network, "precharging_adjust_loadfollow", interval)
-            balance_with_transmission(interval, solution.network, False)
-
-            network_m.set_node_fills_and_surpluses(solution.network, "precharging_adjust_storage", interval)
-            balance_with_transmission(interval, solution.network, False)
-            balance_with_flexible(interval, solution.network, solution.fleet, solution.static.resolution, True)  # Local flexible
+            balance_with_transmission(interval, solution.network, "precharging_adjust_storage", False)
+            balance_with_loadfollow(interval, solution.network, solution.fleet, solution.static.resolution, True)
+            balance_with_flexible(interval, solution.network, solution.fleet, solution.static.resolution, True)
 
             if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
-                network_m.set_node_fills_and_surpluses(solution.network, "flexible", interval)
-                balance_with_transmission(interval, solution.network, False)
-                # Neighbouring and local flexible
+                balance_with_transmission(interval, solution.network, "loadfollow", False)
+                balance_with_loadfollow(interval, solution.network, solution.fleet, solution.static.resolution, True)
+                balance_with_transmission(interval, solution.network, "flexible", False)
                 balance_with_flexible(interval, solution.network, solution.fleet, solution.static.resolution, True)
         else:
-            infeasible_flag = fleet_m.determine_feasible_flexible_dispatch(solution.fleet, interval, solution.static.resolution)
-            if infeasible_flag:
+            infeasible_flex = fleet_m.determine_feasible_flexible_dispatch(solution.fleet, interval, solution.static.resolution)
+            infeasible_lf = fleet_m.determine_feasible_loadfollow_dispatch(solution.fleet, interval, solution.static.resolution)
+            if infeasible_lf or infeasible_flex:
                 network_m.reset_transmission(solution.network, interval)
                 fleet_m.calculate_available_storage_dispatch(solution.fleet, interval)
 
-                network_m.set_node_fills_and_surpluses(solution.network, "precharging_adjust_surplus", interval)
-                balance_with_transmission(interval, solution.network, False)
-
-                network_m.set_node_fills_and_surpluses(solution.network, "precharging_adjust_loadfollow", interval)
-                balance_with_transmission(interval, solution.network, False)
-
-                network_m.set_node_fills_and_surpluses(solution.network, "precharging_adjust_flexible", interval)
-                balance_with_transmission(interval, solution.network, False)
+                balance_with_transmission(interval, solution.network, "precharging_adjust_surplus", False)
+                balance_with_transmission(interval, solution.network, "precharging_adjust_loadfollow", False)
+                balance_with_transmission(interval, solution.network, "precharging_adjust_flexible", False)
 
                 perform_fill_adjustment(
                     interval,
@@ -1446,7 +1438,6 @@ def resolve_energy_discontinuities(
                         )
 
         network_m.calculate_spillage_and_deficit(solution.network, interval)
-
         fleet_m.update_stored_energies(solution.fleet, interval, solution.static.interval_resolutions[interval], True)
     return None
 
