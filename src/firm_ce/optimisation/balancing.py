@@ -342,7 +342,7 @@ def energy_balance_for_interval(
         # Run local load-following generators to balance remaining deficits
         balance_with_loadfollow(interval, solution.network, solution.fleet, solution.static.resolution, forward_time_flag)
         # Run neighbouring load-following generators
-        balance_with_transmission(solution.network, "load_follow", interval)
+        balance_with_transmission(interval, solution.network, "loadfollow", False)
 
     if network_m.check_remaining_netloads(solution.network, interval, "deficit"):
         # Run local storages to balance remaining deficits

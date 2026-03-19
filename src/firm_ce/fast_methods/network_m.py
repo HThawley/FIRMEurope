@@ -524,7 +524,7 @@ def set_node_fills_and_surpluses(
             node.fill = max(node.netload_t, 0.0)
             node.surplus = -min(node.netload_t, 0.0)
 
-    elif transmission_case == "load_follow":
+    elif transmission_case == "loadfollow":
         for node in network_instance.nodes.values():
             node.fill = max(node.netload_t - node.loadfollow_power[interval], 0.0)
             node.surplus = max(node.loadfollow_max_t[-1] - node.loadfollow_power[interval], 0.0)
@@ -595,7 +595,7 @@ def set_node_fills_and_surpluses(
             )
             node.surplus = -min(
                 node.netload_t
-                - node.load_follow_power[interval]
+                - node.loadfollow_power[interval]
                 - max(node.storage_power[interval], 0.0),  # remove committed discharge from surplus
                 0.0
             )
@@ -622,7 +622,7 @@ def set_node_fills_and_surpluses(
             node.fill = -min(node.storage_power[interval], 0.0)  # storage charge
             node.surplus = -min(
                 node.netload_t
-                - node.loadfollow_power  # remove committed loadfollow
+                - node.loadfollow_power[interval]  # remove committed loadfollow
                 - max(node.storage_power[interval], 0.0)  # remove committed discharge
                 - node.flexible_power[interval],  # remove committed flex
                 0.0
