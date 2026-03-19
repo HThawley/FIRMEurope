@@ -343,7 +343,7 @@ def objective(solution: Solution_InstanceType) -> tuple[float]:
         return solution.lcoe, solution.penalties  # End early if reliability constraint breached
     total_costs += calculate_variable_costs(solution)
 
-    lcoe = total_costs * solution.static.year_count / sum(solution.static.year_energy_demand) / 1000  # $/MWh
+    lcoe = total_costs * solution.static.mean_annual_demand / 1000  # $/MWh
     return lcoe, solution.penalties
 
 

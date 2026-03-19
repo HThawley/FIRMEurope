@@ -89,10 +89,8 @@ class Solver:
             self.config.fixed_costs_threshold,
         )
         return args
-        
-    def get_mhmga_kwargs(
-        self, 
-    ) -> dict:
+
+    def get_mhmga_kwargs(self) -> dict:
         kwargs = {
             "static": self.parameters_static,
             "fleet": self.fleet_static,
@@ -133,6 +131,7 @@ class Solver:
 
         # fkwargs = self.get_mhmga_kwargs()
         fargs = self.get_differential_evolution_args()
+        jacobian = self.get_approximate_jacobian()
 
         problem = OptimizationProblem(
             objective=mga_parallel_wrapper,
@@ -181,7 +180,9 @@ class Solver:
                 niche_elitism=self.config.mga_niche_elitism[step],
                 noptimal_rel=self.config.mga_noptimal_rel[step],
                 noptimal_abs=self.config.mga_noptimal_abs[step],
-                violation_factor=PENALTY_MULTIPLIER
+                violation_factor=PENALTY_MULTIPLIER,
+                mutation_scaler=jacobian,
+                centroid_scaler=jacobian,
             )
 
             algorithm.step(disp_rate=self.config.mga_disp_rate)
@@ -312,6 +313,68 @@ class Solver:
         self.logger.info(f"[midpoint_explore] finished; wrote {len(evaluation_records)} feasible points to {csv_path}")
 
         return None
+
+    def get_approximate_jacobian(self) -> NDArray[np.float64]:
+        """Calculates approximate dC/dx for all assets in the x vector."""
+
+        flexible_costs = []
+
+        for gen in self.fleet.generators.values():
+            if gen.is_flexible:
+                # Total marginal cost = VOM + Fuel Cost ($/MWh)
+                marginal_cost_mwh = gen.cost.vom + gen.cost.fuel_cost_mwh
+                # Convert $/MWh to $/GWh to match the energy variables
+                flexible_costs.append(marginal_cost_mwh * 1e3)
+        if not flexible_costs:
+            self.logger.warning("No flexible generators found. Assuming 0 system marginal cost.")
+            flexible_costs = [0.0]
+
+        assumed_system_marginal_cost = np.mean(flexible_costs)
+
+        def get_annuity_factor(dr: float, life: float) -> float:
+            return (1 - (1 + dr) ** (-1 * life)) / dr
+
+        jacobian = []
+
+        for gen in self.fleet.generators.values():
+            af = get_annuity_factor(gen.cost.discount_rate, gen.cost.lifetime)
+            capex = (1e6 * gen.cost.capex_p) / af if af > 1e-6 else 0.0
+            fom = 1e6 * gen.cost.fom
+            dc_fixed = capex + fom
+            dc_var = 0.0
+            if not gen.is_flexible and len(gen.data) > 0:
+                cf = np.mean(gen.data)
+                annual_gen_gwh = cf * 8760
+                # unit_costs.vom is $/MWh -> * 1e3 for $/GWh
+                dc_var = annual_gen_gwh * ((gen.cost.vom * 1e3) - assumed_system_marginal_cost)
+            jacobian.append(dc_fixed + dc_var)
+
+        # Storages Power
+        for sto in self.fleet.storages.values():
+            af = get_annuity_factor(sto.cost.discount_rate, sto.cost.lifetime)
+            capex = (1e6 * sto.cost.capex_p) / af if af > 1e-6 else 0.0
+            fom = 1e6 * sto.cost.fom
+            jacobian.append(capex + fom)  # dc_var assumed 0
+
+        # Storages Energy
+        for sto in self.fleet.storages.values():
+            if sto.duration == 0:
+                af = get_annuity_factor(sto.cost.discount_rate, sto.cost.lifetime)
+                capex = (1e6 * sto.cost.capex_e) / af if af > 1e-6 else 0.0
+                jacobian.append(capex)  # dc_var assumed 0
+            else:
+                jacobian.append(0.0)
+
+        # Lines
+        for line in self.network.major_lines.values():
+            af = get_annuity_factor(line.cost.discount_rate, line.cost.lifetime)
+            capex = (1e3 * line.length * line.cost.capex_p + 1e3 * line.cost.transformer_capex) / af if af > 1e-6 else 0.0
+            fom = 1e3 * line.length * line.cost.fom
+            jacobian.append(capex + fom)  # dc_var assumed 0
+
+        jacobian = np.array(jacobian, dtype=np.float64)
+        jacobian /= (self.static.mean_annual_demand * 1000)  # $/MWh
+        return jacobian
 
     def capacity_expansion(self):
         pass

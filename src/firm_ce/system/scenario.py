@@ -33,6 +33,7 @@ from firm_ce.system.topology import Line_InstanceType
 
 class Scenario:
     def __init__(self, model_data: ModelData, scenario_id: int) -> None:
+        self.data_status = False
         self.logger, self.results_dir = model_data.logger, model_data.results_dir
 
         self.model_data = model_data
@@ -145,6 +146,7 @@ class Scenario:
         load_datafiles_to_storages(self.fleet, datafiles, self.limit_timesteps, yeartuple)
 
         static_m.set_year_energy_demand(self.static, self.network.nodes)
+        self.data_status = True
 
         return None
 
@@ -155,6 +157,7 @@ class Scenario:
         unload_data_from_storages(self.fleet)
 
         static_m.unset_year_energy_demand(self.static)
+        self.data_status = False
 
         gc.collect()
 

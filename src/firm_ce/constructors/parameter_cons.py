@@ -85,7 +85,7 @@ def construct_ScenarioParameters_object(
             year_count,
             resolution,
         )
-        if year_first_t[-1] > limit_timesteps: 
+        if year_first_t[-1] > limit_timesteps:
             year_first_t = year_first_t[:-1]
 
     else:
@@ -96,8 +96,6 @@ def construct_ScenarioParameters_object(
             year_count,
             resolution,
         )
-
-
 
     return ScenarioParameters(
         resolution,
