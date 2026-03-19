@@ -23,6 +23,7 @@ if JIT_ENABLED:
         ("flexible_merit_order", int64[:]),
         ("loadfollow_merit_order", int64[:]),
         ("netload_t", float64),
+        ("must_run_baseload", float64),
         ("discharge_max_t", float64[:]),
         ("charge_max_t", float64[:]),
         ("flexible_max_t", float64[:]),
@@ -136,6 +137,7 @@ class Node:
         self.loadfollow_merit_order = np.empty((0,), dtype=np.int64)
         self.storage_merit_order = np.empty((0,), dtype=np.int64)
         self.netload_t = 0.0  # GW
+        self.must_run_baseload = 0.0
         self.discharge_max_t = np.empty((0,), dtype=np.float64)  # GW
         self.charge_max_t = np.empty((0,), dtype=np.float64)  # GW
         self.flexible_max_t = np.empty((0,), dtype=np.float64)  # GW

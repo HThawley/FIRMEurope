@@ -205,7 +205,9 @@ def update_netload_t(
     """
     # Note: exports are negative, so they add to load
     node_instance.netload_t = (
-        get_data(node_instance, "residual_load")[interval] - node_instance.imports_exports[interval]
+        get_data(node_instance, "residual_load")[interval]
+        - node_instance.imports_exports[interval]
+        - node_instance.must_run_baseload
     )
 
     if precharging_flag:

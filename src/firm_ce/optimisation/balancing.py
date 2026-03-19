@@ -242,37 +242,6 @@ def balance_with_loadfollow(
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def enforce_must_run(
-    interval: int64,
-    network: Network_InstanceType,
-    fleet: Fleet_InstanceType,
-    resolution: float64,
-    forward_time_flag: boolean,
-) -> None:
-    """Enforces minimum load rules for dual-flagged load-following generators."""
-    for node in network.nodes.values():
-        for idx, loadfollow_order in enumerate(node.loadfollow_merit_order):
-            generator = fleet.generators[loadfollow_order]
-            if generator.is_loadfollow:
-                if forward_time_flag:
-                    fuel_avail = generator.fuel.remaining_energy[interval] / resolution
-                else:
-                    fuel_avail = generator.fuel.remaining_energy_temp_reverse / resolution
-
-                actual_must_run = min(generator.baseload_min_op, fuel_avail)
-                if actual_must_run > TOLERANCE:
-                    # Allocate power to the generator
-                    generator.dispatch_power[interval] += actual_must_run
-                    node.loadfollow_power[interval] += actual_must_run
-                    # Deduct the must-run portion directly from the node's netload
-                    node.netload_t -= actual_must_run
-                    # Claim available upward capacity dynamically
-                    node.loadfollow_max_t[idx:] -= actual_must_run
-                    generator_m.update_fuel_reserve(generator, interval, resolution, actual_must_run, forward_time_flag)
-    return None
-
-
-@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def energy_balance_for_interval(
     solution,
     interval: int64,
@@ -323,14 +292,6 @@ def energy_balance_for_interval(
         solution.fleet,
         solution.static.interval_resolutions[interval],
         forward_time_flag,
-    )
-
-    enforce_must_run(
-        interval,
-        solution.network,
-        solution.fleet,
-        solution.static.interval_resolutions[interval],
-        forward_time_flag
     )
 
     # Check deficits
@@ -1395,14 +1356,6 @@ def resolve_energy_discontinuities(
             network_m.reset_flexible(solution.network, interval)
             fleet_m.reset_loadfollow(solution.fleet, interval)
             fleet_m.reset_flexible(solution.fleet, interval)
-
-            enforce_must_run(
-                interval,
-                solution.network,
-                solution.fleet,
-                solution.static.resolution,
-                True,
-            )
 
             balance_with_transmission(interval, solution.network, "precharging_adjust_storage", False)
             balance_with_loadfollow(interval, solution.network, solution.fleet, solution.static.resolution, True)

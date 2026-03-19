@@ -64,6 +64,8 @@ def build_capacity(
     generator_instance.new_build += new_build_power_capacity
     generator_instance.heat_base_consumption = generator_instance.capacity * generator_instance.cost.heat_rate_base  # GWh/h
     generator_instance.baseload_min_op = generator_instance.baseload_min_op_pct * generator_instance.capacity
+    generator_instance.node.must_run_baseload += generator_instance.baseload_min_op
+    generator_instance.fuel.remaining_energy -= generator_instance.baseload_min_op
 
     generator_instance.line.capacity += new_build_power_capacity
     generator_instance.line.new_build += new_build_power_capacity
@@ -272,7 +274,12 @@ def set_loadfollow_max_t(
     merit_order_idx: int64,
     forward_time_flag: boolean,
 ) -> None:
-    max_upward = max(generator_instance.capacity - generator_instance.dispatch_power[interval], 0.0)
+    max_upward = max(
+        generator_instance.capacity
+        - generator_instance.baseload_min_op
+        - generator_instance.dispatch_power[interval],
+        0.0
+    )
     advertised_limit = min(max_upward, generator_instance.fuel.allocated_energy / resolution)
 
     generator_instance.loadfollow_max_t = generator_instance.dispatch_power[interval] + advertised_limit
@@ -323,7 +330,9 @@ def set_precharging_loadfollow_max_t(
     if generator_instance.fuel.trickling_flag:
         advertised_limit = min(
             generator_instance.fuel.allocated_trickling / resolution,
-            generator_instance.capacity - generator_instance.dispatch_power[interval],
+            generator_instance.capacity
+            - generator_instance.baseload_min_op
+            - generator_instance.dispatch_power[interval],
         )
         generator_instance.loadfollow_max_t = advertised_limit
         generator_instance.fuel.allocated_trickling -= advertised_limit * resolution
@@ -371,7 +380,7 @@ def set_live_loadfollow_max_t(
         live_pool = generator_instance.fuel.remaining_energy_temp_reverse
 
     generator_instance.loadfollow_max_t = min(
-        generator_instance.capacity,
+        generator_instance.capacity - generator_instance.baseload_min_op,
         generator_instance.dispatch_power[interval] + (live_pool / resolution)
     )
     return None
@@ -411,7 +420,9 @@ def set_live_trickling_loadfollow_max_t(
         )
         # Note: Delta limit for dispatch_power_update
         generator_instance.loadfollow_max_t = min(
-            generator_instance.capacity - generator_instance.dispatch_power[interval],
+            generator_instance.capacity
+            - generator_instance.baseload_min_op
+            - generator_instance.dispatch_power[interval],
             live_remaining_trickling / resolution
         )
     else:
@@ -592,7 +603,11 @@ def calculate_lt_generation(
     Attributes modified for the flexible Generator instance: lt_generation, line, unit_lt_hours.
     Attributes modified for the referenced Generator.line: lt_flows.
     """
-    update_lt_generation(generator_instance, generator_instance.dispatch_power, interval_resolutions)
+    total_dispatch = generator_instance.dispatch_power
+    if generator_instance.is_loadfollow:
+        total_dispatch += generator_instance.baseload_min_op
+
+    update_lt_generation(generator_instance, total_dispatch, interval_resolutions)
     generator_instance.unit_lt_hours = sum(
         np.ceil(generator_instance.dispatch_power / generator_instance.unit_size) * interval_resolutions
     )
