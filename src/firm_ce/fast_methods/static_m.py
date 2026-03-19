@@ -5,7 +5,7 @@ import numpy as np
 from numpy.typing import NDArray
 from numba.core.types import UniTuple
 
-from firm_ce.common.constants import FASTMATH, LEAPDAYS
+from firm_ce.common.constants import FASTMATH, LEAPDAYS, BOUNDSCHECK
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import DictType, boolean, float64, int64
 from firm_ce.fast_methods import node_m
@@ -13,7 +13,7 @@ from firm_ce.system.parameters import ScenarioParameters_InstanceType
 from firm_ce.system.topology import Node_InstanceType
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_year_t_boundaries(
     static_instance: ScenarioParameters_InstanceType,
     year: int64,
@@ -40,7 +40,7 @@ def get_year_t_boundaries(
     return static_instance.year_first_t[year], last_t
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_year_first_block(static_instance: ScenarioParameters_InstanceType, blocks_per_day: int64) -> None:
     static_instance.year_first_t = np.zeros(static_instance.year_count, dtype=np.int64)
 
@@ -54,7 +54,7 @@ def set_year_first_block(static_instance: ScenarioParameters_InstanceType, block
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_year_energy_demand(
     static_instance: ScenarioParameters_InstanceType,
     nodes_typed_dict: DictType(int64, Node_InstanceType),
@@ -69,7 +69,7 @@ def set_year_energy_demand(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def unset_year_energy_demand(
     static_instance: ScenarioParameters_InstanceType,
 ) -> None:
@@ -94,7 +94,7 @@ def unset_year_energy_demand(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_reliability_constraint(
     static_instance: ScenarioParameters_InstanceType,
     year: int64,
@@ -103,7 +103,7 @@ def check_reliability_constraint(
     return (year_unserved_energy / static_instance.year_energy_demand[year]) <= static_instance.allowance
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_block_resolutions(
     static_instance: ScenarioParameters_InstanceType,
     block_durations: int64[:],

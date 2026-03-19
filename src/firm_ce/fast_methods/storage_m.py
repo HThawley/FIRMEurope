@@ -1,7 +1,7 @@
 # type: ignore
 import numpy as np
 
-from firm_ce.common.constants import FASTMATH, TOLERANCE
+from firm_ce.common.constants import FASTMATH, TOLERANCE, BOUNDSCHECK
 from firm_ce.common.exceptions import (
     raise_getting_unloaded_data_error,
     raise_static_modification_error,
@@ -13,7 +13,7 @@ from firm_ce.system.components import Storage, Storage_InstanceType
 from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def create_dynamic_copy(
     storage_instance: Storage_InstanceType,
     nodes_typed_dict: DictType(int64, Node_InstanceType),
@@ -57,7 +57,7 @@ def create_dynamic_copy(
     return storage_copy
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def build_capacity(
     storage_instance: Storage_InstanceType,
     new_build_capacity: float64,
@@ -82,7 +82,7 @@ def build_capacity(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def load_data(
     storage_instance: Storage_InstanceType,
     inflow_trace: float64[:],
@@ -113,7 +113,7 @@ def load_data(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def unload_data(storage_instance: Storage_InstanceType) -> None:
     """
     Unload the inflow data from the Storage instance. This is done after solving a Scenario to reduce memory usage.
@@ -135,7 +135,7 @@ def unload_data(storage_instance: Storage_InstanceType) -> None:
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_data(
     storage_instance: Storage_InstanceType,
     data_type: unicode_type,
@@ -166,7 +166,7 @@ def get_data(
         raise RuntimeError("Invalid data_type argument for Storage.get_data(data_type).")
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def allocate_memory(
     storage_instance: Storage_InstanceType,
     intervals_count: int64
@@ -199,7 +199,7 @@ def allocate_memory(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_stored_energy(
     storage_instance: Storage_InstanceType,
 ) -> None:
@@ -230,7 +230,7 @@ def initialise_stored_energy(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_dispatch_max_t(
     storage_instance: Storage_InstanceType,
     interval: int64,
@@ -283,7 +283,7 @@ def set_dispatch_max_t(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def dispatch(
     storage_instance: Storage_InstanceType,
     interval: int64,
@@ -356,7 +356,7 @@ def dispatch(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_stored_energy(
     storage_instance: Storage_InstanceType,
     interval: int64,
@@ -394,7 +394,7 @@ def update_stored_energy(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_lt_generation(
     storage_instance: Storage_InstanceType,
     interval_resolutions: float64[:],
@@ -424,7 +424,7 @@ def calculate_lt_generation(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_variable_costs(
     storage_instance: Storage_InstanceType,
     year_float: float64,
@@ -462,7 +462,7 @@ def calculate_variable_costs(
     return ltcosts_m.get_variable(storage_instance.lt_costs)
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_fixed_costs(
     storage_instance: Storage_InstanceType,
     include_existing: bool,
@@ -511,7 +511,7 @@ def calculate_fixed_costs(
     return ltcosts_m.get_fixed(storage_instance.lt_costs)
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_deficit_block(
     storage_instance: Storage_InstanceType,
     interval: int64,
@@ -543,7 +543,7 @@ def initialise_deficit_block(
     storage_instance.deficit_block_max_storage = storage_instance.stored_energy_temp_reverse
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_deficit_block_bounds(
     storage_instance: Storage_InstanceType,
     stored_energy: float64,
@@ -573,7 +573,7 @@ def update_deficit_block_bounds(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def assign_precharging_reserves(
     storage_instance: Storage_InstanceType,
 ) -> None:
@@ -614,7 +614,7 @@ def assign_precharging_reserves(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_precharging_flags(
     storage_instance: Storage_InstanceType,
     interval: int64,
@@ -653,7 +653,7 @@ def initialise_precharging_flags(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_precharging_flags(
     storage_instance: Storage_InstanceType,
     interval: int64,
@@ -701,7 +701,7 @@ def update_precharging_flags(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_precharging_max_t(
     storage_instance: Storage_InstanceType,
     interval: int64,
@@ -760,7 +760,7 @@ def set_precharging_max_t(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_dispatch_energy_update(
     storage_instance: Storage_InstanceType,
     dispatch_power_original: float64,
@@ -803,7 +803,7 @@ def calculate_dispatch_energy_update(
     return dispatch_energy_update
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_precharge_dispatch(
     storage_instance: Storage_InstanceType,
     interval: int64,
@@ -832,7 +832,7 @@ def update_precharge_dispatch(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_available_dispatch(
     storage_instance: Storage_InstanceType,
     interval: int64,

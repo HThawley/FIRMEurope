@@ -1,13 +1,13 @@
 # type: ignore
 from typing import Tuple
 
-from firm_ce.common.constants import FASTMATH
+from firm_ce.common.constants import FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import DictType, TypedList, boolean, float64, int64
 from firm_ce.system.topology import Line_InstanceType, Node_InstanceType, Route, Route_InstanceType
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def create_dynamic_copy(
     route_instance: Route_InstanceType,
     nodes_typed_dict: DictType(int64, Node_InstanceType),
@@ -32,7 +32,7 @@ def create_dynamic_copy(
     )
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_contains_line(
     route_instance: Route_InstanceType,
     new_line: Line_InstanceType,
@@ -58,7 +58,7 @@ def check_contains_line(
     return False
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_contains_node(
     route_instance: Route_InstanceType,
     new_node: Node_InstanceType,
@@ -85,7 +85,7 @@ def check_contains_node(
     return False
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_forward_outflow(current_flow: float64, exist_flow: float64, capacity: float64, l_eff: float64) -> float64:
     """Helper to determine the constrained outflow during the forward pass."""
     # maximum flow that may be reversed from pov of recipient
@@ -101,7 +101,7 @@ def get_forward_outflow(current_flow: float64, exist_flow: float64, capacity: fl
     return (inflow_cancel / l_eff) + (inflow_new * l_eff)
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_backward_inflow_and_delta(required_flow: float64, exist_flow: float64, l_eff: float64) -> Tuple[float64, float64]:
     """Helper to determine the required inflow and line flow delta during the backward pass."""
     outflow_cancel = min(required_flow, max(0.0, -exist_flow))
@@ -113,7 +113,7 @@ def get_backward_inflow_and_delta(required_flow: float64, exist_flow: float64, l
     return required_inflow, flow_delta
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_flow_update(
     route_instance: Route_InstanceType,
     interval: int64,
@@ -175,7 +175,7 @@ def calculate_flow_update(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_exports(
     route_instance: Route_InstanceType,
     interval: int64,

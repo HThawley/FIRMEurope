@@ -1,7 +1,7 @@
 # type: ignore
 import numpy as np
 
-from firm_ce.common.constants import FASTMATH, TOLERANCE
+from firm_ce.common.constants import FASTMATH, TOLERANCE, BOUNDSCHECK
 from firm_ce.common.exceptions import (
     raise_getting_unloaded_data_error,
     raise_static_modification_error,
@@ -13,7 +13,7 @@ from firm_ce.system.components import Generator, Generator_InstanceType, Fuel_In
 from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def create_dynamic_copy(
     generator_instance: Generator_InstanceType,
     nodes_typed_dict: DictType(int64, Node_InstanceType),
@@ -52,7 +52,7 @@ def create_dynamic_copy(
     return generator_copy
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def build_capacity(
     generator_instance: Generator_InstanceType,
     new_build_power_capacity: float64,
@@ -72,7 +72,7 @@ def build_capacity(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def load_data(
     generator_instance: Generator_InstanceType,
     generation_trace: float64[:],
@@ -108,7 +108,7 @@ def load_data(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def unload_data(generator_instance: Generator_InstanceType) -> None:
     """
     Unload the capacity factor trace and flexible annual constraint data from the Generator instance. This is done
@@ -131,7 +131,7 @@ def unload_data(generator_instance: Generator_InstanceType) -> None:
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_data(
     generator_instance: Generator_InstanceType,
     data_type: unicode_type,
@@ -163,7 +163,7 @@ def get_data(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def allocate_memory(
     generator_instance: Generator_InstanceType,
     intervals_count: int64,
@@ -195,7 +195,7 @@ def allocate_memory(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_residual_load(
     generator_instance: Generator_InstanceType,
     added_capacity: float64,
@@ -208,7 +208,7 @@ def update_residual_load(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_lt_generation(
     generator_instance: Generator_InstanceType,
     generation_trace: float64[:],
@@ -219,7 +219,7 @@ def update_lt_generation(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_unit_type(
     generator_instance: Generator_InstanceType,
     unit_type: unicode_type,
@@ -241,7 +241,7 @@ def check_unit_type(
     return generator_instance.unit_type == unit_type
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_flexible_max_t(
     generator_instance: Generator_InstanceType,
     interval: int64,
@@ -264,7 +264,7 @@ def set_flexible_max_t(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_loadfollow_max_t(
     generator_instance: Generator_InstanceType,
     interval: int64,
@@ -287,7 +287,7 @@ def set_loadfollow_max_t(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_precharging_flexible_max_t(
     generator_instance: Generator_InstanceType,
     interval: int64,
@@ -313,7 +313,7 @@ def set_precharging_flexible_max_t(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_precharging_loadfollow_max_t(
     generator_instance: Generator_InstanceType,
     interval: int64,
@@ -339,7 +339,7 @@ def set_precharging_loadfollow_max_t(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_live_flexible_max_t(
     generator_instance: Generator_InstanceType,
     interval: int64,
@@ -358,7 +358,7 @@ def set_live_flexible_max_t(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_live_loadfollow_max_t(
     generator_instance: Generator_InstanceType,
     interval: int64,
@@ -377,7 +377,7 @@ def set_live_loadfollow_max_t(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_live_trickling_flexible_max_t(
     generator_instance: Generator_InstanceType,
     interval: int64,
@@ -398,7 +398,7 @@ def set_live_trickling_flexible_max_t(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_live_trickling_loadfollow_max_t(
     generator_instance: Generator_InstanceType,
     interval: int64,
@@ -419,7 +419,7 @@ def set_live_trickling_loadfollow_max_t(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_fuel_reserve(
     generator_instance: Generator_InstanceType,
     interval: int64,
@@ -435,7 +435,7 @@ def update_fuel_reserve(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def dispatch_flexible(
     generator_instance: Generator_InstanceType,
     interval: int64,
@@ -503,7 +503,7 @@ def dispatch_flexible(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def dispatch_loadfollow(
     generator_instance: Generator_InstanceType,
     interval: int64,
@@ -567,7 +567,7 @@ def dispatch_loadfollow(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_lt_generation(
     generator_instance: Generator_InstanceType,
     interval_resolutions: float64[:],
@@ -599,7 +599,7 @@ def calculate_lt_generation(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_variable_costs(
     generator_instance: Generator_InstanceType,
     year_float: float64,
@@ -637,7 +637,7 @@ def calculate_variable_costs(
     return ltcosts_m.get_variable(generator_instance.lt_costs)
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_fixed_costs(
     generator_instance: Generator_InstanceType,
     include_existing: bool,
@@ -686,7 +686,7 @@ def calculate_fixed_costs(
     return ltcosts_m.get_fixed(generator_instance.lt_costs)
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_precharge_flexible_dispatch(
     generator_instance: Generator_InstanceType,
     interval: int64,
@@ -703,7 +703,7 @@ def update_precharge_flexible_dispatch(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_precharge_loadfollow_dispatch(
     generator_instance: Generator_InstanceType,
     interval: int64,

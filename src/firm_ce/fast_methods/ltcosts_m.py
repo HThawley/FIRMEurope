@@ -1,31 +1,31 @@
 # type: ignore
-from firm_ce.common.constants import FASTMATH
+from firm_ce.common.constants import FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import float64, unicode_type
 from firm_ce.system.costs import LTCosts_InstanceType, UnitCost_InstanceType
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_total(ltcosts_instance: LTCosts_InstanceType) -> float64:
     return ltcosts_instance.annualised_build + ltcosts_instance.fom + ltcosts_instance.vom + ltcosts_instance.fuel
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_variable(ltcosts_instance: LTCosts_InstanceType) -> float64:
     return ltcosts_instance.vom + ltcosts_instance.fuel
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_fixed(ltcosts_instance: LTCosts_InstanceType) -> float64:
     return ltcosts_instance.annualised_build + ltcosts_instance.fom
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_annuity_factor(discount_rate: float64, lifetime: float64) -> float64:
     return (1 - (1 + discount_rate) ** (-1 * lifetime)) / discount_rate
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_annualised_build(
     ltcosts_instance: LTCosts_InstanceType,
     energy_capacity: float64,
@@ -53,7 +53,7 @@ def calculate_annualised_build(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_lcoe(
     ltcosts_instance: LTCosts_InstanceType,
     generation: float64,
@@ -66,7 +66,7 @@ def calculate_lcoe(
     return 0.0
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_fom(
     ltcosts_instance: LTCosts_InstanceType,
     power_capacity: float64,
@@ -81,7 +81,7 @@ def calculate_fom(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_vom(
     ltcosts_instance: LTCosts_InstanceType,
     generation: float64,
@@ -92,7 +92,7 @@ def calculate_vom(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_fuel(
     ltcosts_instance: LTCosts_InstanceType,
     generation: float64,

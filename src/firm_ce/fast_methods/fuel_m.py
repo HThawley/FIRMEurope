@@ -1,14 +1,14 @@
 # type: ignore
 import numpy as np
 
-from firm_ce.common.constants import FASTMATH, TOLERANCE
+from firm_ce.common.constants import FASTMATH, TOLERANCE, BOUNDSCHECK
 from firm_ce.common.exceptions import raise_static_modification_error, raise_getting_unloaded_data_error
 from firm_ce.common.typing import float64, unicode_type, int64
 from firm_ce.common.jit_overload import njit
 from firm_ce.system.components import Fuel, Fuel_InstanceType
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def create_dynamic_copy(
     fuel_instance: Fuel_InstanceType,
 ) -> Fuel_InstanceType:
@@ -56,7 +56,7 @@ def create_dynamic_copy(
     return fuel_copy
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def allocate_memory(fuel_instance: Fuel_InstanceType, intervals_count: int) -> None:
     """
     Allocates memory for attributes of the Fleet jitclass that are required to be modified when testing candidate solutions
@@ -72,7 +72,7 @@ def allocate_memory(fuel_instance: Fuel_InstanceType, intervals_count: int) -> N
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def load_data(
     fuel_instance: Fuel_InstanceType,
     annual_limit: float64[:],
@@ -107,7 +107,7 @@ def load_data(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def unload_data(fuel_instance: Fuel_InstanceType) -> None:
     """
     Unload the capacity factor trace and flexible annual constraint data from the Fuel instance. This is done
@@ -130,7 +130,7 @@ def unload_data(fuel_instance: Fuel_InstanceType) -> None:
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_data(
     fuel_instance: Fuel_InstanceType,
     data_type: unicode_type,
@@ -162,7 +162,7 @@ def get_data(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_annual_limit(
     fuel_instance: Fuel_InstanceType,
     year: int64,
@@ -170,7 +170,7 @@ def get_annual_limit(
     return get_data(fuel_instance, "annual_limit")[year]
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_annual_limits(fuel_instance: Fuel_InstanceType, year: int, first_t: int) -> None:
     """
     Initialises the remaining_energy attribute of the Fuel jitclass to the annual limit for the
@@ -189,7 +189,7 @@ def initialise_annual_limits(fuel_instance: Fuel_InstanceType, year: int, first_
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def assign_trickling_reserves(fuel_instance: Fuel_InstanceType) -> None:
     fuel_instance.trickling_reserves = (
         fuel_instance.deficit_block_max_energy - fuel_instance.deficit_block_min_energy
@@ -197,7 +197,7 @@ def assign_trickling_reserves(fuel_instance: Fuel_InstanceType) -> None:
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_deficit_block_bounds(
     fuel_instance: Fuel_InstanceType,
     remaining_energy: float64,
@@ -228,7 +228,7 @@ def update_deficit_block_bounds(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_deficit_block(
     fuel_instance: Fuel_InstanceType,
     interval: int64,
@@ -260,7 +260,7 @@ def initialise_deficit_block(
     fuel_instance.deficit_block_min_energy = fuel_instance.remaining_energy_temp_reverse
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_precharging_flags(
     fuel_instance: Fuel_InstanceType,
     interval: int64,
@@ -293,7 +293,7 @@ def initialise_precharging_flags(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_precharging_flags(
     fuel_instance: Fuel_InstanceType,
     interval: int64,

@@ -1,5 +1,5 @@
 # type: ignore
-from firm_ce.common.constants import FASTMATH, TOLERANCE
+from firm_ce.common.constants import FASTMATH, TOLERANCE, BOUNDSCHECK
 from firm_ce.common.exceptions import raise_static_modification_error
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import DictType, TypedDict, boolean, float64, int64, unicode_type
@@ -8,7 +8,7 @@ from firm_ce.system.components import Fleet, Fleet_InstanceType, Generator_Insta
 from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def create_dynamic_copy(
     fleet_instance: Fleet_InstanceType,
     nodes_typed_dict: DictType(int64, Node_InstanceType),
@@ -71,7 +71,7 @@ def create_dynamic_copy(
     return fleet_copy
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def build_capacities(
     fleet_instance: Fleet_InstanceType,
     decision_x: float64[:],
@@ -119,7 +119,7 @@ def build_capacities(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def allocate_memory(
     fleet_instance: Fleet_InstanceType,
     intervals_count: int64,
@@ -159,7 +159,7 @@ def allocate_memory(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_stored_energies(
     fleet_instance: Fleet_InstanceType,
 ) -> None:
@@ -186,7 +186,7 @@ def initialise_stored_energies(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_annual_limits(
     fleet_instance: Fleet_InstanceType,
     year: int64,
@@ -218,7 +218,7 @@ def initialise_annual_limits(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def count_generator_unit_type(
     fleet_instance: Fleet_InstanceType,
     unit_type: unicode_type,
@@ -242,7 +242,7 @@ def count_generator_unit_type(
     return count
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_stored_energies(
     fleet_instance: Fleet_InstanceType,
     interval: int64,
@@ -277,7 +277,7 @@ def update_stored_energies(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_remaining_flexible_energies(
     fleet_instance: Fleet_InstanceType,
     interval: int64,
@@ -323,7 +323,7 @@ def update_remaining_flexible_energies(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_lt_generations(
     fleet_instance: Fleet_InstanceType,
     interval_resolutions: float64[:],
@@ -359,7 +359,7 @@ def calculate_lt_generations(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_deficit_block(
     fleet_instance: Fleet_InstanceType,
     interval_after_deficit_block: int64,
@@ -395,7 +395,7 @@ def initialise_deficit_block(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def reset_flexible(
     fleet_instance: Fleet_InstanceType,
     interval: int64,
@@ -422,7 +422,7 @@ def reset_flexible(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def reset_dispatch(
     fleet_instance: Fleet_InstanceType,
     interval: int64,
@@ -450,7 +450,7 @@ def reset_dispatch(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_deficit_block(
     fleet_instance: Fleet_InstanceType,
 ) -> None:
@@ -482,7 +482,7 @@ def update_deficit_block(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def assign_precharging_values(
     fleet_instance: Fleet_InstanceType,
     interval: int64,
@@ -543,7 +543,7 @@ def assign_precharging_values(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_precharging_flags(
     fleet_instance: Fleet_InstanceType,
     interval: int64,
@@ -578,7 +578,7 @@ def initialise_precharging_flags(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_precharging_flags(
     fleet_instance: Fleet_InstanceType,
     interval: int64,
@@ -615,7 +615,7 @@ def update_precharging_flags(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_precharge_remaining(
     fleet_instance: Fleet_InstanceType,
 ) -> boolean:
@@ -636,7 +636,7 @@ def check_precharge_remaining(
     return False
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_trickling_remaining(
     fleet_instance: Fleet_InstanceType,
 ) -> boolean:
@@ -663,7 +663,7 @@ def check_trickling_remaining(
     return False
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def determine_feasible_storage_dispatch(
     fleet_instance: Fleet_InstanceType,
     interval: int64,
@@ -700,7 +700,7 @@ def determine_feasible_storage_dispatch(
     return infeasible_flag
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def determine_feasible_flexible_dispatch(
     fleet_instance: Fleet_InstanceType,
     interval: int64,
@@ -743,7 +743,7 @@ def determine_feasible_flexible_dispatch(
     return infeasible_flag
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_available_storage_dispatch(fleet_instance: Fleet_InstanceType, interval: int64) -> None:
     """
     Calculates the maximum amount that dispatch_power for each Storage system in a particular time interval can be adjusted.
@@ -767,7 +767,7 @@ def calculate_available_storage_dispatch(fleet_instance: Fleet_InstanceType, int
         storage_m.calculate_available_dispatch(storage, interval)
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def reset_flexible_reserves(fleet_instance: Fleet_InstanceType) -> None:
     """
     Resets the trickling reserves for all flexible Generators to 0. Required when

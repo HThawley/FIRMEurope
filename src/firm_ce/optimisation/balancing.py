@@ -1,5 +1,5 @@
 # type: ignore
-from firm_ce.common.constants import FASTMATH, TOLERANCE
+from firm_ce.common.constants import FASTMATH, TOLERANCE, BOUNDSCHECK
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import boolean, float64, int64
 from firm_ce.fast_methods import (
@@ -14,7 +14,7 @@ from firm_ce.system.components import Fleet_InstanceType
 from firm_ce.system.topology import Network_InstanceType
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_interval(
     interval: int64,
     network: Network_InstanceType,
@@ -75,7 +75,7 @@ def initialise_interval(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def balance_with_transmission(
     interval: int64,
     network: Network_InstanceType,
@@ -117,7 +117,7 @@ def balance_with_transmission(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def balance_with_storage(
     interval: int64,
     network: Network_InstanceType,
@@ -157,7 +157,7 @@ def balance_with_storage(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def balance_with_flexible(
     interval: int64,
     network: Network_InstanceType,
@@ -198,7 +198,7 @@ def balance_with_flexible(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def balance_with_loadfollow(
     interval: int64,
     network: Network_InstanceType,
@@ -239,7 +239,7 @@ def balance_with_loadfollow(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def enforce_must_run(
     interval: int64,
     network: Network_InstanceType,
@@ -270,7 +270,7 @@ def enforce_must_run(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def energy_balance_for_interval(
     solution,
     interval: int64,
@@ -368,7 +368,7 @@ def energy_balance_for_interval(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def balance_for_period(
     start_t: int64,
     end_t: int64,
@@ -433,7 +433,7 @@ def balance_for_period(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def determine_precharge_energies_for_deficit_block(
     interval: int64,
     solution,
@@ -500,7 +500,7 @@ def determine_precharge_energies_for_deficit_block(
             return interval
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_precharging_interval(
     interval: int64,
     network: Network_InstanceType,
@@ -549,7 +549,7 @@ def initialise_precharging_interval(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_local_surplus_transfers(
     interval: int64,
     network: Network_InstanceType,
@@ -602,7 +602,7 @@ def perform_local_surplus_transfers(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_transmitted_surplus_transfers(
     interval: int64,
     network: Network_InstanceType,
@@ -663,7 +663,7 @@ def perform_transmitted_surplus_transfers(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_intranode_loadfollow_transfers(
     interval: int64,
     network: Network_InstanceType,
@@ -729,7 +729,7 @@ def perform_intranode_loadfollow_transfers(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_internode_loadfollow_transfers(
     interval: int64,
     network: Network_InstanceType,
@@ -804,7 +804,7 @@ def perform_internode_loadfollow_transfers(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_loadfollow_precharging(
     solution,
     interval: int64,
@@ -858,7 +858,7 @@ def perform_loadfollow_precharging(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_intranode_interstorage_transfers(
     interval: int64,
     network: Network_InstanceType,
@@ -919,7 +919,7 @@ def perform_intranode_interstorage_transfers(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_internode_interstorage_transfers(
     interval: int64,
     network: Network_InstanceType,
@@ -991,7 +991,7 @@ def perform_internode_interstorage_transfers(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_intranode_flexible_transfers(
     interval: int64,
     network: Network_InstanceType,
@@ -1057,7 +1057,7 @@ def perform_intranode_flexible_transfers(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_internode_flexible_transfers(
     interval: int64,
     network: Network_InstanceType,
@@ -1132,7 +1132,7 @@ def perform_internode_flexible_transfers(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_flexible_precharging(
     solution,
     interval: int64,
@@ -1186,7 +1186,7 @@ def perform_flexible_precharging(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def determine_power_adjustments_for_precharging_period(
     interval: int64,
     solution,
@@ -1302,7 +1302,7 @@ def determine_power_adjustments_for_precharging_period(
     return first_interval_precharge
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_fill_adjustment(
     interval: int64,
     network: Network_InstanceType,
@@ -1339,7 +1339,7 @@ def perform_fill_adjustment(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def resolve_energy_discontinuities(
     first_interval_precharge: int64,
     interval_after_deficit_block: int64,
@@ -1451,7 +1451,7 @@ def resolve_energy_discontinuities(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def precharge_storage(
     solution,
     interval_after_deficit_block: int64,

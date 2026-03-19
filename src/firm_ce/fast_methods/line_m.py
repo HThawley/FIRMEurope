@@ -1,7 +1,7 @@
 # type: ignore
 import numpy as np
 
-from firm_ce.common.constants import FASTMATH
+from firm_ce.common.constants import FASTMATH, BOUNDSCHECK
 from firm_ce.common.exceptions import (
     raise_static_modification_error,
 )
@@ -11,7 +11,7 @@ from firm_ce.fast_methods import ltcosts_m
 from firm_ce.system.topology import Line, Line_InstanceType, Node, Node_InstanceType
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def create_dynamic_copy(
     line_instance: Line_InstanceType, nodes_typed_dict: DictType(int64, Node_InstanceType), line_type: unicode_type
 ) -> Line_InstanceType:
@@ -75,7 +75,7 @@ def create_dynamic_copy(
     return line_copy
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def build_capacity(line_instance: Line_InstanceType, new_build_power_capacity: float64) -> None:
     """
     Takes a new_build_power_capacity and adds it to the existing capacity and new_build attributes.
@@ -100,7 +100,7 @@ def build_capacity(line_instance: Line_InstanceType, new_build_power_capacity: f
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def allocate_memory(line_instance: Line_InstanceType, intervals_count: int64) -> None:
     """
     Memory associated with time-series data for a Line is only allocated after a dynamic copy of the Line instance
@@ -125,13 +125,13 @@ def allocate_memory(line_instance: Line_InstanceType, intervals_count: int64) ->
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_lt_flow(line_instance: Line_InstanceType, interval_resolutions: float64[:]) -> None:
     line_instance.lt_flows = sum(np.abs(line_instance.flows) * interval_resolutions)
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_variable_costs(
     line_instance: Line_InstanceType,
     year_float: float64,
@@ -169,7 +169,7 @@ def calculate_variable_costs(
     return ltcosts_m.get_variable(line_instance.lt_costs)
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_fixed_costs(
     line_instance: Line_InstanceType,
     include_existing: bool,
