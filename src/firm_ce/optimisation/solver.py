@@ -156,6 +156,7 @@ class Solver:
             random_seed=None,
             parallelize=False,  # we will implement parallelisation independently
             callback=mga_callback,
+            include_obj_in_fitness=True,
         )
         algorithm.add_niches(num_niches=self.config.mga_start_niches)
         self.logger.info(f"[MHMGA] MGA algorithm initialised with {self.config.mga_start_niches} niches.")
@@ -182,7 +183,7 @@ class Solver:
                 noptimal_abs=self.config.mga_noptimal_abs[step],
                 violation_factor=PENALTY_MULTIPLIER,
                 mutation_scaler=jacobian,
-                centroid_scaler=jacobian,
+                objective_scaler=1.0,
             )
 
             algorithm.step(disp_rate=self.config.mga_disp_rate)
@@ -319,7 +320,7 @@ class Solver:
 
         flexible_costs = []
 
-        for gen in self.fleet.generators.values():
+        for gen in self.fleet_static.generators.values():
             if gen.is_flexible:
                 # Total marginal cost = VOM + Fuel Cost ($/MWh)
                 marginal_cost_mwh = gen.cost.vom + gen.cost.fuel_cost_mwh
@@ -336,7 +337,7 @@ class Solver:
 
         jacobian = []
 
-        for gen in self.fleet.generators.values():
+        for gen in self.fleet_static.generators.values():
             af = get_annuity_factor(gen.cost.discount_rate, gen.cost.lifetime)
             capex = (1e6 * gen.cost.capex_p) / af if af > 1e-6 else 0.0
             fom = 1e6 * gen.cost.fom
@@ -350,14 +351,14 @@ class Solver:
             jacobian.append(dc_fixed + dc_var)
 
         # Storages Power
-        for sto in self.fleet.storages.values():
+        for sto in self.fleet_static.storages.values():
             af = get_annuity_factor(sto.cost.discount_rate, sto.cost.lifetime)
             capex = (1e6 * sto.cost.capex_p) / af if af > 1e-6 else 0.0
             fom = 1e6 * sto.cost.fom
             jacobian.append(capex + fom)  # dc_var assumed 0
 
         # Storages Energy
-        for sto in self.fleet.storages.values():
+        for sto in self.fleet_static.storages.values():
             if sto.duration == 0:
                 af = get_annuity_factor(sto.cost.discount_rate, sto.cost.lifetime)
                 capex = (1e6 * sto.cost.capex_e) / af if af > 1e-6 else 0.0
@@ -366,14 +367,14 @@ class Solver:
                 jacobian.append(0.0)
 
         # Lines
-        for line in self.network.major_lines.values():
+        for line in self.network_static.major_lines.values():
             af = get_annuity_factor(line.cost.discount_rate, line.cost.lifetime)
             capex = (1e3 * line.length * line.cost.capex_p + 1e3 * line.cost.transformer_capex) / af if af > 1e-6 else 0.0
             fom = 1e3 * line.length * line.cost.fom
             jacobian.append(capex + fom)  # dc_var assumed 0
 
         jacobian = np.array(jacobian, dtype=np.float64)
-        jacobian /= (self.static.mean_annual_demand * 1000)  # $/MWh
+        jacobian /= (self.parameters_static.mean_annual_demand * 1000)  # $/MWh
         return jacobian
 
     def capacity_expansion(self):
