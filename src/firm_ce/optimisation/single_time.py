@@ -21,6 +21,8 @@ if JIT_ENABLED:
         ("x", float64[:]),
         ("evaluated", boolean),
         ("lcoe", float64),
+        ("x_lcoe", float64[:]),
+        ("x_lcoe_residual", float64),
         ("penalties", float64),
         ("balancing_type", unicode_type),
         ("fixed_costs_threshold", float64),
@@ -108,6 +110,8 @@ class Solution:
         self.x = x
         self.evaluated = False
         self.lcoe = 0.0
+        self.x_lcoe = np.zeros(len(x), np.float64)
+        self.x_lcoe_residual = 0.0
         self.penalties = 0.0
 
         # These are static jitclass instances. It is UNSAFE to modify these
@@ -214,21 +218,21 @@ def calculate_fixed_costs(
         Solution.network.major_lines, Solution.network.minor_lines: lt_costs.
     Attributes modified for LTCosts instances referenced in the lt_costs attributes: fom, annualised_build.
     """
-    total_costs = 0.0
-
     for generator in solution.fleet.generators.values():
-        total_costs += generator_m.calculate_fixed_costs(generator, include_existing)
+        solution.x_lcoe[generator.candidate_x_idx] += generator_m.calculate_fixed_costs(generator, include_existing)
 
     for storage in solution.fleet.storages.values():
-        total_costs += storage_m.calculate_fixed_costs(storage, include_existing)
+        storage_m.calculate_fixed_costs(storage, include_existing)
+        solution.x_lcoe[storage.candidate_p_x_idx] += storage_m.get_fixed_costs_power(storage)
+        solution.x_lcoe[storage.candidate_e_x_idx] += storage_m.get_fixed_costs_energy(storage)
 
     for line in solution.network.major_lines.values():
-        total_costs += line_m.calculate_fixed_costs(line, include_existing)
+        solution.x_lcoe[line.candidate_x_idx] += line_m.calculate_fixed_costs(line, include_existing)
 
     for line in solution.network.minor_lines.values():
-        total_costs += line_m.calculate_fixed_costs(line, include_existing)
+        solution.x_lcoe_residual += line_m.calculate_fixed_costs(line, include_existing)
 
-    return total_costs
+    return None
 
 
 @njit(fastmath=FASTMATH)
@@ -252,8 +256,6 @@ def calculate_variable_costs(solution: Solution_InstanceType) -> float64:
         Solution.network.major_lines, Solution.network.minor_lines: lt_costs.
     Attributes modified for LTCosts instances referenced in the lt_costs attributes: vom, fuel.
     """
-    total_costs = 0.0
-
     fleet_m.calculate_lt_generations(
         solution.fleet,
         solution.static.interval_resolutions,
@@ -264,18 +266,18 @@ def calculate_variable_costs(solution: Solution_InstanceType) -> float64:
     )
 
     for generator in solution.fleet.generators.values():
-        total_costs += generator_m.calculate_variable_costs(generator, solution.static.year_float)
+        solution.x_lcoe[generator.candidate_x_idx] += generator_m.calculate_variable_costs(generator, solution.static.year_float)
 
     for storage in solution.fleet.storages.values():
-        total_costs += storage_m.calculate_variable_costs(storage, solution.static.year_float)
+        solution.x_lcoe[storage.candidate_p_x_idx] += storage_m.calculate_variable_costs(storage, solution.static.year_float)
 
     for line in solution.network.major_lines.values():
-        total_costs += line_m.calculate_variable_costs(line, solution.static.year_float)
+        solution.x_lcoe[line.candidate_x_idx] += line_m.calculate_variable_costs(line, solution.static.year_float)
 
     for line in solution.network.minor_lines.values():
-        total_costs += line_m.calculate_variable_costs(line, solution.static.year_float)
+        solution.x_lcoe_residual += line_m.calculate_variable_costs(line, solution.static.year_float)
 
-    return total_costs
+    return None
 
 
 @njit(fastmath=FASTMATH)
@@ -335,16 +337,19 @@ def objective(solution: Solution_InstanceType) -> tuple[float]:
     *Dynamic* or *Precharging* comments in the relevant jitclass definitions.
     """
 
-    total_costs = calculate_fixed_costs(solution, True)
+    calculate_fixed_costs(solution, True)
+    total_costs = solution.x_lcoe.sum() + solution.x_lcoe_residual
     if not check_fixed_costs(solution, total_costs):
         return solution.lcoe, total_costs  # End early if fixed cost constraint breached
     reliability_check = balance_residual_load(solution)
     if not reliability_check:
         return solution.lcoe, solution.penalties  # End early if reliability constraint breached
-    total_costs += calculate_variable_costs(solution)
+    calculate_variable_costs(solution)
 
-    lcoe = total_costs * solution.static.mean_annual_demand / 1000  # $/MWh
-    return lcoe, solution.penalties
+    solution.x_lcoe *= solution.static.mean_annual_demand / 1000  # $/MWh
+    solution.x_lcoe_residual *= solution.static.mean_annual_demand / 1000  # $/MWh
+    solution.lcoe = solution.x_lcoe.sum() + solution.x_lcoe_residual  # $/MWh
+    return None
 
 
 @njit(fastmath=FASTMATH)
@@ -361,9 +366,9 @@ def evaluate(solution: Solution_InstanceType) -> Solution_InstanceType:
     -------
     Attributes modified for Solution instance: lcoe, penalties, evaluated.
     """
-    solution.lcoe, solution.penalties = objective(solution)
+    objective(solution)
     solution.evaluated = True
-    return solution
+    return None
 
 
 @njit(parallel=True)
@@ -379,14 +384,17 @@ def mga_parallel_wrapper(
     Behaves identically to `parallel_wrapper` but expects xs.T and returns [lcoe, penalties] only. Used for MGA optimisation.
     """
     n_points = xs.shape[0]
-    result = np.zeros((2, n_points), dtype=np.float64)
+    lcoe = np.zeros(n_points, dtype=np.float64)
+    penalties = np.zeros(n_points, dtype=np.float64)
+    scaled_points = np.zeros(xs.shape, dtype=np.float64)
     for j in prange(n_points):
         xj = xs[j]
         solution = Solution(xj, static, fleet, network, balancing_type, fixed_costs_threshold)
         evaluate(solution)
-        result[0, j] = solution.lcoe
-        result[1, j] = solution.penalties
-    return result
+        lcoe[j] = solution.lcoe
+        penalties[j] = solution.penalties
+        scaled_points[j] = solution.x_lcoe
+    return lcoe, penalties, scaled_points
 
 
 @njit(parallel=True)

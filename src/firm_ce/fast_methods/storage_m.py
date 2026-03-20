@@ -11,7 +11,6 @@ from firm_ce.common.typing import DictType, boolean, float64, int64, unicode_typ
 from firm_ce.fast_methods import ltcosts_m
 from firm_ce.system.components import Storage, Storage_InstanceType
 from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
-from firme_ce.system.costs import UnitCost_InstanceType
 
 
 @njit(fastmath=FASTMATH)
@@ -458,42 +457,6 @@ def calculate_variable_costs(
 
 
 @njit(fastmath=FASTMATH)
-def get_annualised_build_power(
-    power_capacity: float64,
-    unit_costs: UnitCost_InstanceType,
-) -> None:
-    """
-    get annualised build of power components only
-    Note: does NOT operate in-place
-    """
-    annuity_factor = ltcosts_m.get_annuity_factor(unit_costs.discount_rate, unit_costs.lifetime)
-    return (
-        (power_capacity * 1e6 * unit_costs.capex_p)
-        / annuity_factor
-        if annuity_factor > 1e-6
-        else 0
-    )
-
-
-@njit(fastmath=FASTMATH)
-def get_annualised_build_energy(
-    energy_capacity: float64,
-    unit_costs: UnitCost_InstanceType,
-) -> None:
-    """
-    get annualised build of power components only
-    Note: does NOT operate in-place
-    """
-    annuity_factor = ltcosts_m.get_annuity_factor(unit_costs.discount_rate, unit_costs.lifetime)
-    return (
-        (energy_capacity * 1e6 * unit_costs.capex_e)
-        / annuity_factor
-        if annuity_factor > 1e-6
-        else 0
-    )
-
-
-@njit(fastmath=FASTMATH)
 def calculate_fixed_costs(
     storage_instance: Storage_InstanceType,
     include_existing: bool,
@@ -515,23 +478,34 @@ def calculate_fixed_costs(
     Attributes modified for the referenced Storage.lt_costs: annualised_build, fom.
     """
     if include_existing:
-        ltcosts_m.calculate_annualised_build(
+        ltcosts_m.calculate_annualised_build_power(
             storage_instance.lt_costs,
-            storage_instance.energy_capacity,
             storage_instance.power_capacity,
             0.0,
             storage_instance.cost,
             "storage",
         )
-    else:
-        ltcosts_m.calculate_annualised_build(
+        ltcosts_m.calculate_annualised_build_energy(
             storage_instance.lt_costs,
-            storage_instance.new_build_e,
+            storage_instance.energy_capacity,
+            storage_instance.cost,
+            "storage",
+        )
+    else:
+        ltcosts_m.calculate_annualised_build_power(
+            storage_instance.lt_costs,
             storage_instance.new_build_p,
             0.0,
             storage_instance.cost,
             "storage",
         )
+        ltcosts_m.calculate_annualised_build_energy(
+            storage_instance.lt_costs,
+            storage_instance.new_build_e,
+            storage_instance.cost,
+            "storage",
+        )
+
     ltcosts_m.calculate_fom(
         storage_instance.lt_costs,
         storage_instance.power_capacity,
@@ -540,6 +514,20 @@ def calculate_fixed_costs(
         "storage"
     )
     return ltcosts_m.get_fixed(storage_instance.lt_costs)
+
+
+@njit(fastmath=FASTMATH)
+def get_fixed_costs_power(
+    storage_instance: Storage_InstanceType,
+) -> float64:
+    return storage_instance.lt_costs.annualised_build_p + storage_instance.lt_costs.fom
+
+
+@njit(fastmath=FASTMATH)
+def get_fixed_costs_energy(
+    storage_instance: Storage_InstanceType,
+) -> float64:
+    return storage_instance.lt_costs.annualised_build_e
 
 
 @njit(fastmath=FASTMATH)

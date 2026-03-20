@@ -498,18 +498,16 @@ def calculate_fixed_costs(
     Attributes modified for the referenced Generator.lt_costs: annualised_build, fom.
     """
     if include_existing:
-        ltcosts_m.calculate_annualised_build(
+        ltcosts_m.calculate_annualised_build_power(
             generator_instance.lt_costs,
-            0.0,
             generator_instance.capacity,
             0.0,
             generator_instance.cost,
             "generator",
         )
     else:
-        ltcosts_m.calculate_annualised_build(
+        ltcosts_m.calculate_annualised_build_power(
             generator_instance.lt_costs,
-            0.0,
             generator_instance.new_build,
             0.0,
             generator_instance.cost,

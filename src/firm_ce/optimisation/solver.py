@@ -140,6 +140,7 @@ class Solver:
             maximize=False,
             vectorized=True,
             constraints=True,
+            return_scaled=True,
             known_optimum=self.decision_x0,
         )
 

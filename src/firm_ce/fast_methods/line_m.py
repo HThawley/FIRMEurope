@@ -191,18 +191,16 @@ def calculate_fixed_costs(
     Attributes modified for the referenced Line.lt_costs: annualised_build, fom.
     """
     if include_existing:
-        ltcosts_m.calculate_annualised_build(
+        ltcosts_m.calculate_annualised_build_power(
             line_instance.lt_costs,
-            0.0,
             line_instance.capacity,
             line_instance.length,
             line_instance.cost,
             "line",
         )
     else:
-        ltcosts_m.calculate_annualised_build(
+        ltcosts_m.calculate_annualised_build_power(
             line_instance.lt_costs,
-            0.0,
             line_instance.new_build,
             line_instance.length,
             line_instance.cost,

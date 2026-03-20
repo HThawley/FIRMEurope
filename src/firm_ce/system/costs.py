@@ -83,7 +83,8 @@ else:
 
 if JIT_ENABLED:
     ltcosts_spec = [
-        ("annualised_build", float64),
+        ("annualised_build_p", float64),
+        ("annualised_build_e", float64),
         ("fom", float64),
         ("vom", float64),
         ("fuel", float64),
@@ -95,7 +96,8 @@ else:
 @jitclass(ltcosts_spec)
 class LTCosts:
     def __init__(self):
-        self.annualised_build = 0.0
+        self.annualised_build_p = 0.0
+        self.annualised_build_e = 0.0
         self.fom = 0.0
         self.vom = 0.0
         self.fuel = 0.0
