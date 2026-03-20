@@ -26,6 +26,7 @@ if JIT_ENABLED:
         ("year_float", float64),
         ("year_energy_demand", float64[:]),
         ("mean_annual_demand", float64),
+        ("demand_sum_mwh", float64),
     ]
 else:
     scenario_parameters_spec = []
@@ -68,6 +69,7 @@ class ScenarioParameters:
         self.year_float = self.year_count * self.fom_scalar
         self.year_energy_demand = np.zeros(self.year_count, dtype=np.float64)
         self.mean_annual_demand = 0.0
+        self.demand_sum_mwh = 0.0
 
 
 if JIT_ENABLED:

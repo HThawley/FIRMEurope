@@ -428,10 +428,10 @@ def mga_callback(population: Population) -> None:
     with open("results/temp/callback.csv", "a", newline="") as f:
         writer = csv.writer(f)
         best_row = [
-            population.current_optima_obj[0],
-            population.current_optima_pob[0],
-            population.current_optima_fit[0],
-            *population.current_optima[0]
+            population.optima_raw_objectives[0],
+            population.optima_penalized_objectives[0],
+            population.optima_fitnesses[0],
+            *population.optima_points[0]
         ]
         writer.writerow(best_row)
 

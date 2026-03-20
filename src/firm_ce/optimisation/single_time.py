@@ -298,7 +298,7 @@ def check_fixed_costs(solution: Solution_InstanceType, fixed_costs: float64) -> 
     -------
     boolean: True if fixed cost constraint is satisfied. Otherwise, False.
     """
-    return (fixed_costs / sum(solution.static.year_energy_demand) / 1000) < solution.fixed_costs_threshold  # $/MWh_demand
+    return (fixed_costs / solution.static.demand_sum_mwh) < solution.fixed_costs_threshold  # $/MWh_demand
 
 
 @njit(fastmath=FASTMATH)
@@ -346,8 +346,8 @@ def objective(solution: Solution_InstanceType) -> tuple[float]:
         return solution.lcoe, solution.penalties  # End early if reliability constraint breached
     calculate_variable_costs(solution)
 
-    solution.x_lcoe *= solution.static.mean_annual_demand / 1000  # $/MWh
-    solution.x_lcoe_residual *= solution.static.mean_annual_demand / 1000  # $/MWh
+    solution.x_lcoe /= solution.static.demand_sum_mwh  # $/MWh
+    solution.x_lcoe_residual /= solution.static.demand_sum_mwh  # $/MWh
     solution.lcoe = solution.x_lcoe.sum() + solution.x_lcoe_residual  # $/MWh
     return None
 
