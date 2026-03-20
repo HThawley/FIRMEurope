@@ -11,6 +11,7 @@ from firm_ce.common.typing import DictType, boolean, float64, int64, unicode_typ
 from firm_ce.fast_methods import ltcosts_m
 from firm_ce.system.components import Storage, Storage_InstanceType
 from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
+from firme_ce.system.costs import UnitCost_InstanceType
 
 
 @njit(fastmath=FASTMATH)
@@ -454,6 +455,42 @@ def calculate_variable_costs(
         storage_instance.cost
     )
     return ltcosts_m.get_variable(storage_instance.lt_costs)
+
+
+@njit(fastmath=FASTMATH)
+def get_annualised_build_power(
+    power_capacity: float64,
+    unit_costs: UnitCost_InstanceType,
+) -> None:
+    """
+    get annualised build of power components only
+    Note: does NOT operate in-place
+    """
+    annuity_factor = ltcosts_m.get_annuity_factor(unit_costs.discount_rate, unit_costs.lifetime)
+    return (
+        (power_capacity * 1e6 * unit_costs.capex_p)
+        / annuity_factor
+        if annuity_factor > 1e-6
+        else 0
+    )
+
+
+@njit(fastmath=FASTMATH)
+def get_annualised_build_energy(
+    energy_capacity: float64,
+    unit_costs: UnitCost_InstanceType,
+) -> None:
+    """
+    get annualised build of power components only
+    Note: does NOT operate in-place
+    """
+    annuity_factor = ltcosts_m.get_annuity_factor(unit_costs.discount_rate, unit_costs.lifetime)
+    return (
+        (energy_capacity * 1e6 * unit_costs.capex_e)
+        / annuity_factor
+        if annuity_factor > 1e-6
+        else 0
+    )
 
 
 @njit(fastmath=FASTMATH)
