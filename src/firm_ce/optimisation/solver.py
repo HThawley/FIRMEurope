@@ -195,7 +195,7 @@ class Solver:
 
             self.logger.info("[MHMGA] MGA complete. Results saved.")
 
-        self.result = algorithm.population.current_optima[0]
+        self.result = algorithm.population.optima_points[0]
 
     def save_mga_results(self, results: Dict) -> None:
         filepath = os.path.join(self.mga_log_dir, "mga_alternatives.csv")
@@ -375,7 +375,7 @@ class Solver:
             jacobian.append(capex + fom)  # dc_var assumed 0
 
         jacobian = np.array(jacobian, dtype=np.float64)
-        jacobian /= (self.parameters_static.mean_annual_demand * 1000)  # $/MWh
+        jacobian /= (self.parameters_static.mean_annual_demand_mwh)  # $/MWh
         return jacobian
 
     def capacity_expansion(self):
@@ -438,7 +438,7 @@ def mga_callback(population: Population) -> None:
     if SAVE_POPULATION:
         # Vectorized flattening: reshape(-1) turns (num_niches, pop_size) into (total_pop,)
         # reshape(-1, ndim) turns (num_niches, pop_size, ndim) into (total_pop, ndim)
-        obj_flat = population.objective_values.reshape(-1)
+        obj_flat = population.raw_objectives.reshape(-1)
         viol_flat = population.violations.reshape(-1)
         fit_flat = population.fitnesses.reshape(-1)
         pts_flat = population.points.reshape(-1, population.points.shape[-1])

@@ -111,7 +111,7 @@ class Model:
 
         scenario.validation = Validation(scenario)
         scenario.validation.validate()
-        scenario.validation.write_results()
+        scenario.validation.dump_logs()
 
         if DEBUG:
             scenario.statistics.dump()

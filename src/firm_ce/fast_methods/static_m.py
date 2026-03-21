@@ -65,8 +65,8 @@ def set_year_energy_demand(
             static_instance.year_energy_demand[year] += (
                 sum(node_m.get_data(node, "trace")[first_t:last_t]) * static_instance.resolution
             )
-    static_instance.mean_annual_demand = np.mean(static_instance.year_energy_demand)
-    static_instance.demand_sum_mwh = np.sum(static_instance.year_energy_demand)
+    static_instance.mean_annual_demand_mwh = np.mean(static_instance.year_energy_demand) * 1000
+    static_instance.demand_sum_mwh = np.sum(static_instance.year_energy_demand) * 1000
     return None
 
 
