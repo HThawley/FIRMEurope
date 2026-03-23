@@ -168,7 +168,7 @@ class Model:
 
         scenario.validation = Validation(scenario)
         scenario.validation.validate()
-        scenario.validation.write_results()
+        scenario.validation.dump_logs()
 
         if DEBUG:
             scenario.statistics.dump()
@@ -212,7 +212,7 @@ class Model:
         processes for the optimisation to create dynamic instances that are safe to modify during the optimisation. The dynamic
         instances are not actually contained in the Model instance.
         """
-        if isinstance(scenarios, list):
+        if isinstance(scenarios, (list, tuple)):
             scenarios = [s.lower() for s in scenarios]
 
         for scenario in self.scenarios.values():

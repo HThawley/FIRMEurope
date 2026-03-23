@@ -521,26 +521,47 @@ def set_node_fills_and_surpluses(
 ) -> None:
     if transmission_case == "surplus":
         for node in network_instance.nodes.values():
-            node.fill = max(node.netload_t, 0)
-            node.surplus = -min(node.netload_t, 0)
+            node.fill = max(node.netload_t, 0.0)
+            node.surplus = -min(node.netload_t, 0.0)
 
     elif transmission_case == "storage_discharge":
         for node in network_instance.nodes.values():
-            node.fill = max(node.netload_t - node.storage_power[interval], 0)
-            node.surplus = max(node.discharge_max_t[-1] - node.storage_power[interval], 0)
+            node.fill = max(
+                node.netload_t
+                - node.storage_power[interval],
+                0.0
+            )
+            node.surplus = max(
+                node.discharge_max_t[-1]
+                - node.storage_power[interval],
+                0.0
+            )
 
     elif transmission_case == "flexible":
         for node in network_instance.nodes.values():
             node.fill = max(
-                node.netload_t - node.storage_power[interval] - node.flexible_power[interval], 0
+                node.netload_t
+                - node.storage_power[interval]
+                - node.flexible_power[interval],
+                0.0
             )
-            node.surplus = max(node.flexible_max_t[-1] - node.flexible_power[interval], 0)
+            node.surplus = max(
+                node.flexible_max_t[-1]
+                - node.flexible_power[interval],
+                0.0
+            )
 
     elif transmission_case == "storage_charge":
         for node in network_instance.nodes.values():
-            node.fill = max(node.charge_max_t[-1] + node.storage_power[interval], 0)
+            node.fill = max(
+                node.charge_max_t[-1] + node.storage_power[interval],
+                0.0
+            )
             node.surplus = -min(
-                node.netload_t - node.storage_power[interval] - node.flexible_power[interval], 0.0
+                node.netload_t
+                - node.storage_power[interval]
+                - node.flexible_power[interval],
+                0.0
             )
 
     elif transmission_case == "precharging_surplus":
@@ -555,20 +576,44 @@ def set_node_fills_and_surpluses(
 
     elif transmission_case == "precharging_adjust_storage":
         for node in network_instance.nodes.values():
-            node.fill = max(node.netload_t - max(node.storage_power[interval], 0), 0)
-            node.surplus = -min(node.netload_t - max(node.storage_power[interval], 0), 0)
+            node.fill = max(
+                node.netload_t
+                # - node.storage_power[interval],
+                - max(node.storage_power[interval], 0.0),
+                0.0
+            )
+            node.surplus = -min(
+                node.netload_t
+                # - node.storage_power[interval],
+                - max(node.storage_power[interval], 0),
+                0.0
+            )
 
     elif transmission_case == "precharging_adjust_surplus":
         for node in network_instance.nodes.values():
-            node.fill = max(node.netload_t - max(node.storage_power[interval], 0.0) - node.flexible_power[interval], 0)
+            node.fill = max(
+                node.netload_t
+                # - node.storage_power[interval]
+                - max(node.storage_power[interval], 0.0)
+                - node.flexible_power[interval],
+                0.0
+            )
             node.surplus = -min(
-                node.netload_t - max(node.storage_power[interval], 0.0) - node.flexible_power[interval], 0
+                node.netload_t
+                # - node.storage_power[interval]
+                - max(node.storage_power[interval], 0.0)
+                - node.flexible_power[interval],
+                0.0
             )
     elif transmission_case == "precharging_adjust_flexible":
         for node in network_instance.nodes.values():
             node.fill = -min(node.storage_power[interval], 0.0)
             node.surplus = -min(
-                node.netload_t - max(node.storage_power[interval], 0.0) - node.flexible_power[interval], 0
+                node.netload_t
+                # - node.storage_power[interval]
+                - max(node.storage_power[interval], 0.0)
+                - node.flexible_power[interval],
+                0.0
             )
     else:
         raise RuntimeError("set_node_fills_and_surpluses contains incorrect transmission_case argument.")

@@ -249,12 +249,8 @@ def set_flexible_max_t(
     generator_instance.flexible_max_t = advertised_limit
     generator_instance.fuel.allocated_energy -= advertised_limit * resolution
 
-    if merit_order_idx == 0:
-        generator_instance.node.flexible_max_t[0] = generator_instance.flexible_max_t
-    else:
-        generator_instance.node.flexible_max_t[merit_order_idx] = (
-            generator_instance.node.flexible_max_t[merit_order_idx - 1] + generator_instance.flexible_max_t
-        )
+    update_node_flexible_max_t(generator_instance, merit_order_idx)
+
     return None
 
 
@@ -275,12 +271,8 @@ def set_precharging_max_t(
     else:
         generator_instance.flexible_max_t = 0.0
 
-    if merit_order_idx == 0:
-        generator_instance.node.flexible_max_t[0] = generator_instance.flexible_max_t
-    else:
-        generator_instance.node.flexible_max_t[merit_order_idx] = (
-            generator_instance.node.flexible_max_t[merit_order_idx - 1] + generator_instance.flexible_max_t
-        )
+    update_node_flexible_max_t(generator_instance, merit_order_idx)
+
     return None
 
 
@@ -289,6 +281,7 @@ def set_live_flexible_max_t(
     generator_instance: Generator_InstanceType,
     interval: int64,
     resolution: float64,
+    merit_order_idx: int64,
     forward_time_flag: boolean,
 ) -> None:
     if forward_time_flag:
@@ -300,6 +293,23 @@ def set_live_flexible_max_t(
         generator_instance.capacity,
         generator_instance.dispatch_power[interval] + (live_pool / resolution)
     )
+
+    update_node_flexible_max_t(generator_instance, merit_order_idx)
+
+    return None
+
+
+@njit(fastmath=FASTMATH)
+def update_node_flexible_max_t(
+    generator_instance: Generator_InstanceType,
+    merit_order_idx: int64,
+):
+    if merit_order_idx == 0:
+        generator_instance.node.flexible_max_t[0] = generator_instance.flexible_max_t
+    else:
+        generator_instance.node.flexible_max_t[merit_order_idx] = (
+            generator_instance.node.flexible_max_t[merit_order_idx - 1] + generator_instance.flexible_max_t
+        )
     return None
 
 
@@ -370,7 +380,7 @@ def dispatch(
     """
     prev_power = generator_instance.dispatch_power[interval]
 
-    set_live_flexible_max_t(generator_instance, interval, resolution, forward_time_flag)
+    set_live_flexible_max_t(generator_instance, interval, resolution, merit_order_idx, forward_time_flag)
 
     if merit_order_idx == 0:
         new_power = min(
@@ -393,14 +403,13 @@ def dispatch(
         )
 
     delta_power = new_power - prev_power
+    generator_instance.dispatch_power[interval] = new_power
+
+    generator_instance.node.flexible_power[interval] += new_power
 
     if abs(delta_power) <= TOLERANCE:
         return None
 
-    generator_instance.dispatch_power[interval] = new_power
-    generator_instance.node.flexible_power[interval] += new_power
-
-    generator_instance.node.flexible_max_t[merit_order_idx:] -= delta_power
     update_fuel_reserve(generator_instance, interval, resolution, delta_power, forward_time_flag)
 
     return None
