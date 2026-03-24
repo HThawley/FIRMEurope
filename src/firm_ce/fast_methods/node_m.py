@@ -1,7 +1,7 @@
 # type: ignore
 import numpy as np
 
-from firm_ce.common.constants import FASTMATH, TOLERANCE
+from firm_ce.common.constants import FASTMATH, TOLERANCE, BOUNDSCHECK
 from firm_ce.common.exceptions import (
     raise_getting_unloaded_data_error,
     raise_static_modification_error,
@@ -12,7 +12,7 @@ from firm_ce.system.components import Generator_InstanceType, Storage_InstanceTy
 from firm_ce.system.topology import Node, Node_InstanceType
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def create_dynamic_copy(node_instance: Node_InstanceType) -> Node_InstanceType:
     node_copy = Node(False, node_instance.id, node_instance.order, node_instance.name)
     node_copy.data_status = node_instance.data_status
@@ -21,7 +21,7 @@ def create_dynamic_copy(node_instance: Node_InstanceType) -> Node_InstanceType:
     return node_copy
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def load_data(
     node_instance: Node_InstanceType,
     trace: float64[:],
@@ -49,7 +49,7 @@ def load_data(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def unload_data(
     node_instance: Node_InstanceType,
 ) -> None:
@@ -75,7 +75,7 @@ def unload_data(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_data(
     node_instance: Node_InstanceType,
     data_type: unicode_type,
@@ -109,7 +109,7 @@ def get_data(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def allocate_memory(
     node_instance: Node_InstanceType,
     intervals_count: int64,
@@ -147,7 +147,7 @@ def allocate_memory(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_netload_t(
     node_instance: Node_InstanceType,
     interval: int64,
@@ -175,7 +175,7 @@ def initialise_netload_t(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_netload_t(
     node_instance: Node_InstanceType,
     interval: int64,
@@ -215,7 +215,7 @@ def update_netload_t(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def fill_required(
     node_instance: Node_InstanceType,
 ) -> boolean:
@@ -233,7 +233,7 @@ def fill_required(
     return node_instance.fill > TOLERANCE
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def surplus_available(
     node_instance: Node_InstanceType,
 ) -> boolean:
@@ -251,7 +251,7 @@ def surplus_available(
     return node_instance.surplus > TOLERANCE
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def assign_storage_merit_order(
     node_instance: Node_InstanceType,
     storages_typed_dict: DictType(int64, Storage_InstanceType),
@@ -290,7 +290,7 @@ def assign_storage_merit_order(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def assign_flexible_merit_order(
     node_instance: Node_InstanceType,
     generators_typed_dict: DictType(int64, Generator_InstanceType),
@@ -324,7 +324,7 @@ def assign_flexible_merit_order(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_remaining_netload(
     node_instance: Node_InstanceType,
     interval: int64,
@@ -360,7 +360,7 @@ def check_remaining_netload(
     return False
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_imports_exports_temp(
     node_instance: Node_InstanceType,
     interval: int64,
@@ -388,7 +388,7 @@ def set_imports_exports_temp(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def reset_dispatch_max_t(
     node_instance: Node_InstanceType,
 ) -> None:

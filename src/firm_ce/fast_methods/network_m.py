@@ -1,7 +1,7 @@
 # type: ignore
 import numpy as np
 
-from firm_ce.common.constants import FASTMATH, TOLERANCE
+from firm_ce.common.constants import FASTMATH, TOLERANCE, BOUNDSCHECK
 from firm_ce.common.exceptions import raise_static_modification_error
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import DictType, TypedDict, TypedList, boolean, float64, int64, unicode_type
@@ -18,7 +18,7 @@ from firm_ce.system.topology import (
 from firm_ce.system.components import Generator_InstanceType, Storage_InstanceType
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def create_dynamic_copy(
     network_instance: Network_InstanceType,
 ) -> Network_InstanceType:
@@ -78,7 +78,7 @@ def create_dynamic_copy(
     return network_copy
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def build_capacity(
     network_instance: Network_InstanceType,
     decision_x: float64[:],
@@ -115,7 +115,7 @@ def build_capacity(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def unload_data(
     network_instance: Network_InstanceType,
 ) -> None:
@@ -141,7 +141,7 @@ def unload_data(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def allocate_memory(
     network_instance: Network_InstanceType,
     intervals_count: int64,
@@ -179,7 +179,7 @@ def allocate_memory(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_remaining_netloads(
     network_instance: Network_InstanceType,
     interval: int64,
@@ -191,7 +191,7 @@ def check_remaining_netloads(
     return False
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_period_unserved_energy(
     network_instance: Network_InstanceType,
     first_t: int64,
@@ -204,7 +204,7 @@ def calculate_period_unserved_energy(
     return unserved_energy
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def reset_transmission(
     network_instance: Network_InstanceType,
     interval: int64,
@@ -236,7 +236,7 @@ def reset_transmission(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def reset_flow_updates(
     network_instance: Network_InstanceType
 ) -> None:
@@ -265,7 +265,7 @@ def reset_flow_updates(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_route_surpluses(
     network_instance: Network_InstanceType,
     fill_node: Node_InstanceType,
@@ -294,7 +294,7 @@ def check_route_surpluses(
     return False
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_network_surplus(
     network_instance: Network_InstanceType,
 ) -> boolean:
@@ -316,7 +316,7 @@ def check_network_surplus(
     return False
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_network_fill(
     network_instance: Network_InstanceType,
 ) -> boolean:
@@ -338,7 +338,7 @@ def check_network_fill(
     return False
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_node_flow_updates(
     network_instance: Network_InstanceType,
     fill_node: Node_InstanceType,
@@ -351,7 +351,7 @@ def calculate_node_flow_updates(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def scale_flow_updates_to_fill(
     network_instance: Network_InstanceType,
     fill_node: Node_InstanceType,
@@ -364,7 +364,7 @@ def scale_flow_updates_to_fill(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_transmission_flows(
     network_instance: Network_InstanceType,
     fill_node: Node_InstanceType,
@@ -378,7 +378,7 @@ def update_transmission_flows(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_netloads(
     network_instance: Network_InstanceType,
     interval: int64,
@@ -408,7 +408,7 @@ def update_netloads(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def reset_line_temp_flows(
     network_instance: Network_InstanceType,
 ) -> None:
@@ -432,7 +432,7 @@ def reset_line_temp_flows(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def reset_node_temp_surpluses(
     network_instance: Network_InstanceType,
 ) -> None:
@@ -457,7 +457,7 @@ def reset_node_temp_surpluses(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def fill_with_transmitted_surpluses(
     network_instance: Network_InstanceType,
     interval: int64
@@ -513,7 +513,7 @@ def fill_with_transmitted_surpluses(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_node_fills_and_surpluses(
     network_instance: Network_InstanceType,
     transmission_case: unicode_type,
@@ -575,7 +575,7 @@ def set_node_fills_and_surpluses(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_spillage_and_deficit(
     network_instance: Network_InstanceType,
     interval: int64,
@@ -608,7 +608,7 @@ def calculate_spillage_and_deficit(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def assign_storage_merit_orders(
     network_instance: Network_InstanceType,
     storages_typed_dict: DictType(int64, Storage_InstanceType),
@@ -642,7 +642,7 @@ def assign_storage_merit_orders(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def assign_flexible_merit_orders(
     network_instance: Network_InstanceType,
     generators_typed_dict: DictType(int64, Generator_InstanceType),
@@ -652,7 +652,7 @@ def assign_flexible_merit_orders(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def assign_route_merit_orders(
     network_instance: Network_InstanceType,
 ) -> None:
@@ -682,7 +682,7 @@ def assign_route_merit_orders(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_lt_flows(
     network_instance: Network_InstanceType,
     interval_resolutions: float64[:],
@@ -712,7 +712,7 @@ def calculate_lt_flows(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def reset_flexible(
     network_instance: Network_InstanceType,
     interval: int64,
@@ -738,7 +738,7 @@ def reset_flexible(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def reset_dispatch(
     network_instance: Network_InstanceType,
     interval: int64,
@@ -765,7 +765,7 @@ def reset_dispatch(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_precharging_end(
     network_instance: Network_InstanceType,
     interval: int64,
@@ -801,7 +801,7 @@ def check_precharging_end(
     return True
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_existing_surplus(
     network_instance: Network_InstanceType,
 ) -> boolean:
@@ -824,7 +824,7 @@ def check_existing_surplus(
     return False
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_storage_precharge_fills_and_surpluses(
     network_instance: Network_InstanceType,
 ) -> None:
@@ -852,7 +852,7 @@ def set_storage_precharge_fills_and_surpluses(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_flexible_precharge_fills_and_surpluses(
     network_instance: Network_InstanceType,
 ) -> None:
@@ -880,7 +880,7 @@ def set_flexible_precharge_fills_and_surpluses(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_imports_exports_temp(
     network_instance: Network_InstanceType,
     interval: int64,
@@ -910,7 +910,7 @@ def update_imports_exports_temp(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_precharge_fill(
     network_instance: Network_InstanceType,
 ) -> boolean:
@@ -932,7 +932,7 @@ def check_precharge_fill(
     return False
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_precharge_surplus(
     network_instance: Network_InstanceType,
 ) -> boolean:

@@ -3,7 +3,7 @@ import time
 
 import numpy as np
 
-from firm_ce.common.constants import JIT_ENABLED, NUM_THREADS, PENALTY_MULTIPLIER, FASTMATH
+from firm_ce.common.constants import JIT_ENABLED, NUM_THREADS, PENALTY_MULTIPLIER, FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import jitclass, njit, prange
 from firm_ce.common.typing import boolean, float64, unicode_type
 from firm_ce.fast_methods import fleet_m, generator_m, line_m, network_m, static_m, storage_m
@@ -144,7 +144,7 @@ else:
     Solution_InstanceType = Solution
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def balance_residual_load(solution: Solution_InstanceType) -> boolean:
     """
     Evaluate the unit committment business rules over the entire modelling horizon.
@@ -189,7 +189,7 @@ def balance_residual_load(solution: Solution_InstanceType) -> boolean:
     return True
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_fixed_costs(
     solution: Solution_InstanceType,
     include_existing: bool,
@@ -235,7 +235,7 @@ def calculate_fixed_costs(
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_variable_costs(solution: Solution_InstanceType) -> float64:
     """
     Calculate total variable costs based on dispatch and flows derived through unit committment
@@ -280,7 +280,7 @@ def calculate_variable_costs(solution: Solution_InstanceType) -> float64:
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_fixed_costs(solution: Solution_InstanceType, fixed_costs: float64) -> boolean:
     """
     Check the fixed cost constraint against the configured threshold.
@@ -301,7 +301,7 @@ def check_fixed_costs(solution: Solution_InstanceType, fixed_costs: float64) -> 
     return (fixed_costs / solution.static.mean_annual_demand_mwh) < solution.fixed_costs_threshold  # $/MWh_demand
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def objective(solution: Solution_InstanceType) -> tuple[float]:
     """
     Evaluates the long-term energy planning system, through the calculation of investment and unit committment
@@ -352,7 +352,7 @@ def objective(solution: Solution_InstanceType) -> tuple[float]:
     return None
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def evaluate(solution: Solution_InstanceType) -> Solution_InstanceType:
     """
     Wrapper that evaluates the objective function and updates the evaluation state.
