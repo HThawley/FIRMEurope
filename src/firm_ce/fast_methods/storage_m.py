@@ -270,16 +270,11 @@ def set_dispatch_max_t(
         else:
             storage_instance.charge_max_t = 0.0
 
-    if merit_order_idx == 0:
-        storage_instance.node.discharge_max_t[0] = storage_instance.discharge_max_t
-        storage_instance.node.charge_max_t[0] = storage_instance.charge_max_t
-    else:
-        storage_instance.node.discharge_max_t[merit_order_idx] = (
-            storage_instance.node.discharge_max_t[merit_order_idx - 1] + storage_instance.discharge_max_t
-        )
-        storage_instance.node.charge_max_t[merit_order_idx] = (
-            storage_instance.node.charge_max_t[merit_order_idx - 1] + storage_instance.charge_max_t
-        )
+    offset = 0.0 if merit_order_idx == 0 else storage_instance.node.discharge_max_t[merit_order_idx - 1]
+    storage_instance.node.discharge_max_t[merit_order_idx] = offset + storage_instance.discharge_max_t
+
+    offset = 0.0 if merit_order_idx == 0 else storage_instance.node.charge_max_t[merit_order_idx - 1]
+    storage_instance.node.charge_max_t[merit_order_idx] = offset + storage_instance.charge_max_t
     return None
 
 
@@ -314,38 +309,14 @@ def dispatch(
     Attributes modified for the Storage instance: dispatch_power, node.
     Attributes modified for referenced Storage.node: storage_power.
     """
-    if merit_order_idx == 0:
-        storage_instance.dispatch_power[interval] = max(
-            min(
-                storage_instance.node.netload_t - storage_instance.node.flexible_power[interval],
-                storage_instance.discharge_max_t,
-            ),
-            0.0,
-        ) + min(
-            max(
-                storage_instance.node.netload_t - storage_instance.node.flexible_power[interval],
-                -storage_instance.charge_max_t,
-            ),
-            0.0,
-        )
-    else:
-        storage_instance.dispatch_power[interval] = max(
-            min(
-                storage_instance.node.netload_t
-                - storage_instance.node.flexible_power[interval]
-                - storage_instance.node.discharge_max_t[merit_order_idx - 1],
-                storage_instance.discharge_max_t,
-            ),
-            0.0,
-        ) + min(
-            max(
-                storage_instance.node.netload_t
-                - storage_instance.node.flexible_power[interval]
-                + storage_instance.node.charge_max_t[merit_order_idx - 1],
-                -storage_instance.charge_max_t,
-            ),
-            0.0,
-        )
+    target_load = storage_instance.node.netload_t - storage_instance.node.flexible_power[interval]
+
+    offset = 0.0 if merit_order_idx == 0 else storage_instance.node.discharge_max_t[merit_order_idx - 1]
+    storage_instance.dispatch_power[interval] = max(min(target_load - offset, storage_instance.discharge_max_t), 0.0)
+
+    offset = 0.0 if merit_order_idx == 0 else storage_instance.node.charge_max_t[merit_order_idx - 1]
+    storage_instance.dispatch_power[interval] += min(max(target_load + offset, -storage_instance.charge_max_t), 0.0)
+
     storage_instance.node.storage_power[interval] += storage_instance.dispatch_power[interval]
     return None
 
@@ -412,9 +383,17 @@ def calculate_lt_generation(
     Attributes modified for the Storage instance: lt_generation, line.
     Attributes modified for the referenced Storage.line: lt_flows.
     """
-    storage_instance.lt_generation = sum(np.maximum(storage_instance.dispatch_power, 0) * interval_resolutions)
+    lt_gen = 0.0
+    lt_flows = 0.0
+    for i in range(len(storage_instance.dispatch_power)):
+        power = storage_instance.dispatch_power[i]
+        res = interval_resolutions[i]
+        if power > TOLERANCE:
+            lt_gen += power * res
+        lt_flows += abs(power) * res
 
-    storage_instance.line.lt_flows += sum(np.abs(storage_instance.dispatch_power) * interval_resolutions)
+    storage_instance.lt_generation = lt_gen
+    storage_instance.line.lt_flows += lt_flows
     return None
 
 
@@ -780,16 +759,11 @@ def set_precharging_max_t(
         storage_instance.charge_max_t = 0.0
 
     # Update nodal dispatch_max_t values
-    if merit_order_idx == 0:
-        storage_instance.node.discharge_max_t[0] = storage_instance.discharge_max_t
-        storage_instance.node.charge_max_t[0] = storage_instance.charge_max_t
-    else:
-        storage_instance.node.discharge_max_t[merit_order_idx] = (
-            storage_instance.node.discharge_max_t[merit_order_idx - 1] + storage_instance.discharge_max_t
-        )
-        storage_instance.node.charge_max_t[merit_order_idx] = (
-            storage_instance.node.charge_max_t[merit_order_idx - 1] + storage_instance.charge_max_t
-        )
+    offset = 0.0 if merit_order_idx == 0 else storage_instance.node.discharge_max_t[merit_order_idx - 1]
+    storage_instance.node.discharge_max_t[merit_order_idx] = offset + storage_instance.discharge_max_t
+
+    offset = 0.0 if merit_order_idx == 0 else storage_instance.node.charge_max_t[merit_order_idx - 1]
+    storage_instance.node.charge_max_t[merit_order_idx] = offset + storage_instance.charge_max_t
     return None
 
 

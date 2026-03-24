@@ -740,25 +740,27 @@ def perform_intranode_flexible_transfers(
         intranode_precharge = -intranode_transfer_power
 
         for idx, flexible_order in enumerate(node.flexible_merit_order):
-            if not fleet.generators[flexible_order].fuel.trickling_flag:
+            generator = fleet.generators[flexible_order]
+            if not generator.fuel.trickling_flag:
                 continue
             # get live fuel-reserve constraint
-            generator_m.set_live_trickling_max_t(fleet.generators[flexible_order], interval, resolution)
-            dispatch_power_update = max(min(intranode_trickle, fleet.generators[flexible_order].flexible_max_t), 0.0)
+            generator_m.set_live_trickling_max_t(generator, interval, resolution)
+            dispatch_power_update = max(min(intranode_trickle, generator.flexible_max_t), 0.0)
             # update fuel-reserve
-            generator_m.update_fuel_reserve(fleet.generators[flexible_order], interval, resolution, dispatch_power_update, True)
+            generator_m.update_fuel_reserve(generator, interval, resolution, dispatch_power_update, True)
             generator_m.update_precharge_dispatch(
-                fleet.generators[flexible_order], interval, resolution, dispatch_power_update, idx
+                generator, interval, resolution, dispatch_power_update, idx
             )
             intranode_trickle -= dispatch_power_update
 
         for idx, storage_order in enumerate(node.storage_merit_order):
-            if not fleet.storages[storage_order].precharge_flag:
+            storage = fleet.storages[storage_order]
+            if not storage.precharge_flag:
                 continue
 
-            dispatch_power_update = min(max(intranode_precharge, -fleet.storages[storage_order].charge_max_t), 0.0)
+            dispatch_power_update = min(max(intranode_precharge, -storage.charge_max_t), 0.0)
             storage_m.update_precharge_dispatch(
-                fleet.storages[storage_order], interval, resolution, dispatch_power_update, True, idx
+                storage, interval, resolution, dispatch_power_update, True, idx
             )
             intranode_precharge -= dispatch_power_update
     return None
@@ -811,28 +813,30 @@ def perform_internode_flexible_transfers(
 
     for node in network.nodes.values():
         for idx, flexible_order in enumerate(node.flexible_merit_order):
-            if not fleet.generators[flexible_order].fuel.trickling_flag:
+            generator = fleet.generators[flexible_order]
+            if not generator.fuel.trickling_flag:
                 continue
             # get live fuel-reserve constraint
-            generator_m.set_live_trickling_max_t(fleet.generators[flexible_order], interval, resolution)
-            dispatch_power_update = max(min(node.imports_exports_update, fleet.generators[flexible_order].flexible_max_t), 0.0)
+            generator_m.set_live_trickling_max_t(generator, interval, resolution)
+            dispatch_power_update = max(min(node.imports_exports_update, generator.flexible_max_t), 0.0)
             # update fuel-reserve
-            generator_m.update_fuel_reserve(fleet.generators[flexible_order], interval, resolution, dispatch_power_update, True)
+            generator_m.update_fuel_reserve(generator, interval, resolution, dispatch_power_update, True)
             generator_m.update_precharge_dispatch(
-                fleet.generators[flexible_order], interval, resolution, dispatch_power_update, idx
+                generator, interval, resolution, dispatch_power_update, idx
             )
             node.imports_exports_update -= dispatch_power_update
 
         for idx_reverse, storage_order in enumerate(node.storage_merit_order[::-1]):
-            if not fleet.storages[storage_order].precharge_flag:
+            storage = fleet.storages[storage_order]
+            if not storage.precharge_flag:
                 continue
             idx = len(node.storage_merit_order) - idx_reverse - 1
 
             dispatch_power_update = min(
-                max(node.imports_exports_update, -fleet.storages[storage_order].charge_max_t), 0.0
+                max(node.imports_exports_update, -storage.charge_max_t), 0.0
             )
             storage_m.update_precharge_dispatch(
-                fleet.storages[storage_order], interval, resolution, dispatch_power_update, True, idx
+                storage, interval, resolution, dispatch_power_update, True, idx
             )
             node.imports_exports_update -= dispatch_power_update
     return None

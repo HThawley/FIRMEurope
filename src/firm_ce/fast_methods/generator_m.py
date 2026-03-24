@@ -304,12 +304,8 @@ def update_node_flexible_max_t(
     generator_instance: Generator_InstanceType,
     merit_order_idx: int64,
 ):
-    if merit_order_idx == 0:
-        generator_instance.node.flexible_max_t[0] = generator_instance.flexible_max_t
-    else:
-        generator_instance.node.flexible_max_t[merit_order_idx] = (
-            generator_instance.node.flexible_max_t[merit_order_idx - 1] + generator_instance.flexible_max_t
-        )
+    offset = 0.0 if merit_order_idx == 0 else generator_instance.node.flexible_max_t[merit_order_idx - 1]
+    generator_instance.node.flexible_max_t[merit_order_idx] = offset + generator_instance.flexible_max_t
     return None
 
 
@@ -379,32 +375,21 @@ def dispatch(
     Attributes modified for referenced Generator.node: flexible_power.
     """
     prev_power = generator_instance.dispatch_power[interval]
-
     set_live_flexible_max_t(generator_instance, interval, resolution, merit_order_idx, forward_time_flag)
 
-    if merit_order_idx == 0:
-        new_power = min(
-            max(
-                generator_instance.node.netload_t
-                - generator_instance.node.storage_power[interval],
-                0.0
-            ),
-            generator_instance.flexible_max_t,
-        )
-    else:
-        new_power = min(
-            max(
-                generator_instance.node.netload_t
-                - generator_instance.node.storage_power[interval]
-                - generator_instance.node.flexible_max_t[merit_order_idx - 1],
-                0.0,
-            ),
-            generator_instance.flexible_max_t,
-        )
+    offset = 0.0 if merit_order_idx == 0 else generator_instance.node.flexible_max_t[merit_order_idx - 1]
+    new_power = min(
+        max(
+            generator_instance.node.netload_t
+            - generator_instance.node.storage_power[interval]
+            - offset,
+            0.0,
+        ),
+        generator_instance.flexible_max_t,
+    )
 
     delta_power = new_power - prev_power
     generator_instance.dispatch_power[interval] = new_power
-
     generator_instance.node.flexible_power[interval] += new_power
 
     if abs(delta_power) <= TOLERANCE:
@@ -441,9 +426,10 @@ def calculate_lt_generation(
     Attributes modified for the referenced Generator.line: lt_flows.
     """
     update_lt_generation(generator_instance, generator_instance.dispatch_power, interval_resolutions)
-    generator_instance.unit_lt_hours = sum(
-        np.ceil(generator_instance.dispatch_power / generator_instance.unit_size) * interval_resolutions
-    )
+    total_hours = 0.0
+    for i in range(len(generator_instance.dispatch_power)):
+        total_hours += np.ceil(generator_instance.dispatch_power[i] / generator_instance.unit_size) * interval_resolutions[i]
+    generator_instance.unit_lt_hours = total_hours
     return None
 
 
