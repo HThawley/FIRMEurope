@@ -1,7 +1,7 @@
 id,name,value
 0,type,mhmga
 1,model_name,FIRMeur
-2,balancing_type,simple
+2,balancing_type,full
 3,fixed_costs_threshold,500
 4,mga_mutation_prob,"0.05,0.1,0.2"
 5,mga_mutation_sigma,"0.1,0.01,0.01"

@@ -2,6 +2,8 @@
 from firm_ce.common.constants import JIT_ENABLED
 from firm_ce.common.jit_overload import jitclass
 from firm_ce.common.typing import float64, int64
+from firm_ce.common.helpers import get_annuity_factor
+
 
 if JIT_ENABLED:
     unitcost_spec = [
@@ -10,6 +12,7 @@ if JIT_ENABLED:
         ("vom", float64),
         ("lifetime", int64),
         ("discount_rate", float64),
+        ("annuity_factor", float64),
         ("heat_rate_base", float64),
         ("heat_rate_incr", float64),
         ("fuel_cost_mwh", float64),
@@ -65,6 +68,7 @@ class UnitCost:
         self.vom = vom  # $/MWh
         self.lifetime = lifetime  # years
         self.discount_rate = discount_rate  # [0,1]
+        self.annuity_factor = get_annuity_factor(self.discount_rate, self.lifetime)
 
         # At the moment, annual usage limits are given in electric energy units. In future they will be thermal
         self.heat_rate_base = heat_rate_base  # MWh/MWh or MWh/GJ depending on how fuel costs are specified

@@ -38,7 +38,7 @@ for scenario in model.scenarios.values():
         False,
     )
     scenario.statistics.generate_result_files()
-    # scenario.statistics.write_results()
+    scenario.statistics.write_results()
 
     scenario.validation = Validation(scenario)
     scenario.validation.validate(verbose=True)
