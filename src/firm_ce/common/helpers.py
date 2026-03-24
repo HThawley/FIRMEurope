@@ -1,9 +1,13 @@
+# type: ignore
 from typing import List, Any
 
 import re
 from numba import njit
 import numpy as np
 from numpy.typing import NDArray
+
+from firm_ce.common.typing import float64
+from firm_ce.common.constants import FASTMATH
 
 
 def parse_comma_separated(value: str, lower: bool = True) -> List[str]:
@@ -59,7 +63,19 @@ def safe_divide(num: float, denom: float, fail: float = 0.0) -> float:
     return num / denom if denom != 0 else fail
 
 
-@njit
+@njit(fastmath=FASTMATH)
+def njit_safe_divide(
+    num: float64,
+    denom: float64,
+    fail: float64
+) -> float64:
+    """Safe division for calculating levelised costs when total dispatch energy from the asset is 0."""
+    if not np.isclose(denom, 0):
+        return num / denom
+    return fail
+
+
+@njit(fastmath=FASTMATH)
 def safe_divide_array(
     num: NDArray[np.float64],
     denom: NDArray[np.float64],
@@ -106,3 +122,9 @@ def parse_boolean(value: str) -> bool:
     bool: The parsed boolean value.
     """
     return str(value).lower() in ("true", "t", "1.0", "1", "y", "yes")
+
+
+@njit(fastmath=FASTMATH)
+def get_annuity_factor(discount_rate: float64, lifetime: float64) -> float64:
+    return (1 - (1 + discount_rate) ** (-1 * lifetime)) / discount_rate
+

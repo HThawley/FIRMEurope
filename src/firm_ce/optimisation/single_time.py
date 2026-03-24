@@ -20,9 +20,9 @@ if JIT_ENABLED:
     solution_spec = [
         ("x", float64[:]),
         ("evaluated", boolean),
+        ("annual_cost", float64),
         ("lcoe", float64),
         ("x_lcoe", float64[:]),
-        ("x_lcoe_residual", float64),
         ("penalties", float64),
         ("balancing_type", unicode_type),
         ("fixed_costs_threshold", float64),
@@ -109,9 +109,9 @@ class Solution:
         """
         self.x = x
         self.evaluated = False
+        self.annual_cost = 0.0
         self.lcoe = 0.0
-        self.x_lcoe = np.zeros(len(x), np.float64)
-        self.x_lcoe_residual = 0.0
+        self.x_lcoe = np.empty(len(x), np.float64)
         self.penalties = 0.0
 
         # These are static jitclass instances. It is UNSAFE to modify these
@@ -193,7 +193,7 @@ def balance_residual_load(solution: Solution_InstanceType) -> boolean:
 def calculate_fixed_costs(
     solution: Solution_InstanceType,
     include_existing: bool,
-) -> float64:
+) -> None:
     """
     Calculate total fixed costs for all assets. Based upon the annualised build costs and fixed O&M costs
     incurred over the modelling horizon.
@@ -219,24 +219,22 @@ def calculate_fixed_costs(
     Attributes modified for LTCosts instances referenced in the lt_costs attributes: fom, annualised_build.
     """
     for generator in solution.fleet.generators.values():
-        solution.x_lcoe[generator.candidate_x_idx] += generator_m.calculate_fixed_costs(generator, include_existing)
+        solution.annual_cost += generator_m.calculate_fixed_costs(generator, include_existing)
 
     for storage in solution.fleet.storages.values():
-        storage_m.calculate_fixed_costs(storage, include_existing)
-        solution.x_lcoe[storage.candidate_p_x_idx] += storage_m.get_fixed_costs_power(storage)
-        solution.x_lcoe[storage.candidate_e_x_idx] += storage_m.get_fixed_costs_energy(storage)
+        solution.annual_cost += storage_m.calculate_fixed_costs(storage, include_existing)
 
     for line in solution.network.major_lines.values():
-        solution.x_lcoe[line.candidate_x_idx] += line_m.calculate_fixed_costs(line, include_existing)
+        solution.annual_cost += line_m.calculate_fixed_costs(line, include_existing)
 
     for line in solution.network.minor_lines.values():
-        solution.x_lcoe_residual += line_m.calculate_fixed_costs(line, include_existing)
+        solution.annual_cost += line_m.calculate_fixed_costs(line, include_existing)
 
     return None
 
 
 @njit(fastmath=FASTMATH)
-def calculate_variable_costs(solution: Solution_InstanceType) -> float64:
+def calculate_variable_costs(solution: Solution_InstanceType) -> None:
     """
     Calculate total variable costs based on dispatch and flows derived through unit committment
     business rules.
@@ -266,22 +264,37 @@ def calculate_variable_costs(solution: Solution_InstanceType) -> float64:
     )
 
     for generator in solution.fleet.generators.values():
-        solution.x_lcoe[generator.candidate_x_idx] += generator_m.calculate_variable_costs(generator, solution.static.year_float)
+        solution.annual_cost += generator_m.calculate_variable_costs(generator, solution.static.year_float)
 
     for storage in solution.fleet.storages.values():
-        solution.x_lcoe[storage.candidate_p_x_idx] += storage_m.calculate_variable_costs(storage, solution.static.year_float)
+        solution.annual_cost += storage_m.calculate_variable_costs(storage, solution.static.year_float)
 
     for line in solution.network.major_lines.values():
-        solution.x_lcoe[line.candidate_x_idx] += line_m.calculate_variable_costs(line, solution.static.year_float)
+        solution.annual_cost += line_m.calculate_variable_costs(line, solution.static.year_float)
 
     for line in solution.network.minor_lines.values():
-        solution.x_lcoe_residual += line_m.calculate_variable_costs(line, solution.static.year_float)
+        solution.annual_cost += line_m.calculate_variable_costs(line, solution.static.year_float)
 
     return None
 
 
 @njit(fastmath=FASTMATH)
-def check_fixed_costs(solution: Solution_InstanceType, fixed_costs: float64) -> boolean:
+def calculate_partial_costs(solution: Solution_InstanceType) -> None:
+    for generator in solution.fleet.generators.values():
+        solution.x_lcoe[generator.candidate_x_idx] = generator_m.get_partial_cost(generator, solution.static.year_float)
+
+    for storage in solution.fleet.storages.values():
+        solution.x_lcoe[storage.candidate_p_x_idx] = storage_m.get_partial_cost_power(storage, solution.static.year_float)
+        solution.x_lcoe[storage.candidate_e_x_idx] = storage_m.get_partial_cost_energy(storage)
+
+    for line in solution.network.major_lines.values():
+        solution.x_lcoe[line.candidate_x_idx] = line_m.get_partial_cost(line, solution.static.year_float)
+
+    return None
+
+
+@njit(fastmath=FASTMATH)
+def check_fixed_costs(solution: Solution_InstanceType) -> boolean:
     """
     Check the fixed cost constraint against the configured threshold.
 
@@ -298,7 +311,7 @@ def check_fixed_costs(solution: Solution_InstanceType, fixed_costs: float64) -> 
     -------
     boolean: True if fixed cost constraint is satisfied. Otherwise, False.
     """
-    return (fixed_costs / solution.static.mean_annual_demand_mwh) < solution.fixed_costs_threshold  # $/MWh_demand
+    return (solution.annual_cost / solution.static.mean_annual_demand_mwh) < solution.fixed_costs_threshold  # $/MWh_demand
 
 
 @njit(fastmath=FASTMATH)
@@ -338,17 +351,17 @@ def objective(solution: Solution_InstanceType) -> tuple[float]:
     """
 
     calculate_fixed_costs(solution, True)
-    total_costs = solution.x_lcoe.sum() + solution.x_lcoe_residual
-    if not check_fixed_costs(solution, total_costs):
-        return solution.lcoe, total_costs  # End early if fixed cost constraint breached
+    if not check_fixed_costs(solution):
+        solution.penalties += solution.annual_cost
+        return solution.lcoe, solution.penalties  # End early if fixed cost constraint breached
     reliability_check = balance_residual_load(solution)
     if not reliability_check:
         return solution.lcoe, solution.penalties  # End early if reliability constraint breached
     calculate_variable_costs(solution)
-
+    calculate_partial_costs(solution)
+    
+    solution.lcoe = solution.annual_cost / solution.static.mean_annual_demand_mwh  # $/MWh
     solution.x_lcoe /= solution.static.mean_annual_demand_mwh  # $/MWh
-    solution.x_lcoe_residual /= solution.static.mean_annual_demand_mwh  # $/MWh
-    solution.lcoe = solution.x_lcoe.sum() + solution.x_lcoe_residual  # $/MWh
     return None
 
 

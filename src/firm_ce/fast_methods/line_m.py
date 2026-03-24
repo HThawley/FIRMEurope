@@ -215,3 +215,20 @@ def calculate_fixed_costs(
         "line"
     )
     return ltcosts_m.get_fixed(line_instance.lt_costs)
+
+
+@njit(fastmath=FASTMATH)
+def get_partial_cost(
+    line_instance: Line_InstanceType,
+    year_float: float64,
+):
+    return ltcosts_m.get_partial_cost_power(
+        line_instance.new_build,
+        line_instance.capacity,
+        line_instance.length,
+        line_instance.lt_flows,
+        year_float,
+        0.0,
+        line_instance.cost,
+        "line",
+    )

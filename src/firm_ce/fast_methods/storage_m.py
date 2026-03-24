@@ -517,17 +517,31 @@ def calculate_fixed_costs(
 
 
 @njit(fastmath=FASTMATH)
-def get_fixed_costs_power(
+def get_partial_cost_power(
     storage_instance: Storage_InstanceType,
-) -> float64:
-    return storage_instance.lt_costs.annualised_build_p + storage_instance.lt_costs.fom
+    year_float: float64,
+):
+    return ltcosts_m.get_partial_cost_power(
+        storage_instance.new_build_p,
+        storage_instance.power_capacity,
+        0.0,
+        storage_instance.lt_generation,
+        year_float,
+        0.0,
+        storage_instance.cost,
+        "storage",
+    )
 
 
 @njit(fastmath=FASTMATH)
-def get_fixed_costs_energy(
+def get_partial_cost_energy(
     storage_instance: Storage_InstanceType,
-) -> float64:
-    return storage_instance.lt_costs.annualised_build_e
+):
+    return ltcosts_m.get_partial_cost_energy(
+        storage_instance.new_build_e,
+        storage_instance.cost,
+        "storage",
+    )
 
 
 @njit(fastmath=FASTMATH)

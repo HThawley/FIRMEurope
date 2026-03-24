@@ -533,6 +533,23 @@ def calculate_fixed_costs(
 
 
 @njit(fastmath=FASTMATH)
+def get_partial_cost(
+    generator_instance: Generator_InstanceType,
+    year_float: float64,
+):
+    return ltcosts_m.get_partial_cost_power(
+        generator_instance.new_build,
+        generator_instance.capacity,
+        0.0,
+        generator_instance.lt_generation,
+        year_float,
+        generator_instance.unit_lt_hours,
+        generator_instance.cost,
+        "generator",
+    )
+
+
+@njit(fastmath=FASTMATH)
 def update_precharge_dispatch(
     generator_instance: Generator_InstanceType,
     interval: int64,
