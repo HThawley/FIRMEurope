@@ -91,7 +91,7 @@ def unset_year_energy_demand(
     Attributes modified for ScenarioParameters instance: year_energy_demand, mean_annual_demand.
     """
     static_instance.year_energy_demand = np.zeros(static_instance.year_count, dtype=np.float64)
-    static_instance.mean_annual_demand = 0.0
+    static_instance.mean_annual_demand_mwh = 0.0
     static_instance.demand_sum_mwh = 0.0
     return None
 

@@ -240,7 +240,7 @@ expected_mga_hyperparameters = {
         "default": 10,
         "ditherable": False,
         "broadcastable": False,
-        "types": ((int, 2, np.inf),),
+        "types": ((int, 1, np.inf),),
     },
     "mga_new_niches": {
         "default": 0,
