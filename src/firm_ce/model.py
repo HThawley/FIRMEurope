@@ -40,6 +40,7 @@ class Model:
         self,
         config_directory: str = "inputs/config",
         data_directory: str = "inputs/data",
+        results_mode: str = "new",
         logging_flag: bool = True,
     ) -> None:
         """
@@ -57,7 +58,12 @@ class Model:
         """
         self.config_directory = config_directory
         self.data_directory = data_directory
-        model_data = ModelData(config_directory=self.config_directory, logging_flag=logging_flag)
+
+        model_data = ModelData(
+            config_directory=self.config_directory,
+            logging_flag=logging_flag,
+            results_mode=str(results_mode).lower()
+        )
 
         if not model_data.validate():
             raise ValidationError(

@@ -610,9 +610,10 @@ def assign_precharging_reserves(
     -------
     Attributes modified for the Storage instance: precharge_flag, precharge_energy, trickling_reserves.
     """
-    storage_instance.precharge_flag = storage_instance.chargeable and (
-        storage_instance.deficit_block_max_storage - storage_instance.deficit_block_min_storage
-        > storage_instance.stored_energy_temp_forward
+    storage_instance.precharge_flag = (
+        (storage_instance.deficit_block_max_storage - storage_instance.deficit_block_min_storage
+         > storage_instance.stored_energy_temp_forward)
+        and (storage_instance.chargeable or storage_instance.inflows)
     )
     if storage_instance.precharge_flag:
         storage_instance.precharge_energy = max(
@@ -661,7 +662,10 @@ def initialise_precharging_flags(
     storage_instance.trickling_flag = (
         storage_instance.stored_energy[interval] - storage_instance.trickling_reserves > TOLERANCE
     ) and (storage_instance.precharge_energy < TOLERANCE)
-    storage_instance.precharge_flag = storage_instance.precharge_energy > TOLERANCE
+    storage_instance.precharge_flag = (
+        (storage_instance.precharge_energy > TOLERANCE)
+        and (storage_instance.chargeable or storage_instance.inflows)
+    )
     return None
 
 
@@ -722,10 +726,14 @@ def set_precharging_max_t(
 ) -> None:
     # Set discharge_max_t for trickle chargers
     if storage_instance.trickling_flag:
-        charge_reduction_constraint_power = min(
-            storage_instance.remaining_trickling_reserves / storage_instance.charge_efficiency / resolution,
-            -min(storage_instance.dispatch_power[interval], 0.0),
-        )
+        if storage_instance.chargeable:
+            charge_reduction_constraint_power = min(
+                storage_instance.remaining_trickling_reserves / storage_instance.charge_efficiency / resolution,
+                -min(storage_instance.dispatch_power[interval], 0.0),
+            )
+        else:
+            charge_reduction_constraint_power = 0.0
+
         charge_reduction_constraint_energy = (
             charge_reduction_constraint_power * storage_instance.charge_efficiency * resolution
         )
@@ -740,20 +748,25 @@ def set_precharging_max_t(
         storage_instance.discharge_max_t = 0.0
 
     # Set charge_max_t for pre-chargers
-    if storage_instance.precharge_flag and storage_instance.chargeable:
+    if storage_instance.precharge_flag:
         discharge_reduction_constraint_power = min(
             storage_instance.precharge_energy * storage_instance.discharge_efficiency / resolution,
             max(storage_instance.dispatch_power[interval], 0.0),
         )
-        discharge_reduction_constraint_energy = (
-            discharge_reduction_constraint_power / storage_instance.discharge_efficiency * resolution
-        )
-        charge_increase_constraint_power = min(
-            (storage_instance.precharge_energy - discharge_reduction_constraint_energy)
-            / storage_instance.charge_efficiency
-            / resolution,
-            storage_instance.power_capacity + min(storage_instance.dispatch_power[interval], 0.0),
-        )
+
+        if storage_instance.chargeable:
+            discharge_reduction_constraint_energy = (
+                discharge_reduction_constraint_power / storage_instance.discharge_efficiency * resolution
+            )
+            charge_increase_constraint_power = min(
+                (storage_instance.precharge_energy - discharge_reduction_constraint_energy)
+                / storage_instance.charge_efficiency
+                / resolution,
+                storage_instance.power_capacity + min(storage_instance.dispatch_power[interval], 0.0),
+            )
+        else:
+            charge_increase_constraint_power = 0.0
+
         storage_instance.charge_max_t = discharge_reduction_constraint_power + charge_increase_constraint_power
     else:
         storage_instance.charge_max_t = 0.0
@@ -780,14 +793,11 @@ def calculate_dispatch_energy_update(
         if dispatch_power_update > 0.0:  # Increase discharging power
             dispatch_energy_update = -dispatch_power_update / storage_instance.discharge_efficiency * resolution
         else:  # Reduce discharging power and increase charging power
-            dispatch_energy_update = (
-                min(dispatch_power_original, -dispatch_power_update)
-                / storage_instance.discharge_efficiency
-                * resolution
-                - min(dispatch_power_original + dispatch_power_update, 0.0)
-                * storage_instance.charge_efficiency
-                * resolution
-            )
+            reduced_discharge = min(dispatch_power_original, -dispatch_power_update)
+            dispatch_energy_update = reduced_discharge / storage_instance.discharge_efficiency * resolution
+            if storage_instance.chargeable:
+                new_charge = - min(dispatch_power_original + dispatch_power_update, 0.0)
+                dispatch_energy_update += new_charge * storage_instance.charge_efficiency * resolution
 
     # If originally charging
     elif dispatch_power_original < 0.0:
@@ -804,7 +814,7 @@ def calculate_dispatch_energy_update(
     else:
         if dispatch_power_update > 0:
             dispatch_energy_update = -dispatch_power_update / storage_instance.discharge_efficiency * resolution
-        else:
+        elif storage_instance.chargeable:
             dispatch_energy_update = -dispatch_power_update * storage_instance.charge_efficiency * resolution
 
     return dispatch_energy_update

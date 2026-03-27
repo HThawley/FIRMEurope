@@ -8,26 +8,42 @@ only generated for scenarios with an initial guess provided in `initial_guess.cs
 
 Alternative filepaths for the config and data folders can be provided as arguments to the Model instantiation.
 """
-
 import time
+import os
+import pandas as pd
 
 from firm_ce.model import Model
 from firm_ce.analysis.statistics import Statistics
 from firm_ce.analysis.validate import Validation
 from firm_ce.analysis.display import Display
 
+RUN_MODE = "latest"
+
 start_time = time.time()
-model = Model()
+model = Model(results_mode=RUN_MODE)
 model_build_time = time.time()
 print(f"Model build time: {model_build_time - start_time:.4f} seconds")
 
 for scenario in model.scenarios.values():
-    if scenario.x0.size == 0:
-        print(f"skipping {scenario.name} as no initial guess provided")
-        continue
+    scenario.solution_dir = scenario.solution_dir.replace("full", "simple")
+    if RUN_MODE == "new":
+        if scenario.x0.size == 0:
+            print(f"skipping {scenario.name} as no initial guess provided")
+            continue
+        x = scenario.x0
+        scenario.create_solution_directory()
+
+    else:
+        x_csv = os.path.join(scenario.solution_dir, "x.csv")
+        if os.path.exists(x_csv):
+            x = pd.read_csv(x_csv, header=None).to_numpy().flatten()
+        else:
+            raise FileNotFoundError("Could not find x.csv. Has the solution been run?")
+
     scenario.load_datafiles(model.datafile_filenames_dict, model.data_directory)
+
     scenario.statistics = Statistics(
-        scenario.x0,
+        x,
         scenario.static,
         scenario.fleet,
         scenario.network,

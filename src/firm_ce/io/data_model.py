@@ -9,7 +9,7 @@ from firm_ce.io.file_manager import import_config_csvs
 
 
 class ModelData:
-    def __init__(self, config_directory: str, logging_flag: bool) -> None:
+    def __init__(self, config_directory: str, logging_flag: bool, results_mode: str) -> None:
         self.config_directory = config_directory
 
         # Get the config settings for the csvs
@@ -19,7 +19,7 @@ class ModelData:
         model_name = self.get_model_name()
 
         # Initialise the logger
-        self.logger, self.results_dir = init_model_logger(model_name, logging_flag)
+        self.logger, self.results_dir = init_model_logger(model_name, logging_flag, results_mode)
 
         # Set all the relevant parameters
         self.scenarios = self.config_data["scenarios"]

@@ -48,7 +48,9 @@ class Scenario:
                 self.limit_timesteps = int(item["value"])
             elif item["name"] == "balancing_type":
                 balancing_type = str(item["value"])
-        self.solution_dir = self.create_solution_directory(self.results_dir, self.name + "_" + balancing_type)
+
+        safe_name = sub(r"[^a-zA-Z0-9_\-]", "_", f"{self.name}_{balancing_type}")
+        self.solution_dir = os.path.join(self.results_dir, safe_name)
 
         self.network = construct_Network_object(
             self.get_scenario_dicts(model_data.nodes),
@@ -77,11 +79,8 @@ class Scenario:
     def __repr__(self):
         return f"Scenario({self.id!r} {self.name!r})"
 
-    def create_solution_directory(self, result_directory: str, solution_name: str) -> str:
-        safe_name = sub(r"[^a-zA-Z0-9_\-]", "_", solution_name)
-        solution_dir = os.path.join(result_directory, safe_name)
-        os.makedirs(solution_dir, exist_ok=True)
-        return solution_dir
+    def create_solution_directory(self) -> None:
+        os.makedirs(self.solution_dir, exist_ok=True)
 
     def get_bounds(self) -> NDArray[np.float64]:
         def power_capacity_bounds(
@@ -213,6 +212,8 @@ class Scenario:
         return None
 
     def solve(self, config: ModelConfig) -> OptimizeResult:
+        self.create_solution_directory()
+
         solver = Solver(self, config)
         solver.evaluate()
         return solver.result

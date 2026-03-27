@@ -101,7 +101,7 @@ class Validation:
 
                 if new_p < min_p - VALIDATION_TOL or new_p > max_p + VALIDATION_TOL:
                     self._log(
-                        f"Bounds Violation: {asset.name} power new_build ({asset.new_p:.3f}) outside [{min_p}, {max_p}]."
+                        f"Bounds Violation: {asset.name} power new_build ({new_p:.3f}) outside [{min_p}, {max_p}]."
                     )
                     passed = False
 
@@ -109,7 +109,7 @@ class Validation:
                     init_e, new_e, min_e, max_e = self.accessor.get_build_energy(asset)
                     if new_e < min_e - VALIDATION_TOL or new_e > max_e + VALIDATION_TOL:
                         self._log(
-                            f"Bounds Violation: {asset.name} power new_build ({asset.new_e:.3f}) outside [{min_e}, {max_e}]."
+                            f"Bounds Violation: {asset.name} power new_build ({new_e:.3f}) outside [{min_e}, {max_e}]."
                         )
                         passed = False
 

@@ -186,7 +186,7 @@ class Solver:
                 mutation_scaler=np.abs(jacobian),
                 objective_scaler=1.0,
             )
-            
+
             algorithm.step(disp_rate=self.config.mga_disp_rate)
 
             # 4. Terminate and get results

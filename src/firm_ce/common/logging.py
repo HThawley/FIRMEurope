@@ -6,7 +6,7 @@ from typing import Tuple
 logging.getLogger("numba").setLevel(logging.WARNING)
 
 
-def init_model_logger(model_name: str, logging_flag: bool) -> Tuple[logging.Logger, str]:
+def init_model_logger(model_name: str, logging_flag: bool, results_mode: str) -> Tuple[logging.Logger, str]:
     """
     Initialize a logger for the model run, configured to log both to console and a log file.
     Logger does not work within JIT compiled code.
@@ -20,12 +20,26 @@ def init_model_logger(model_name: str, logging_flag: bool) -> Tuple[logging.Logg
     Tuple[logging.Logger, str]: A tuple containing the configured `Logger` instance and the path to the results
         directory.
     """
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    if logging_flag:
-        results_dir = os.path.join("results", f"{model_name}_{timestamp}")
+    if results_mode == "new":
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if logging_flag:
+            results_dir = os.path.join("results", f"{model_name}_{timestamp}")
+        else:
+            results_dir = os.path.join("results", "temp")
+    elif results_mode == "latest":
+        base_dir = "results"
+        if os.path.exists(base_dir):
+            dirs = [
+                os.path.join(base_dir, d) for d in os.listdir(base_dir)
+                if os.path.isdir(os.path.join(base_dir, d)) and "temp" not in d
+            ]
+            if dirs:
+                results_dir = max(dirs, key=os.path.getctime)
+            else:
+                raise FileNotFoundError("No previous results found.")
     else:
-        results_dir = os.path.join("results", "temp")
+        results_dir = results_mode
+
     os.makedirs(results_dir, exist_ok=True)
 
     log_path = os.path.join(results_dir, "log.txt")
