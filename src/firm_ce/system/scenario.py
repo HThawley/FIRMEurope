@@ -66,8 +66,9 @@ class Scenario:
             self.network.nodes,
         )
 
-        self.x0 = self._get_x0(model_data.x0s)
         self.lower_bounds, self.upper_bounds = self.get_bounds()
+        self.x0 = self._get_x0(model_data.x0s)
+
         if len(self.x0) > 0:
             if (self.x0 - self.lower_bounds).min() < 0 or (self.x0 - self.upper_bounds).max() > 0:
                 self.logger.info("Initial guess (x0) is out of bounds. Clipping to bounds.")
@@ -147,6 +148,9 @@ class Scenario:
         static_m.set_year_energy_demand(self.static, self.network.nodes)
         self.data_status = True
 
+        if len(self.x0) == 0:
+            self.x0 = self._approximate_feasible_solution()
+
         return None
 
     def unload_datafiles(self) -> None:
@@ -193,7 +197,69 @@ class Scenario:
                 except AttributeError:
                     x0_list = []
                 return np.array(x0_list, dtype=np.float64)
-        return np.array([], dtype=np.float64)
+        return np.array([], np.float64)
+
+    def _approximate_feasible_solution(self) -> NDArray[np.float64]:
+        """ If no initial guess is provided, create an approximate feasible solution."""
+        if not self.data_status:
+            self.logger.warning("Datafiles not loaded. Node data is empty; heuristic may fail or return zeros.")
+
+        # Determine the size of the decision vector based on assigned indices
+        num_vars = len(self.fleet.generators) + (2 * len(self.fleet.storages)) + len(self.network.major_lines)
+        heuristic_x = np.zeros(num_vars, dtype=np.float64)
+
+        # Pre-calculate node metrics to avoid redundant array operations
+        node_metrics = {}
+        for node in self.network.nodes.values():
+            node_metrics[node.id] = (
+                np.max(node.data),  # peak
+                np.mean(node.data),  # avg
+            )
+
+        factors = {
+            # 'name': <approx energy fraction> / <approx capacity factor>
+            "ccgt": 0.2 / 0.2,
+            "pv_fixed": 0.5 / 0.15,
+            "pv_track": 0.2 / 0.2,
+            "onsw": 0.4 / 0.35,
+            "offw": 0.4 / 0.45,
+            "biogas": 0.02 / 0.4,
+            "biomass": 0.02 / 0.4,
+        }
+
+        for gen in self.fleet.generators.values():
+            peak, avg = node_metrics[gen.node.id]
+
+            idx = gen.candidate_x_idx
+            unit_type = gen.unit_type
+            # assignment pattern is avg / <capacity factor> * < net energy contrib.>
+
+            if unit_type in factors:
+                heuristic_x[idx] = avg * factors[unit_type]
+
+            if unit_type == "nuclear":
+                if "LTE" in gen.name:
+                    heuristic_x[idx] = gen.max_build
+                else:
+                    heuristic_x[idx] = avg / 0.9 * 0.1
+
+        for sto in self.fleet.storages.values():
+            peak, avg = node_metrics[sto.node.id]
+
+            idx_p = sto.candidate_p_x_idx
+            idx_e = sto.candidate_e_x_idx
+            heuristic_x[idx_p] = peak * 0.4  # multiple types of storage -> at least 1x peak
+            heuristic_x[idx_e] = avg / 0.25 * 48  # only applies to phes, will be clipped for fixed duration battery
+
+        for line in self.network.major_lines.values():
+            idx = line.candidate_x_idx
+            peak_start, _ = node_metrics[line.node_start.id]
+            peak_end, _ = node_metrics[line.node_end.id]
+            max_connecting_peak = max(peak_start, peak_end)
+
+            heuristic_x[idx] = max_connecting_peak * 0.25
+
+        return np.clip(heuristic_x, self.lower_bounds, self.upper_bounds)
 
     def assign_x_indices(self) -> None:
         x_index = 0
