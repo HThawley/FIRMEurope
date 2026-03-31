@@ -127,7 +127,7 @@ class Solver:
         )[0, :]  # just cost + penalties * penalty_multiplier
 
     def generate_alternatives(self) -> None:
-        self.logger.info("[MHMGA] Initialising MGA algorithm. (this may take a while)")
+        self.logger.info("[MHMGA] Initialising MGA algorithm.")
 
         # fkwargs = self.get_mhmga_kwargs()
         fargs = self.get_differential_evolution_args()

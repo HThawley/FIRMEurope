@@ -53,6 +53,7 @@ class Statistics:
         )
 
         self.df_static, self.df_temporal = self._build_master_tables()
+        self.result_files = {}
         self.statistics_generated = False
 
     def _build_master_tables(self):
@@ -191,7 +192,7 @@ class Statistics:
                 )
         return None
 
-    def generate_result_files(self) -> None:
+    def generate_result_files(self, file='all') -> None:
         """
         Generates all result files using the high-level master DataFrames.
         """
@@ -200,15 +201,18 @@ class Statistics:
             if not hasattr(self, "df_static"):
                 self.df_static, self.df_temporal = self._build_master_tables()
 
-        self.result_files = {}
-        self.result_files["capacities"] = self._view_capacities()
-        self.result_files["component_costs"] = self._view_component_costs()
-        self.result_files["energy_balance_ASSETS"] = self._view_energy_balance("assets")
-        self.result_files["energy_balance_NODES"] = self._view_energy_balance("nodes")
-        self.result_files["energy_balance_NETWORK"] = self._view_energy_balance("network")
-        self.result_files["levelised_costs"] = self._view_levelised_costs()
-        self.result_files["summary"] = self._view_summary()
-        self.result_files["x"] = self.generate_x_file()
+        if file == 'all':
+            self.result_files["capacities"] = self._view_capacities()
+            self.result_files["component_costs"] = self._view_component_costs()
+            self.result_files["energy_balance_ASSETS"] = self._view_energy_balance("assets")
+            self.result_files["energy_balance_NODES"] = self._view_energy_balance("nodes")
+            self.result_files["energy_balance_NETWORK"] = self._view_energy_balance("network")
+            self.result_files["levelised_costs"] = self._view_levelised_costs()
+            self.result_files["summary"] = self._view_summary()
+            self.result_files["x"] = self.generate_x_file()
+
+        else: 
+            self.results_files # TODO
 
         self.statistics_generated = True
         return None
