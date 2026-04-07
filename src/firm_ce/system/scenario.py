@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult
 
 from firm_ce.common.helpers import parse_comma_separated, chain
+from firm_ce.common.typing import npfloat
 from firm_ce.constructors.component_cons import construct_Fleet_object
 from firm_ce.constructors.parameter_cons import construct_ScenarioParameters_object
 from firm_ce.constructors.topology_cons import construct_Network_object
@@ -83,7 +84,7 @@ class Scenario:
     def create_solution_directory(self) -> None:
         os.makedirs(self.solution_dir, exist_ok=True)
 
-    def get_bounds(self) -> NDArray[np.float64]:
+    def get_bounds(self) -> NDArray[npfloat]:
         def power_capacity_bounds(
             asset_list: Union[List[Generator_InstanceType], List[Storage_InstanceType], List[Line_InstanceType]],
             build_cap_constraint: str,
@@ -188,7 +189,7 @@ class Scenario:
             or parse_comma_separated(datafile_filenames_dict[idx]["scenarios"]) == ["all"]
         }
 
-    def _get_x0(self, all_x0s: Dict[str, Dict[str, str]]) -> NDArray[np.float64]:
+    def _get_x0(self, all_x0s: Dict[str, Dict[str, str]]) -> NDArray[npfloat]:
         """Get the initial guess corresponding to this scenario."""
         for entry in all_x0s.values():
             if entry["scenario"] == self.name:
@@ -196,17 +197,17 @@ class Scenario:
                     x0_list = [float(x) for x in entry["x_0"].strip().split(",") if x.strip()]
                 except AttributeError:
                     x0_list = []
-                return np.array(x0_list, dtype=np.float64)
-        return np.array([], np.float64)
+                return np.array(x0_list, dtype=npfloat)
+        return np.array([], npfloat)
 
-    def _approximate_feasible_solution(self) -> NDArray[np.float64]:
+    def _approximate_feasible_solution(self) -> NDArray[npfloat]:
         """ If no initial guess is provided, create an approximate feasible solution."""
         if not self.data_status:
             self.logger.warning("Datafiles not loaded. Node data is empty; heuristic may fail or return zeros.")
 
         # Determine the size of the decision vector based on assigned indices
         num_vars = len(self.fleet.generators) + (2 * len(self.fleet.storages)) + len(self.network.major_lines)
-        heuristic_x = np.zeros(num_vars, dtype=np.float64)
+        heuristic_x = np.zeros(num_vars, dtype=npfloat)
 
         # Pre-calculate node metrics to avoid redundant array operations
         node_metrics = {}
@@ -284,7 +285,7 @@ class Scenario:
         solver.evaluate()
         return solver.result
 
-    def polish(self, config: ModelConfig, initial_population: NDArray[np.float64]) -> OptimizeResult:
+    def polish(self, config: ModelConfig, initial_population: NDArray[npfloat]) -> OptimizeResult:
         solver = Solver(
             self, config, True, initial_population
         )

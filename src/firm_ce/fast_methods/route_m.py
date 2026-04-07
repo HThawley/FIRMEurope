@@ -3,15 +3,15 @@ from typing import Tuple
 
 from firm_ce.common.constants import FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import njit
-from firm_ce.common.typing import DictType, TypedList, boolean, float64, int64
+from firm_ce.common.typing import DictType, TypedList, boolean, nbfloat, nbintp
 from firm_ce.system.topology import Line_InstanceType, Node_InstanceType, Route, Route_InstanceType
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def create_dynamic_copy(
     route_instance: Route_InstanceType,
-    nodes_typed_dict: DictType(int64, Node_InstanceType),
-    lines_typed_dict: DictType(int64, Line_InstanceType),
+    nodes_typed_dict: DictType(nbintp, Node_InstanceType),
+    lines_typed_dict: DictType(nbintp, Line_InstanceType),
 ) -> Route_InstanceType:
     nodes_list_copy = TypedList.empty_list(Node_InstanceType)
     lines_list_copy = TypedList.empty_list(Line_InstanceType)
@@ -86,7 +86,7 @@ def check_contains_node(
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def get_forward_outflow(current_flow: float64, exist_flow: float64, capacity: float64, l_eff: float64) -> float64:
+def get_forward_outflow(current_flow: nbfloat, exist_flow: nbfloat, capacity: nbfloat, l_eff: nbfloat) -> nbfloat:
     """Helper to determine the constrained outflow during the forward pass."""
     # maximum flow that may be reversed from pov of recipient
     max_cancel_inflow = max(0.0, -exist_flow) * l_eff
@@ -102,7 +102,7 @@ def get_forward_outflow(current_flow: float64, exist_flow: float64, capacity: fl
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def get_backward_inflow_and_delta(required_flow: float64, exist_flow: float64, l_eff: float64) -> Tuple[float64, float64]:
+def get_backward_inflow_and_delta(required_flow: nbfloat, exist_flow: nbfloat, l_eff: nbfloat) -> Tuple[nbfloat, nbfloat]:
     """Helper to determine the required inflow and line flow delta during the backward pass."""
     outflow_cancel = min(required_flow, max(0.0, -exist_flow))
     outflow_new = required_flow - outflow_cancel
@@ -116,7 +116,7 @@ def get_backward_inflow_and_delta(required_flow: float64, exist_flow: float64, l
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_flow_update(
     route_instance: Route_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     During a transmission action, the flow update of each Route for a given fill node and route length
@@ -132,7 +132,7 @@ def calculate_flow_update(
     Parameters:
     -------
     route_instance (Route_InstanceType): A static instance of the Route jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
 
     Returns:
     -------
@@ -178,7 +178,7 @@ def calculate_flow_update(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_exports(
     route_instance: Route_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     Once the flow updates for the Route instances corresponding to a particular start node and route length
@@ -192,7 +192,7 @@ def update_exports(
     Parameters:
     -------
     route_instance (Route_InstanceType): An instance of the Route jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
 
     Returns:
     -------

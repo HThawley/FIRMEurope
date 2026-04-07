@@ -7,7 +7,7 @@ from firm_ce.common.exceptions import (
     raise_static_modification_error,
 )
 from firm_ce.common.jit_overload import njit
-from firm_ce.common.typing import DictType, boolean, float64, int64, unicode_type
+from firm_ce.common.typing import DictType, boolean, nbfloat, npfloat, nbint, nbintp, npintp, unicode_type
 from firm_ce.system.components import Generator_InstanceType, Storage_InstanceType
 from firm_ce.system.topology import Node, Node_InstanceType
 
@@ -24,7 +24,7 @@ def create_dynamic_copy(node_instance: Node_InstanceType) -> Node_InstanceType:
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def load_data(
     node_instance: Node_InstanceType,
-    trace: float64[:],
+    trace: nbfloat[:],
 ) -> None:
     """
     Load the electricity demand trace and initialise the residual load for a Node instance.
@@ -32,7 +32,7 @@ def load_data(
     Parameters:
     -------
     node_instance (Node_InstanceType): An instance of the Node jitclass.
-    trace (float64[:]): Array containing the time-series electricity demand trace for the Node. Each element
+    trace (nbfloat[:]): Array containing the time-series electricity demand trace for the Node. Each element
         provides the demand [MW] for a time interval.
 
     Returns:
@@ -70,8 +70,8 @@ def unload_data(
     Attributes modified for the Node instance: data_status, data, residual_load.
     """
     node_instance.data_status = False
-    node_instance.data = np.empty((0,), dtype=np.float64)
-    node_instance.residual_load = np.empty((0,), dtype=np.float64)
+    node_instance.data = np.empty((0,), dtype=npfloat)
+    node_instance.residual_load = np.empty((0,), dtype=npfloat)
     return None
 
 
@@ -79,7 +79,7 @@ def unload_data(
 def get_data(
     node_instance: Node_InstanceType,
     data_type: unicode_type,
-) -> float64[:]:
+) -> nbfloat[:]:
     """
     Gets the specified data_type from the Node instance.
 
@@ -90,7 +90,7 @@ def get_data(
 
     Returns:
     -------
-    float64[:]: The data array associated with data_type.
+    nbfloat[:]: The data array associated with data_type.
 
     Raises:
     -------
@@ -112,7 +112,7 @@ def get_data(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def allocate_memory(
     node_instance: Node_InstanceType,
-    intervals_count: int64,
+    intervals_count: nbint,
 ) -> None:
     """
     Memory associated with endogenous time-series data for a Node is only allocated after a dynamic copy of
@@ -121,7 +121,7 @@ def allocate_memory(
     Parameters:
     -------
     node_instance (Node_InstanceType): A dynamic instance of the Node jitclass.
-    intervals_count (int64): Total number of time intervals over the modelling horizon.
+    intervals_count (nbint): Total number of time intervals over the modelling horizon.
 
     Returns:
     -------
@@ -138,19 +138,19 @@ def allocate_memory(
     """
     if node_instance.static_instance:
         raise_static_modification_error()
-    node_instance.imports_exports = np.zeros(intervals_count, dtype=np.float64)
-    node_instance.deficits = np.zeros(intervals_count, dtype=np.float64)
-    node_instance.spillage = np.zeros(intervals_count, dtype=np.float64)
+    node_instance.imports_exports = np.zeros(intervals_count, dtype=npfloat)
+    node_instance.deficits = np.zeros(intervals_count, dtype=npfloat)
+    node_instance.spillage = np.zeros(intervals_count, dtype=npfloat)
 
-    node_instance.flexible_power = np.zeros(intervals_count, dtype=np.float64)
-    node_instance.storage_power = np.zeros(intervals_count, dtype=np.float64)
+    node_instance.flexible_power = np.zeros(intervals_count, dtype=npfloat)
+    node_instance.storage_power = np.zeros(intervals_count, dtype=npfloat)
     return None
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_netload_t(
     node_instance: Node_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     Initialises the netload for a Node to be the residual load. The residual load is equal to the
@@ -161,7 +161,7 @@ def initialise_netload_t(
     Parameters:
     -------
     node_instance (Node_InstanceType): An instance of the Node jitclass.
-    interval (int64): Index for the time interval during unit committment.
+    interval (nbintp): Index for the time interval during unit committment.
 
     Returns:
     -------
@@ -178,7 +178,7 @@ def initialise_netload_t(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_netload_t(
     node_instance: Node_InstanceType,
-    interval: int64,
+    interval: nbintp,
     precharging_flag: boolean,
 ) -> None:
     """
@@ -189,7 +189,7 @@ def update_netload_t(
     Parameters:
     -------
     node_instance (Node_InstanceType): An instance of the Node jitclass.
-    interval (int64): Index for the time interval during unit committment.
+    interval (nbintp): Index for the time interval during unit committment.
     precharging_flag (boolean): True if balancing in either a deficit block or precharging period. Otherwise, False.
         When the value is True, the netload calculation also considers current storage and flexible dispatch at that
         node.
@@ -254,7 +254,7 @@ def surplus_available(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def assign_storage_merit_order(
     node_instance: Node_InstanceType,
-    storages_typed_dict: DictType(int64, Storage_InstanceType),
+    storages_typed_dict: DictType(nbintp, Storage_InstanceType),
 ) -> None:
     orders = []
     durations = []
@@ -268,8 +268,8 @@ def assign_storage_merit_order(
     if count == 0:
         return None
 
-    temp_orders = np.array(orders, dtype=np.int64)
-    temp_durations = np.array(durations, dtype=np.float64)
+    temp_orders = np.array(orders, dtype=npintp)
+    temp_durations = np.array(durations, dtype=npfloat)
 
     # Faster than argsort for a small number of items
     # sort durations longest to shortest
@@ -293,11 +293,11 @@ def assign_storage_merit_order(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def assign_flexible_merit_order(
     node_instance: Node_InstanceType,
-    generators_typed_dict: DictType(int64, Generator_InstanceType),
+    generators_typed_dict: DictType(nbintp, Generator_InstanceType),
 ) -> None:
     generators_count = len(generators_typed_dict)
-    temp_orders = np.full(generators_count, -1, dtype=np.int64)
-    temp_marginal_costs = np.full(generators_count, -1, dtype=np.float64)
+    temp_orders = np.full(generators_count, -1, dtype=npintp)
+    temp_marginal_costs = np.full(generators_count, -1, dtype=npfloat)
 
     idx = 0
     for generator_order, generator in generators_typed_dict.items():
@@ -327,7 +327,7 @@ def assign_flexible_merit_order(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_remaining_netload(
     node_instance: Node_InstanceType,
-    interval: int64,
+    interval: nbintp,
     check_case: unicode_type,
 ) -> boolean:
     """
@@ -338,7 +338,7 @@ def check_remaining_netload(
     Parameters:
     -------
     node_instance (Node_InstanceType): A dynamic instance of the Node jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
     check_case (unicode_type): Either 'deficit' (netload greater than 0), 'spillage' (netload less than 0),
         or 'both' (netload equals 0).
 
@@ -363,7 +363,7 @@ def check_remaining_netload(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_imports_exports_temp(
     node_instance: Node_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     During the precharging period, imports/exports at the nodes are adjusted to allow for additional transmission
@@ -374,7 +374,7 @@ def set_imports_exports_temp(
     Parameters:
     -------
     node_instance (Node_InstanceType): A dynamic instance of the Node jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
 
     Returns:
     -------
@@ -411,14 +411,14 @@ def reset_dispatch_max_t(
     Attributes modified for each Node in Network.nodes: discharge_max_t, charge_max_t, flexible_max_t.
     """
     if len(node_instance.storage_merit_order) > 0:
-        node_instance.discharge_max_t = np.zeros(len(node_instance.storage_merit_order), dtype=np.float64)
-        node_instance.charge_max_t = np.zeros(len(node_instance.storage_merit_order), dtype=np.float64)
+        node_instance.discharge_max_t = np.zeros(len(node_instance.storage_merit_order), dtype=npfloat)
+        node_instance.charge_max_t = np.zeros(len(node_instance.storage_merit_order), dtype=npfloat)
     else:
-        node_instance.discharge_max_t = np.zeros(1, dtype=np.float64)
-        node_instance.charge_max_t = np.zeros(1, dtype=np.float64)
+        node_instance.discharge_max_t = np.zeros(1, dtype=npfloat)
+        node_instance.charge_max_t = np.zeros(1, dtype=npfloat)
 
     if len(node_instance.flexible_merit_order) > 0:
-        node_instance.flexible_max_t = np.zeros(len(node_instance.flexible_merit_order), dtype=np.float64)
+        node_instance.flexible_max_t = np.zeros(len(node_instance.flexible_merit_order), dtype=npfloat)
     else:
-        node_instance.flexible_max_t = np.zeros(1, dtype=np.float64)
+        node_instance.flexible_max_t = np.zeros(1, dtype=npfloat)
     return None

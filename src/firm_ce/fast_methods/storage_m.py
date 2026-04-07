@@ -7,7 +7,7 @@ from firm_ce.common.exceptions import (
     raise_static_modification_error,
 )
 from firm_ce.common.jit_overload import njit
-from firm_ce.common.typing import DictType, boolean, float64, int64, unicode_type
+from firm_ce.common.typing import DictType, boolean, nbfloat, npfloat, nbint, nbintp, unicode_type
 from firm_ce.fast_methods import ltcosts_m
 from firm_ce.system.components import Storage, Storage_InstanceType
 from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
@@ -16,8 +16,8 @@ from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def create_dynamic_copy(
     storage_instance: Storage_InstanceType,
-    nodes_typed_dict: DictType(int64, Node_InstanceType),
-    lines_typed_dict: DictType(int64, Line_InstanceType),
+    nodes_typed_dict: DictType(nbintp, Node_InstanceType),
+    lines_typed_dict: DictType(nbintp, Line_InstanceType),
 ) -> Storage_InstanceType:
     node_copy = nodes_typed_dict[storage_instance.node.order]
     line_copy = lines_typed_dict[storage_instance.line.order]
@@ -60,7 +60,7 @@ def create_dynamic_copy(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def build_capacity(
     storage_instance: Storage_InstanceType,
-    new_build_capacity: float64,
+    new_build_capacity: nbfloat,
     capacity_type: unicode_type,
 ) -> None:
     if storage_instance.static_instance:
@@ -85,7 +85,7 @@ def build_capacity(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def load_data(
     storage_instance: Storage_InstanceType,
-    inflow_trace: float64[:],
+    inflow_trace: nbfloat[:],
 ) -> None:
     """
     Load the inflow trace data to the Storage instance. This is done before solving a Scenario.
@@ -93,9 +93,9 @@ def load_data(
     Parameters:
     -------
     storage_instance (Storage_InstanceType): An instance of the Storage jitclass.
-    inflow_trace (float64[:]): Array containing the time-series inflow trace for the Storage. Each element
+    inflow_trace (nbfloat[:]): Array containing the time-series inflow trace for the Storage. Each element
         provides the capacity factor for a time interval.
-    interval_resolutions (float64[:]): A 1-dimensional array containing the resolution for every time interval
+    interval_resolutions (nbfloat[:]): A 1-dimensional array containing the resolution for every time interval
         in the unit committment formulation (hours per time interval). An array is used instead of a single
         scalar value to allow for variable time step simplified balancing methods to be developed in future.
 
@@ -130,7 +130,7 @@ def unload_data(storage_instance: Storage_InstanceType) -> None:
     -------
     Attributes modified for the Storage instance: data_status, data.
     """
-    storage_instance.data = np.empty((0,), dtype=np.float64)
+    storage_instance.data = np.empty((0,), dtype=npfloat)
     storage_instance.data_status = False
     return None
 
@@ -139,7 +139,7 @@ def unload_data(storage_instance: Storage_InstanceType) -> None:
 def get_data(
     storage_instance: Storage_InstanceType,
     data_type: unicode_type,
-) -> float64[:]:
+) -> nbfloat[:]:
     """
     Gets the specified data_type from the Storage instance.
 
@@ -150,7 +150,7 @@ def get_data(
 
     Returns:
     -------
-    float64[:]: The data array associated with data_type.
+    nbfloat[:]: The data array associated with data_type.
 
     Raises:
     -------
@@ -169,7 +169,7 @@ def get_data(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def allocate_memory(
     storage_instance: Storage_InstanceType,
-    intervals_count: int64
+    intervals_count: nbint
 ) -> None:
     """
     Memory associated with endogenous time-series data for a Storage system is only allocated after a dynamic copy of
@@ -178,7 +178,7 @@ def allocate_memory(
     Parameters:
     -------
     storage_instance (Storage_InstanceType): A dynamic instance of the Storage jitclass.
-    intervals_count (int64): Total number of time intervals over the modelling horizon.
+    intervals_count (nbint): Total number of time intervals over the modelling horizon.
 
     Returns:
     -------
@@ -194,8 +194,8 @@ def allocate_memory(
     """
     if storage_instance.static_instance:
         raise_static_modification_error()
-    storage_instance.dispatch_power = np.zeros(intervals_count, dtype=np.float64)
-    storage_instance.stored_energy = np.zeros(intervals_count, dtype=np.float64)
+    storage_instance.dispatch_power = np.zeros(intervals_count, dtype=npfloat)
+    storage_instance.stored_energy = np.zeros(intervals_count, dtype=npfloat)
     return None
 
 
@@ -233,9 +233,9 @@ def initialise_stored_energy(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_dispatch_max_t(
     storage_instance: Storage_InstanceType,
-    interval: int64,
-    resolution: float64,
-    merit_order_idx: int64,
+    interval: nbintp,
+    resolution: nbfloat,
+    merit_order_idx: nbintp,
     forward_time_flag: boolean,
 ) -> None:
     inflow_energy = 0.0
@@ -281,8 +281,8 @@ def set_dispatch_max_t(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def dispatch(
     storage_instance: Storage_InstanceType,
-    interval: int64,
-    merit_order_idx: int64,
+    interval: nbintp,
+    merit_order_idx: nbintp,
 ) -> None:
     """
     Dispatches the Storage system according to its place in the merit order for the Storage.node.
@@ -296,8 +296,8 @@ def dispatch(
     Parameters:
     -------
     storage_instance (Storage_InstanceType): An instance of the Storage jitclass.
-    interval (int64): Index for the time interval during unit committment.
-    merit_order_idx (int64): Location of the Storage system in the merit order at the Storage.node.
+    interval (nbintp): Index for the time interval during unit committment.
+    merit_order_idx (nbintp): Location of the Storage system in the merit order at the Storage.node.
         Lower merit_order_idx indicates shorter duration and higher priority in the merit order.
 
     Returns:
@@ -324,8 +324,8 @@ def dispatch(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_stored_energy(
     storage_instance: Storage_InstanceType,
-    interval: int64,
-    resolution: float64,
+    interval: nbintp,
+    resolution: nbfloat,
     forward_time_flag: boolean,
 ) -> None:
     dispatched_energy = (
@@ -362,7 +362,7 @@ def update_stored_energy(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_lt_generation(
     storage_instance: Storage_InstanceType,
-    interval_resolutions: float64[:],
+    interval_resolutions: nbfloat[:],
 ) -> None:
     """
     Calculate the total energy discharged over the long-term modelling horizon for a Storage system.
@@ -370,7 +370,7 @@ def calculate_lt_generation(
     Parameters:
     -------
     storage_instance (Storage_InstanceType): An instance of the Storage jitclass.
-    interval_resolutions (float64[:]): A 1-dimensional array containing the resolution for every time interval
+    interval_resolutions (nbfloat[:]): A 1-dimensional array containing the resolution for every time interval
         in the unit committment formulation (hours per time interval). An array is used instead of a single
         scalar value to allow for variable time step simplified balancing methods to be developed in future.
 
@@ -400,19 +400,19 @@ def calculate_lt_generation(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_variable_costs(
     storage_instance: Storage_InstanceType,
-    year_float: float64,
-) -> float64:
+    year_float: nbfloat,
+) -> nbfloat:
     """
     Calculate the total variable costs for a Storage system at the end of unit committment.
 
     Parameters:
     -------
     storage_instance (Storage_InstanceType): An instance of the Storage jitclass.
-    year_float (float64): Number of years. Leap days provide additional fractional value.
+    year_float (nbfloat): Number of years. Leap days provide additional fractional value.
 
     Returns:
     -------
-    float64: Total variable costs ($), equal to sum of fuel and VO&M costs.
+    nbfloat: Total variable costs ($), equal to sum of fuel and VO&M costs.
 
     Side-effects:
     -------
@@ -439,7 +439,7 @@ def calculate_variable_costs(
 def calculate_fixed_costs(
     storage_instance: Storage_InstanceType,
     include_existing: bool,
-) -> float64:
+) -> nbfloat:
     """
     Calculate the total fixed costs for a Storage system.
 
@@ -449,7 +449,7 @@ def calculate_fixed_costs(
 
     Returns:
     -------
-    float64: Total fixed costs ($), equal to sum of annualised build and FO&M costs.
+    nbfloat: Total fixed costs ($), equal to sum of annualised build and FO&M costs.
 
     Side-effects:
     -------
@@ -498,7 +498,7 @@ def calculate_fixed_costs(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_partial_cost_power(
     storage_instance: Storage_InstanceType,
-    year_float: float64,
+    year_float: nbfloat,
 ):
     return ltcosts_m.get_partial_cost_power(
         storage_instance.new_build_p,
@@ -526,7 +526,7 @@ def get_partial_cost_energy(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_deficit_block(
     storage_instance: Storage_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     Upon resolving a deficit block, initialise the temporary stored energy,
@@ -537,7 +537,7 @@ def initialise_deficit_block(
     Parameters:
     -------
     storage_instance (Storage_InstanceType): An instance of the Storage jitclass.
-    interval (int64): Index for the first time interval immediately following the deficit block.
+    interval (nbintp): Index for the first time interval immediately following the deficit block.
         During unit committment for the deficit block, time intervals will decrease in value (reverse
         time).
 
@@ -558,7 +558,7 @@ def initialise_deficit_block(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_deficit_block_bounds(
     storage_instance: Storage_InstanceType,
-    stored_energy: float64,
+    stored_energy: nbfloat,
 ) -> None:
     """
     Update the temporary minimum and maximum stored energy values for the Storage system in the
@@ -570,7 +570,7 @@ def update_deficit_block_bounds(
     Parameters:
     -------
     storage_instance (Storage_InstanceType): An instance of the Storage jitclass.
-    stored_energy (float64): The stored energy in a time interval for the Storage system.
+    stored_energy (nbfloat): The stored energy in a time interval for the Storage system.
 
     Returns:
     -------
@@ -630,7 +630,7 @@ def assign_precharging_reserves(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_precharging_flags(
     storage_instance: Storage_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     Initialises the trickling flag and precharge flag for a Storage system once precharging in the lead-up to the deficit
@@ -647,7 +647,7 @@ def initialise_precharging_flags(
     Parameters:
     -------
     storage_instance (Storage_InstanceType): An instance of the Storage jitclass.
-    interval (int64): Index for the first time interval of the deficit block (immediately following the
+    interval (nbintp): Index for the first time interval of the deficit block (immediately following the
         precharging period). Time intervals during the precharging period will decrease in value (reverse
         time).
 
@@ -672,7 +672,7 @@ def initialise_precharging_flags(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_precharging_flags(
     storage_instance: Storage_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     At the start of a time interval within the precharging period, the remaining trickling reserves,
@@ -691,7 +691,7 @@ def update_precharging_flags(
     Parameters:
     -------
     storage_instance (Storage_InstanceType): An instance of the Storage jitclass.
-    interval (int64): Index for the current time interval in the precharging period. Time intervals during
+    interval (nbintp): Index for the current time interval in the precharging period. Time intervals during
         the precharging period will decrease in value (reverse time).
 
     Returns:
@@ -720,9 +720,9 @@ def update_precharging_flags(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_precharging_max_t(
     storage_instance: Storage_InstanceType,
-    interval: int64,
-    resolution: float64,
-    merit_order_idx: int64,
+    interval: nbintp,
+    resolution: nbfloat,
+    merit_order_idx: nbintp,
 ) -> None:
     # Set discharge_max_t for trickle chargers
     if storage_instance.trickling_flag:
@@ -783,10 +783,10 @@ def set_precharging_max_t(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_dispatch_energy_update(
     storage_instance: Storage_InstanceType,
-    dispatch_power_original: float64,
-    dispatch_power_update: float64,
-    resolution: float64,
-) -> float64:
+    dispatch_power_original: nbfloat,
+    dispatch_power_update: nbfloat,
+    resolution: nbfloat,
+) -> nbfloat:
     dispatch_energy_update = 0.0
 
     if dispatch_power_original > 0.0:  # If originally discharging
@@ -823,11 +823,11 @@ def calculate_dispatch_energy_update(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_precharge_dispatch(
     storage_instance: Storage_InstanceType,
-    interval: int64,
-    resolution: float64,
-    dispatch_power_update: float64,
+    interval: nbintp,
+    resolution: nbfloat,
+    dispatch_power_update: nbfloat,
     precharging_flag: boolean,
-    merit_order_idx: int64,
+    merit_order_idx: nbintp,
 ) -> None:
     dispatch_energy_update = calculate_dispatch_energy_update(
         storage_instance, storage_instance.dispatch_power[interval], dispatch_power_update, resolution
@@ -852,7 +852,7 @@ def update_precharge_dispatch(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_available_dispatch(
     storage_instance: Storage_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     Calculate the maximum adjustment to dispatch power that is possible for a Storage system. When
@@ -866,7 +866,7 @@ def calculate_available_dispatch(
     Parameters:
     -------
     storage_instance (Storage_InstanceType): An instance of the Storage jitclass.
-    interval (int64): Index for the current time interval when re-calculating stored energy by dispatching
+    interval (nbintp): Index for the current time interval when re-calculating stored energy by dispatching
         according to the precharging dispatch powers. Note that this is done in forward time.
 
     Returns:

@@ -1,24 +1,24 @@
 # type: ignore
 from firm_ce.common.constants import JIT_ENABLED
 from firm_ce.common.jit_overload import jitclass
-from firm_ce.common.typing import float64, int64
+from firm_ce.common.typing import nbfloat, nbint
 from firm_ce.common.helpers import get_annuity_factor
 
 
 if JIT_ENABLED:
     unitcost_spec = [
-        ("capex_p", float64),
-        ("fom", float64),
-        ("vom", float64),
-        ("lifetime", int64),
-        ("discount_rate", float64),
-        ("annuity_factor", float64),
-        ("heat_rate_base", float64),
-        ("heat_rate_incr", float64),
-        ("fuel_cost_mwh", float64),
-        ("fuel_cost_h", float64),
-        ("capex_e", float64),
-        ("transformer_capex", float64),
+        ("capex_p", nbfloat),
+        ("fom", nbfloat),
+        ("vom", nbfloat),
+        ("lifetime", nbint),
+        ("discount_rate", nbfloat),
+        ("annuity_factor", nbfloat),
+        ("heat_rate_base", nbfloat),
+        ("heat_rate_incr", nbfloat),
+        ("fuel_cost_mwh", nbfloat),
+        ("fuel_cost_h", nbfloat),
+        ("capex_e", nbfloat),
+        ("transformer_capex", nbfloat),
     ]
 else:
     unitcost_spec = []
@@ -32,16 +32,16 @@ class UnitCost:
 
     def __init__(
         self,
-        capex_p: float64,
-        fom: float64,
-        vom: float64,
-        lifetime: int64,
-        discount_rate: float64,
-        heat_rate_base: float64,
-        heat_rate_incr: float64,
-        fuel_cost: float64,
-        capex_e: float64,
-        transformer_capex: float64,
+        capex_p: nbfloat,
+        fom: nbfloat,
+        vom: nbfloat,
+        lifetime: nbint,
+        discount_rate: nbfloat,
+        heat_rate_base: nbfloat,
+        heat_rate_incr: nbfloat,
+        fuel_cost: nbfloat,
+        capex_e: nbfloat,
+        transformer_capex: nbfloat,
     ) -> None:
         """
         Initialize cost attributes for a Generator, Storage or Line object.
@@ -87,11 +87,11 @@ else:
 
 if JIT_ENABLED:
     ltcosts_spec = [
-        ("annualised_build_p", float64),
-        ("annualised_build_e", float64),
-        ("fom", float64),
-        ("vom", float64),
-        ("fuel", float64),
+        ("annualised_build_p", nbfloat),
+        ("annualised_build_e", nbfloat),
+        ("fom", nbfloat),
+        ("vom", nbfloat),
+        ("fuel", nbfloat),
     ]
 else:
     ltcosts_spec = []

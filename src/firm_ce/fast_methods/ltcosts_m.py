@@ -1,13 +1,13 @@
 # type: ignore
 from firm_ce.common.constants import FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import njit
-from firm_ce.common.typing import float64, unicode_type
+from firm_ce.common.typing import nbfloat, unicode_type
 from firm_ce.system.costs import LTCosts_InstanceType, UnitCost_InstanceType
 from firm_ce.common.helpers import njit_safe_divide
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def get_total(ltcosts_instance: LTCosts_InstanceType) -> float64:
+def get_total(ltcosts_instance: LTCosts_InstanceType) -> nbfloat:
     return (
         ltcosts_instance.annualised_build_p
         + ltcosts_instance.annualised_build_e
@@ -18,40 +18,40 @@ def get_total(ltcosts_instance: LTCosts_InstanceType) -> float64:
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def get_variable(ltcosts_instance: LTCosts_InstanceType) -> float64:
+def get_variable(ltcosts_instance: LTCosts_InstanceType) -> nbfloat:
     return ltcosts_instance.vom + ltcosts_instance.fuel
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def get_fixed(ltcosts_instance: LTCosts_InstanceType) -> float64:
+def get_fixed(ltcosts_instance: LTCosts_InstanceType) -> nbfloat:
     return ltcosts_instance.annualised_build_p + ltcosts_instance.annualised_build_e + ltcosts_instance.fom
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def get_annuity_factor(discount_rate: float64, lifetime: float64) -> float64:
+def get_annuity_factor(discount_rate: nbfloat, lifetime: nbfloat) -> nbfloat:
     return (1 - (1 + discount_rate) ** (-1 * lifetime)) / discount_rate
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_fixed_costs_power(
     ltcosts_instance: LTCosts_InstanceType,
-) -> float64:
+) -> nbfloat:
     return ltcosts_instance.annualised_build_p + ltcosts_instance.fom
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_fixed_costs_energy(
     ltcosts_instance: LTCosts_InstanceType,
-) -> float64:
+) -> nbfloat:
     return ltcosts_instance.annualised_build_e
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def _do_annualised_build_calc(
-    quantity: float64,
-    capex: float64,
-    annuity_factor: float64,
-) -> float64:
+    quantity: nbfloat,
+    capex: nbfloat,
+    annuity_factor: nbfloat,
+) -> nbfloat:
     if annuity_factor > 1e-6:
         return quantity * capex / annuity_factor
     return 0
@@ -60,8 +60,8 @@ def _do_annualised_build_calc(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_annualised_build_power(
     ltcosts_instance: LTCosts_InstanceType,
-    power_capacity: float64,
-    line_length: float64,
+    power_capacity: nbfloat,
+    line_length: nbfloat,
     unit_costs: UnitCost_InstanceType,
     asset_type: unicode_type,
 ) -> None:
@@ -96,7 +96,7 @@ def calculate_annualised_build_power(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_annualised_build_energy(
     ltcosts_instance: LTCosts_InstanceType,
-    energy_capacity: float64,
+    energy_capacity: nbfloat,
     unit_costs: UnitCost_InstanceType,
     asset_type: unicode_type,
 ) -> None:
@@ -112,15 +112,15 @@ def calculate_annualised_build_energy(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_partial_cost_power(
-    new_power_capacity: float64,
-    total_power_capacity: float64,
-    line_length: float64,
-    generation: float64,
-    year_float: float64,
-    unit_hours: float64,
+    new_power_capacity: nbfloat,
+    total_power_capacity: nbfloat,
+    line_length: nbfloat,
+    generation: nbfloat,
+    year_float: nbfloat,
+    unit_hours: nbfloat,
     unit_costs: UnitCost_InstanceType,
     asset_type: unicode_type,
-) -> float64:
+) -> nbfloat:
     result = 0.0
     if asset_type in ("generator", "storage"):
         result += _do_annualised_build_calc(
@@ -166,10 +166,10 @@ def get_partial_cost_power(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_partial_cost_energy(
-    new_energy_capacity: float64,
+    new_energy_capacity: nbfloat,
     unit_costs: UnitCost_InstanceType,
     asset_type: unicode_type,
-) -> float64:
+) -> nbfloat:
     # TODO: Add portion of generation where stored_energy < (capacity - existing)?
     result = 0.0
     if asset_type == "storage":
@@ -184,9 +184,9 @@ def get_partial_cost_energy(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_lcoe(
     ltcosts_instance: LTCosts_InstanceType,
-    generation: float64,
-    years_float: float64,
-) -> float64:
+    generation: nbfloat,
+    years_float: nbfloat,
+) -> nbfloat:
     total_annual_cost = get_total(ltcosts_instance)
 
     if generation > 1e-6:
@@ -197,8 +197,8 @@ def calculate_lcoe(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_fom(
     ltcosts_instance: LTCosts_InstanceType,
-    power_capacity: float64,
-    line_length: float64,
+    power_capacity: nbfloat,
+    line_length: nbfloat,
     unit_costs: UnitCost_InstanceType,
     asset_type: unicode_type,
 ) -> None:
@@ -212,8 +212,8 @@ def calculate_fom(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_vom(
     ltcosts_instance: LTCosts_InstanceType,
-    generation: float64,
-    year_float: float64,
+    generation: nbfloat,
+    year_float: nbfloat,
     unit_costs: UnitCost_InstanceType,
 ) -> None:
     ltcosts_instance.vom = generation * 1e3 * unit_costs.vom / year_float
@@ -223,9 +223,9 @@ def calculate_vom(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_fuel(
     ltcosts_instance: LTCosts_InstanceType,
-    generation: float64,
-    year_float: float64,
-    unit_hours: float64,
+    generation: nbfloat,
+    year_float: nbfloat,
+    unit_hours: nbfloat,
     unit_costs: UnitCost_InstanceType,
 ) -> None:
     ltcosts_instance.fuel = (generation * 1e3 * unit_costs.fuel_cost_mwh + unit_hours * unit_costs.fuel_cost_h) / year_float

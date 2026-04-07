@@ -5,7 +5,7 @@ import numpy as np
 
 from firm_ce.common.constants import JIT_ENABLED, NUM_THREADS, PENALTY_MULTIPLIER, FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import jitclass, njit, prange
-from firm_ce.common.typing import boolean, float64, unicode_type
+from firm_ce.common.typing import boolean, nbfloat, npfloat, unicode_type
 from firm_ce.fast_methods import fleet_m, generator_m, line_m, network_m, static_m, storage_m
 from firm_ce.optimisation.balancing import balance_for_period
 from firm_ce.system.components import Fleet_InstanceType
@@ -18,14 +18,14 @@ if JIT_ENABLED:
     set_num_threads(int(NUM_THREADS))
 
     solution_spec = [
-        ("x", float64[:]),
+        ("x", nbfloat[:]),
         ("evaluated", boolean),
-        ("annual_cost", float64),
-        ("lcoe", float64),
-        ("x_lcoe", float64[:]),
-        ("penalties", float64),
+        ("annual_cost", nbfloat),
+        ("lcoe", nbfloat),
+        ("x_lcoe", nbfloat[:]),
+        ("penalties", nbfloat),
         ("balancing_type", unicode_type),
-        ("fixed_costs_threshold", float64),
+        ("fixed_costs_threshold", nbfloat),
         # Static jitclass instances
         ("static", ScenarioParameters_InstanceType),
         # Dynamic jitclass instances
@@ -62,13 +62,13 @@ class Solution:
 
     Attributes:
     -------
-    x (float64[:]): Candidate solution decision variable vector.
+    x (nbfloat[:]): Candidate solution decision variable vector.
     evaluated (boolean): Flag indicating whether `objective()` has been evaluated.
-    lcoe (float64): Levelised cost of electricity for the candidate, units $/MWh.
-    penalties (float64): Accumulated penalties for soft-constraint violations (fixed-costs and reliability), units $ or GW.
+    lcoe (nbfloat): Levelised cost of electricity for the candidate, units $/MWh.
+    penalties (nbfloat): Accumulated penalties for soft-constraint violations (fixed-costs and reliability), units $ or GW.
     balancing_type (unicode_type): Balancing mode (e.g., 'full' for balancing with the complete time-series over the entire
         time horizon at the specified resolution).
-    fixed_costs_threshold (float64): Upper bound on fixed costs intensity, units $/MWh of operational demand. Allows
+    fixed_costs_threshold (nbfloat): Upper bound on fixed costs intensity, units $/MWh of operational demand. Allows
         low-quality solutions to be rapidly discarded and penalised without evaluating the time-consuming unit committment
         problem.
     static (ScenarioParameters_InstanceType): Static scenario parameters (unsafe to modify).
@@ -78,25 +78,25 @@ class Solution:
 
     def __init__(
         self,
-        x: float64[:],
+        x: nbfloat[:],
         static: ScenarioParameters_InstanceType,
         fleet: Fleet_InstanceType,
         network: Network_InstanceType,
         balancing_type: unicode_type,
-        fixed_costs_threshold: float64,
+        fixed_costs_threshold: nbfloat,
     ) -> None:
         """
         Initialise a Solution instance and construct dynamic copies of Fleet and Network.
 
         Parameters:
         -------
-        x (float64[:]): Candidate solution decision variable vector.
+        x (nbfloat[:]): Candidate solution decision variable vector.
         static (ScenarioParameters_InstanceType): Static scenario parameters (unsafe to modify).
         fleet (Fleet_InstanceType): Static Fleet jitclass instance used to derive a dynamic copy for evaluation.
         network (Network_InstanceType): Static Network jitclass instance used to derive a dynamic copy for evaluation.
         balancing_type (unicode_type): Balancing mode (e.g., 'full' for balancing with the complete time-series over
             the entire time horizon at the specified resolution).
-        fixed_costs_threshold (float64): Upper bound on fixed costs intensity, units $/MWh of operational demand. Allows
+        fixed_costs_threshold (nbfloat): Upper bound on fixed costs intensity, units $/MWh of operational demand. Allows
             low-quality solutions to be rapidly discarded and penalised without evaluating the time-consuming unit
             committment problem.
 
@@ -111,7 +111,7 @@ class Solution:
         self.evaluated = False
         self.annual_cost = 0.0
         self.lcoe = 0.0
-        self.x_lcoe = np.empty(len(x), np.float64)
+        self.x_lcoe = np.empty(len(x), nbfloat)
         self.penalties = 0.0
 
         # These are static jitclass instances. It is UNSAFE to modify these
@@ -210,7 +210,7 @@ def calculate_fixed_costs(
 
     Returns:
     -------
-    float64: Total fixed costs over the modelling horizon, units $.
+    nbfloat: Total fixed costs over the modelling horizon, units $.
 
     Side-effects:
     -------
@@ -246,7 +246,7 @@ def calculate_variable_costs(solution: Solution_InstanceType) -> None:
 
     Returns:
     -------
-    float64: Total variable costs over the modelling horizon, units $.
+    nbfloat: Total variable costs over the modelling horizon, units $.
 
     Side-effects:
     -------
@@ -305,7 +305,7 @@ def check_fixed_costs(solution: Solution_InstanceType) -> boolean:
 
     Parameters:
     -------
-    fixed_costs (float64): Total fixed costs over the modelling horizon, units $.
+    fixed_costs (nbfloat): Total fixed costs over the modelling horizon, units $.
 
     Returns:
     -------
@@ -335,7 +335,7 @@ def objective(solution: Solution_InstanceType) -> tuple[float]:
 
     Returns:
     -------
-    UniTuple(float64, 2): A UniTuple containing two float64 values. The first value is the LCOE and the second value
+    UniTuple(nbfloat, 2): A UniTuple containing two nbfloat values. The first value is the LCOE and the second value
         is the penalties for penalty function violations.
 
     Side-effects:
@@ -386,20 +386,21 @@ def evaluate(solution: Solution_InstanceType) -> Solution_InstanceType:
 
 @njit(parallel=True)
 def mga_parallel_wrapper(
-    xs: float64[:, :],
+    xs: nbfloat[:, :],
     static: ScenarioParameters_InstanceType,
     fleet: Fleet_InstanceType,
     network: Network_InstanceType,
     balancing_type: unicode_type,
-    fixed_costs_threshold: float64,
-) -> float64[:, :]:
+    fixed_costs_threshold: nbfloat,
+) -> nbfloat[:, :]:
     """
     Behaves identically to `parallel_wrapper` but expects xs.T and returns [lcoe, penalties] only. Used for MGA optimisation.
     """
+    xs = xs.astype(nbfloat)
     n_points = xs.shape[0]
-    lcoe = np.zeros(n_points, dtype=np.float64)
-    penalties = np.zeros(n_points, dtype=np.float64)
-    scaled_points = np.zeros(xs.shape, dtype=np.float64)
+    lcoe = np.zeros(n_points, dtype=npfloat)
+    penalties = np.zeros(n_points, dtype=npfloat)
+    scaled_points = np.zeros(xs.shape, dtype=npfloat)
     for j in prange(n_points):
         xj = xs[j]
         solution = Solution(xj, static, fleet, network, balancing_type, fixed_costs_threshold)
@@ -412,13 +413,13 @@ def mga_parallel_wrapper(
 
 @njit(parallel=True)
 def parallel_wrapper(
-    xs: float64[:, :],
+    xs: nbfloat[:, :],
     static: ScenarioParameters_InstanceType,
     fleet: Fleet_InstanceType,
     network: Network_InstanceType,
     balancing_type: unicode_type,
-    fixed_costs_threshold: float64,
-) -> float64[:, :]:
+    fixed_costs_threshold: nbfloat,
+) -> nbfloat[:, :]:
     """
     A wrapper receives the vectorised differential evolution population and evaluates it over a parallel range.
     A Solution instance is created for each candidate solution and evaluated. The parallel range splits the candidate
@@ -427,25 +428,25 @@ def parallel_wrapper(
 
     Parameters:
     -------
-    xs (float64[:, :]): 2-dimensional array containing population for an iteration of the differential
+    xs (nbfloat[:, :]): 2-dimensional array containing population for an iteration of the differential
         evolution. Each row is a separate candidate solution, each column is a decision variable.
     static (ScenarioParameters_InstanceType): Static scenario parameters.
     fleet (Fleet_InstanceType): Static Fleet jitclass instance used to derive a dynamic copy for evaluation.
     network (Network_InstanceType): Static Network jitclass instance used to derive a dynamic copy for evaluation.
     balancing_type (unicode_type): Balancing mode (e.g., 'full' for balancing with the complete time-series over
         the entire time horizon at the specified resolution).
-    fixed_costs_threshold (float64): Upper bound on fixed costs intensity, units $/MWh of operational demand. Allows
+    fixed_costs_threshold (nbfloat): Upper bound on fixed costs intensity, units $/MWh of operational demand. Allows
         low-quality solutions to be rapidly discarded and penalised without evaluating the time-consuming unit
         committment problem.
 
     Returns:
     -------
-    float64[:, :]: A 2-dimensional array with 3 rows and a separate column for each candidate solution in the
+    nbfloat[:, :]: A 2-dimensional array with 3 rows and a separate column for each candidate solution in the
         population. The first row is the total energy (cost) of the objective function, second row is the LCOE, and
         third row is the penalties for each candidate solution.
     """
     n_points = xs.shape[1]
-    result = np.zeros((3, n_points), dtype=np.float64)
+    result = np.zeros((3, n_points), dtype=npfloat)
     for j in prange(n_points):
         xj = xs[:, j]
         solution = Solution(xj, static, fleet, network, balancing_type, fixed_costs_threshold)
@@ -457,12 +458,12 @@ def parallel_wrapper(
 
 
 def evaluate_vectorised_xs(
-    xs: float64[:, :],
+    xs: nbfloat[:, :],
     static: ScenarioParameters_InstanceType,
     fleet: Fleet_InstanceType,
     network: Network_InstanceType,
     balancing_type: unicode_type,
-    fixed_costs_threshold: float64,
+    fixed_costs_threshold: nbfloat,
 ):
     """
     A wrapper receives the vectorised differential evolution population and passes it to the parallel wrapper.
@@ -471,20 +472,20 @@ def evaluate_vectorised_xs(
 
     Parameters:
     -------
-    xs (float64[:, :]): 2-dimensional array containing population for an iteration of the differential
+    xs (nbfloat[:, :]): 2-dimensional array containing population for an iteration of the differential
         evolution. Each row is a separate candidate solution, each column is a decision variable.
     static (ScenarioParameters_InstanceType): Static scenario parameters.
     fleet (Fleet_InstanceType): Static Fleet jitclass instance used to derive a dynamic copy for evaluation.
     network (Network_InstanceType): Static Network jitclass instance used to derive a dynamic copy for evaluation.
     balancing_type (unicode_type): Balancing mode (e.g., 'full' for balancing with the complete time-series over
         the entire time horizon at the specified resolution).
-    fixed_costs_threshold (float64): Upper bound on fixed costs intensity, units $/MWh of operational demand. Allows
+    fixed_costs_threshold (nbfloat): Upper bound on fixed costs intensity, units $/MWh of operational demand. Allows
         low-quality solutions to be rapidly discarded and penalised without evaluating the time-consuming unit
         committment problem.
 
     Returns:
     -------
-    float64[:]: Total energies (costs) of the evaluated objective functions for each candidate solution in the
+    nbfloat[:]: Total energies (costs) of the evaluated objective functions for each candidate solution in the
         population. Each column is the energy of a different candidate solution. The energy is the sum of LCOE
         and the penalties. This is the value minimised by the differential evolution optimisation.
     """

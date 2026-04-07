@@ -4,7 +4,7 @@ import numpy as np
 from firm_ce.common.constants import FASTMATH, TOLERANCE, BOUNDSCHECK
 from firm_ce.common.exceptions import raise_static_modification_error
 from firm_ce.common.jit_overload import njit
-from firm_ce.common.typing import DictType, TypedDict, TypedList, boolean, float64, int64, unicode_type
+from firm_ce.common.typing import DictType, TypedDict, TypedList, boolean, nbfloat, npfloat, nbint, nbintp, unicode_type
 from firm_ce.fast_methods import line_m, node_m, route_m
 from firm_ce.system.topology import (
     Line_InstanceType,
@@ -47,9 +47,9 @@ def create_dynamic_copy(
     -------
     Network_InstanceType: A dynamic instance of the Network jitclass.
     """
-    nodes_copy = TypedDict.empty(key_type=int64, value_type=Node_InstanceType)
-    major_lines_copy = TypedDict.empty(key_type=int64, value_type=Line_InstanceType)
-    minor_lines_copy = TypedDict.empty(key_type=int64, value_type=Line_InstanceType)
+    nodes_copy = TypedDict.empty(key_type=nbintp, value_type=Node_InstanceType)
+    major_lines_copy = TypedDict.empty(key_type=nbintp, value_type=Line_InstanceType)
+    minor_lines_copy = TypedDict.empty(key_type=nbintp, value_type=Line_InstanceType)
     routes_copy = TypedDict.empty(key_type=routes_key_type, value_type=routes_list_type)
 
     for order, node in network_instance.nodes.items():
@@ -81,7 +81,7 @@ def create_dynamic_copy(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def build_capacity(
     network_instance: Network_InstanceType,
-    decision_x: float64[:],
+    decision_x: nbfloat[:],
 ) -> None:
     """
     The candidate solution defines new build capacity for each Generator, Storage, and Line (major_lines) object. This
@@ -92,7 +92,7 @@ def build_capacity(
     Parameters:
     -------
     network_instance (Network_InstanceType): A dynamic instance of the Network jitclass.
-    decision_x (float64[:]): A 1-dimensional array containing the candidate solution for the differential
+    decision_x (nbfloat[:]): A 1-dimensional array containing the candidate solution for the differential
         evolution. The candidate solution defines new build capacity for each decision variable (either power
         or energy capacity).
 
@@ -144,7 +144,7 @@ def unload_data(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def allocate_memory(
     network_instance: Network_InstanceType,
-    intervals_count: int64,
+    intervals_count: nbint,
 ) -> None:
     """
     Memory associated with endogenous time-series data for Node and Line instances is only
@@ -154,7 +154,7 @@ def allocate_memory(
     Parameters:
     -------
     network_instance (Network_InstanceType): A dynamic instance of the Network jitclass.
-    intervals_count (int64): Total number of time intervals over the modelling horizon.
+    intervals_count (nbint): Total number of time intervals over the modelling horizon.
 
     Returns:
     -------
@@ -182,7 +182,7 @@ def allocate_memory(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_remaining_netloads(
     network_instance: Network_InstanceType,
-    interval: int64,
+    interval: nbintp,
     check_case: unicode_type,
 ) -> boolean:
     for node in network_instance.nodes.values():
@@ -194,10 +194,10 @@ def check_remaining_netloads(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_period_unserved_energy(
     network_instance: Network_InstanceType,
-    first_t: int64,
-    last_t: int64,
-    interval_resolutions: float64[:],
-) -> float64:
+    first_t: nbintp,
+    last_t: nbintp,
+    interval_resolutions: nbfloat[:],
+) -> nbfloat:
     unserved_energy = 0
     for node in network_instance.nodes.values():
         for t in range(first_t, last_t + 1):
@@ -208,7 +208,7 @@ def calculate_period_unserved_energy(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def reset_transmission(
     network_instance: Network_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     Transmission flows and nodal import/export values are iteratively updated when solving the unit committment
@@ -218,7 +218,7 @@ def reset_transmission(
     Parameters:
     -------
     network_instance (Network_InstanceType): An instance of the Network jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
 
     Returns:
     -------
@@ -270,7 +270,7 @@ def reset_flow_updates(
 def check_route_surpluses(
     network_instance: Network_InstanceType,
     fill_node: Node_InstanceType,
-    leg: int64,
+    leg: nbintp,
 ) -> boolean:
     """
     Checks each Route in a route list (corresponding to a particular start node and route length) and determines if
@@ -281,7 +281,7 @@ def check_route_surpluses(
     -------
     network_instance (Network_InstanceType): An instance of the Network jitclass.
     fill_node (Node_InstanceType): The first node in the Route instances in the route list.
-    leg (int64): The length of the Route instances in the route list (corresponding to the number of lines in the
+    leg (nbintp): The length of the Route instances in the route list (corresponding to the number of lines in the
         Route).
 
     Returns:
@@ -343,8 +343,8 @@ def check_network_fill(
 def calculate_node_flow_updates(
     network_instance: Network_InstanceType,
     fill_node: Node_InstanceType,
-    leg: int64,
-    interval: int64,
+    leg: nbintp,
+    interval: nbintp,
 ) -> None:
     fill_node.available_imports = 0.0
     for route in network_instance.routes[fill_node.order, leg]:
@@ -356,8 +356,8 @@ def calculate_node_flow_updates(
 def scale_flow_updates_to_fill(
     network_instance: Network_InstanceType,
     fill_node: Node_InstanceType,
-    leg: int64,
-) -> float64:
+    leg: nbintp,
+) -> nbfloat:
     if fill_node.available_imports > fill_node.fill:
         scale_factor = fill_node.fill / fill_node.available_imports
         for route in network_instance.routes[fill_node.order, leg]:
@@ -369,8 +369,8 @@ def scale_flow_updates_to_fill(
 def update_transmission_flows(
     network_instance: Network_InstanceType,
     fill_node: Node_InstanceType,
-    leg: int64,
-    interval: int64,
+    leg: nbintp,
+    interval: nbintp,
 ) -> None:
     for route in network_instance.routes[fill_node.order, leg]:
         fill_node.imports_exports[interval] += route.flow_update
@@ -382,7 +382,7 @@ def update_transmission_flows(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_netloads(
     network_instance: Network_InstanceType,
-    interval: int64,
+    interval: nbintp,
     precharging_flag: boolean,
 ) -> None:
     """
@@ -391,7 +391,7 @@ def update_netloads(
     Parameters:
     -------
     network_instance (Network_InstanceType): An instance of the Network jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
     precharging_flag (boolean): True if balancing in either a deficit block or precharging period. Otherwise, False.
         When the value is True, the netload calculation also considers current storage and flexible dispatch at that
         node.
@@ -461,7 +461,7 @@ def reset_node_temp_surpluses(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def fill_with_transmitted_surpluses(
     network_instance: Network_InstanceType,
-    interval: int64
+    interval: nbintp
 ) -> None:
     """
     Overarching function that manages transmission actions. Surplus energy from Nodes is transmitted to
@@ -480,7 +480,7 @@ def fill_with_transmitted_surpluses(
     Parameters:
     -------
     network_instance (Network_InstanceType): An instance of the Network jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
 
     Returns:
     -------
@@ -518,7 +518,7 @@ def fill_with_transmitted_surpluses(
 def set_node_fills_and_surpluses(
     network_instance: Network_InstanceType,
     transmission_case: unicode_type,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     if transmission_case == "surplus":
         for node in network_instance.nodes.values():
@@ -624,7 +624,7 @@ def set_node_fills_and_surpluses(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_spillage_and_deficit(
     network_instance: Network_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     Calculate the power spilled/curtailed and the unserved power (deficit) for each Node in the network
@@ -633,7 +633,7 @@ def calculate_spillage_and_deficit(
     Parameters:
     -------
     network_instance (Network_InstanceType): An instance of the Network jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
 
     Returns:
     -------
@@ -657,7 +657,7 @@ def calculate_spillage_and_deficit(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def assign_storage_merit_orders(
     network_instance: Network_InstanceType,
-    storages_typed_dict: DictType(int64, Storage_InstanceType),
+    storages_typed_dict: DictType(nbintp, Storage_InstanceType),
 ) -> None:
     """
     For each Node, finds all Storage instances at that Node. Sorts the Storage systems at that Node from
@@ -672,7 +672,7 @@ def assign_storage_merit_orders(
     Parameters:
     -------
     network_instance (Network_InstanceType): An instance of the Network jitclass.
-    storages_typed_dict (DictType(int64, Storage_InstanceType)): Typed dictionary of Storage instances within
+    storages_typed_dict (DictType(nbintp, Storage_InstanceType)): Typed dictionary of Storage instances within
         the scenario, keyed by Storage.order.
 
     Returns:
@@ -691,7 +691,7 @@ def assign_storage_merit_orders(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def assign_flexible_merit_orders(
     network_instance: Network_InstanceType,
-    generators_typed_dict: DictType(int64, Generator_InstanceType),
+    generators_typed_dict: DictType(nbintp, Generator_InstanceType),
 ) -> None:
     for node in network_instance.nodes.values():
         node_m.assign_flexible_merit_order(node, generators_typed_dict)
@@ -711,7 +711,7 @@ def assign_route_merit_orders(
         if count <= 1:
             continue
 
-        effs = np.zeros(count, dtype=np.float64)
+        effs = np.zeros(count, dtype=npfloat)
         for i in range(count):
             effs[i] = routes_list[i].efficiency
 
@@ -731,7 +731,7 @@ def assign_route_merit_orders(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_lt_flows(
     network_instance: Network_InstanceType,
-    interval_resolutions: float64[:],
+    interval_resolutions: nbfloat[:],
 ) -> None:
     """
     After completing unit committment, calculates the total long-term major Line flows across the entire
@@ -741,7 +741,7 @@ def calculate_lt_flows(
     Parameters:
     -------
     network_instance (Network_InstanceType): An instance of the Network jitclass.
-    interval_resolutions (float64[:]): A 1-dimensional array containing the resolution for every time interval
+    interval_resolutions (nbfloat[:]): A 1-dimensional array containing the resolution for every time interval
         in the unit committment formulation (hours per time interval). An array is used instead of a single
         scalar value to allow for variable time step simplified balancing methods to be developed in future.
 
@@ -761,7 +761,7 @@ def calculate_lt_flows(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def reset_flexible(
     network_instance: Network_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     Resets the nodal flexible power to zero at each Node for a given time interval.
@@ -769,7 +769,7 @@ def reset_flexible(
     Parameters:
     -------
     network_instance (Network_InstanceType): An instance of the Network jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
 
     Returns:
     -------
@@ -787,7 +787,7 @@ def reset_flexible(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def reset_dispatch(
     network_instance: Network_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     Resets the nodal storage power and flexible power to zero at each Node for a given time interval.
@@ -795,7 +795,7 @@ def reset_dispatch(
     Parameters:
     -------
     network_instance (Network_InstanceType): An instance of the Network jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
 
     Returns:
     -------
@@ -814,7 +814,7 @@ def reset_dispatch(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def check_precharging_end(
     network_instance: Network_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> boolean:
     """
     Check whether the start of the deficit block has been reached. While balancing a deficit block,
@@ -826,7 +826,7 @@ def check_precharging_end(
     Parameters:
     -------
     network_instance (Network_InstanceType): An instance of the Network jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
 
     Returns:
     -------
@@ -929,7 +929,7 @@ def set_flexible_precharge_fills_and_surpluses(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_imports_exports_temp(
     network_instance: Network_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     Within the precharging period, imports/exports at each Node are adjusted to allow for additional
@@ -940,7 +940,7 @@ def update_imports_exports_temp(
     Parameters:
     -------
     network_instance (Network_InstanceType): An instance of the Network jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
 
     Returns:
     -------

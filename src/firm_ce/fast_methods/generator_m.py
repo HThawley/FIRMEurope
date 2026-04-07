@@ -7,7 +7,7 @@ from firm_ce.common.exceptions import (
     raise_static_modification_error,
 )
 from firm_ce.common.jit_overload import njit
-from firm_ce.common.typing import DictType, boolean, float64, int64, unicode_type
+from firm_ce.common.typing import DictType, boolean, nbfloat, npfloat, nbint, nbintp, unicode_type
 from firm_ce.fast_methods import ltcosts_m, node_m
 from firm_ce.system.components import Generator, Generator_InstanceType, Fuel_InstanceType
 from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
@@ -16,8 +16,8 @@ from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def create_dynamic_copy(
     generator_instance: Generator_InstanceType,
-    nodes_typed_dict: DictType(int64, Node_InstanceType),
-    lines_typed_dict: DictType(int64, Line_InstanceType),
+    nodes_typed_dict: DictType(nbintp, Node_InstanceType),
+    lines_typed_dict: DictType(nbintp, Line_InstanceType),
     fuel_dynamic_copy: Fuel_InstanceType,
 ) -> Generator_InstanceType:
     node_copy = nodes_typed_dict[generator_instance.node.order]
@@ -53,8 +53,8 @@ def create_dynamic_copy(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def build_capacity(
     generator_instance: Generator_InstanceType,
-    new_build_power_capacity: float64,
-    interval_resolutions: float64[:],
+    new_build_power_capacity: nbfloat,
+    interval_resolutions: nbfloat[:],
 ) -> None:
     if generator_instance.static_instance:
         raise_static_modification_error()
@@ -71,8 +71,8 @@ def build_capacity(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def load_data(
     generator_instance: Generator_InstanceType,
-    generation_trace: float64[:],
-    interval_resolutions: float64[:],
+    generation_trace: nbfloat[:],
+    interval_resolutions: nbfloat[:],
 ) -> None:
     """
     Load the capacity factor trace and flexible annual constraint data to the Generator instance. This is done
@@ -81,9 +81,9 @@ def load_data(
     Parameters:
     -------
     generator_instance (Generator_InstanceType): An instance of the Generator jitclass.
-    generation_trace (float64[:]): Array containing the time-series capacity factor trace for the Generator. Each element
+    generation_trace (nbfloat[:]): Array containing the time-series capacity factor trace for the Generator. Each element
         provides the capacity factor for a time interval.
-    interval_resolutions (float64[:]): A 1-dimensional array containing the resolution for every time interval
+    interval_resolutions (nbfloat[:]): A 1-dimensional array containing the resolution for every time interval
         in the unit committment formulation (hours per time interval). An array is used instead of a single
         scalar value to allow for variable time step simplified balancing methods to be developed in future.
 
@@ -122,7 +122,7 @@ def unload_data(generator_instance: Generator_InstanceType) -> None:
     -------
     Attributes modified for the Generator instance: data_status, data, annual_constraints_data.
     """
-    generator_instance.data = np.empty((0,), dtype=np.float64)
+    generator_instance.data = np.empty((0,), dtype=npfloat)
     generator_instance.data_status = False
     return None
 
@@ -131,7 +131,7 @@ def unload_data(generator_instance: Generator_InstanceType) -> None:
 def get_data(
     generator_instance: Generator_InstanceType,
     data_type: unicode_type,
-) -> float64[:]:
+) -> nbfloat[:]:
     """
     Gets the specified data_type from the Generator instance.
 
@@ -142,7 +142,7 @@ def get_data(
 
     Returns:
     -------
-    float64[:]: The data array associated with data_type.
+    nbfloat[:]: The data array associated with data_type.
 
     Raises:
     -------
@@ -162,7 +162,7 @@ def get_data(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def allocate_memory(
     generator_instance: Generator_InstanceType,
-    intervals_count: int64,
+    intervals_count: nbint,
 ) -> None:
     """
     Memory associated with endogenous time-series data for a flexible Generator is only allocated after a dynamic copy of
@@ -171,7 +171,7 @@ def allocate_memory(
     Parameters:
     -------
     generator_instance (Generator_InstanceType): A dynamic instance of the Generator jitclass.
-    intervals_count (int64): Total number of time intervals over the modelling horizon.
+    intervals_count (nbint): Total number of time intervals over the modelling horizon.
 
     Returns:
     -------
@@ -187,15 +187,15 @@ def allocate_memory(
     """
     if generator_instance.static_instance:
         raise_static_modification_error()
-    generator_instance.dispatch_power = np.zeros(intervals_count, dtype=np.float64)
+    generator_instance.dispatch_power = np.zeros(intervals_count, dtype=npfloat)
     return None
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_residual_load(
     generator_instance: Generator_InstanceType,
-    added_capacity: float64,
-    interval_resolutions: float64[:],
+    added_capacity: nbfloat,
+    interval_resolutions: nbfloat[:],
 ) -> None:
     if get_data(generator_instance, "trace").shape[0] > 0 and added_capacity > 0.0:
         new_trace = get_data(generator_instance, "trace") * added_capacity
@@ -207,8 +207,8 @@ def update_residual_load(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_lt_generation(
     generator_instance: Generator_InstanceType,
-    generation_trace: float64[:],
-    interval_resolutions: float64[:],
+    generation_trace: nbfloat[:],
+    interval_resolutions: nbfloat[:],
 ) -> None:
     generator_instance.lt_generation += sum(generation_trace * interval_resolutions)
     generator_instance.line.lt_flows += generator_instance.lt_generation
@@ -240,9 +240,9 @@ def check_unit_type(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_flexible_max_t(
     generator_instance: Generator_InstanceType,
-    interval: int64,
-    resolution: float64,
-    merit_order_idx: int64,
+    interval: nbintp,
+    resolution: nbfloat,
+    merit_order_idx: nbintp,
     forward_time_flag: boolean,
 ) -> None:
     advertised_limit = min(generator_instance.capacity, generator_instance.fuel.allocated_energy / resolution)
@@ -257,9 +257,9 @@ def set_flexible_max_t(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_precharging_max_t(
     generator_instance: Generator_InstanceType,
-    interval: int64,
-    resolution: float64,
-    merit_order_idx: int64,
+    interval: nbintp,
+    resolution: nbfloat,
+    merit_order_idx: nbintp,
 ) -> None:
     if generator_instance.fuel.trickling_flag:
         advertised_limit = min(
@@ -279,9 +279,9 @@ def set_precharging_max_t(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_live_flexible_max_t(
     generator_instance: Generator_InstanceType,
-    interval: int64,
-    resolution: float64,
-    merit_order_idx: int64,
+    interval: nbintp,
+    resolution: nbfloat,
+    merit_order_idx: nbintp,
     forward_time_flag: boolean,
 ) -> None:
     if forward_time_flag:
@@ -302,7 +302,7 @@ def set_live_flexible_max_t(
 @njit(fastmath=FASTMATH)
 def update_node_flexible_max_t(
     generator_instance: Generator_InstanceType,
-    merit_order_idx: int64,
+    merit_order_idx: nbintp,
 ):
     offset = 0.0 if merit_order_idx == 0 else generator_instance.node.flexible_max_t[merit_order_idx - 1]
     generator_instance.node.flexible_max_t[merit_order_idx] = offset + generator_instance.flexible_max_t
@@ -312,8 +312,8 @@ def update_node_flexible_max_t(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def set_live_trickling_max_t(
     generator_instance: Generator_InstanceType,
-    interval: int64,
-    resolution: float64,
+    interval: nbintp,
+    resolution: nbfloat,
 ) -> None:
     if generator_instance.fuel.trickling_flag:
         live_remaining_trickling = max(
@@ -333,9 +333,9 @@ def set_live_trickling_max_t(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_fuel_reserve(
     generator_instance: Generator_InstanceType,
-    interval: int64,
-    resolution: float64,
-    delta_power: float64,
+    interval: nbintp,
+    resolution: nbfloat,
+    delta_power: nbfloat,
     forward_time_flag: boolean,
 ) -> None:
     if forward_time_flag:
@@ -349,9 +349,9 @@ def update_fuel_reserve(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def dispatch(
     generator_instance: Generator_InstanceType,
-    interval: int64,
-    merit_order_idx: int64,
-    resolution: float64,
+    interval: nbintp,
+    merit_order_idx: nbintp,
+    resolution: nbfloat,
     forward_time_flag: boolean,
 ) -> None:
     """
@@ -361,8 +361,8 @@ def dispatch(
     Parameters:
     -------
     generator_instance (Generator_InstanceType): An instance of the Generator jitclass.
-    interval (int64): Index for the time interval during unit committment.
-    merit_order_idx (int64): Location of the flexible Generator in the merit order at the Generator.node.
+    interval (nbintp): Index for the time interval during unit committment.
+    merit_order_idx (nbintp): Location of the flexible Generator in the merit order at the Generator.node.
         Lower merit_order_idx indicates lower variable costs and higher priority in the merit order.
 
     Returns:
@@ -403,7 +403,7 @@ def dispatch(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_lt_generation(
     generator_instance: Generator_InstanceType,
-    interval_resolutions: float64[:],
+    interval_resolutions: nbfloat[:],
 ) -> None:
     """
     Calculate the total generation over the long-term modelling horizon for a flexible Generator. Also
@@ -412,7 +412,7 @@ def calculate_lt_generation(
     Parameters:
     -------
     generator_instance (Generator_InstanceType): An instance of the Generator jitclass.
-    interval_resolutions (float64[:]): A 1-dimensional array containing the resolution for every time interval
+    interval_resolutions (nbfloat[:]): A 1-dimensional array containing the resolution for every time interval
         in the unit committment formulation (hours per time interval). An array is used instead of a single
         scalar value to allow for variable time step simplified balancing methods to be developed in future.
 
@@ -436,19 +436,19 @@ def calculate_lt_generation(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_variable_costs(
     generator_instance: Generator_InstanceType,
-    year_float: float64,
-) -> float64:
+    year_float: nbfloat,
+) -> nbfloat:
     """
     Calculate the total variable costs for a Generator system at the end of unit committment.
 
     Parameters:
     -------
     generator_instance (Generator_InstanceType): An instance of the Generator jitclass.
-    year_float (float64): Number of years. Leap days provide additional fractional value.
+    year_float (nbfloat): Number of years. Leap days provide additional fractional value.
 
     Returns:
     -------
-    float64: Total variable costs ($), equal to sum of fuel and VO&M costs.
+    nbfloat: Total variable costs ($), equal to sum of fuel and VO&M costs.
 
     Side-effects:
     -------
@@ -475,7 +475,7 @@ def calculate_variable_costs(
 def calculate_fixed_costs(
     generator_instance: Generator_InstanceType,
     include_existing: bool,
-) -> float64:
+) -> nbfloat:
     """
     Calculate the total fixed costs for a Generator system.
 
@@ -485,7 +485,7 @@ def calculate_fixed_costs(
 
     Returns:
     -------
-    float64: Total fixed costs ($), equal to sum of annualised build and FO&M costs.
+    nbfloat: Total fixed costs ($), equal to sum of annualised build and FO&M costs.
 
     Side-effects:
     -------
@@ -521,7 +521,7 @@ def calculate_fixed_costs(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_partial_cost(
     generator_instance: Generator_InstanceType,
-    year_float: float64,
+    year_float: nbfloat,
 ):
     return ltcosts_m.get_partial_cost_power(
         generator_instance.new_build,
@@ -538,10 +538,10 @@ def get_partial_cost(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_precharge_dispatch(
     generator_instance: Generator_InstanceType,
-    interval: int64,
-    resolution: float64,
-    dispatch_power_update: float64,
-    merit_order_idx: int64,
+    interval: nbintp,
+    resolution: nbfloat,
+    dispatch_power_update: nbfloat,
+    merit_order_idx: nbintp,
 ) -> None:
     generator_instance.dispatch_power[interval] += dispatch_power_update
     generator_instance.node.flexible_power[interval] += dispatch_power_update

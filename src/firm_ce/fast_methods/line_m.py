@@ -6,14 +6,14 @@ from firm_ce.common.exceptions import (
     raise_static_modification_error,
 )
 from firm_ce.common.jit_overload import njit
-from firm_ce.common.typing import DictType, float64, int64, unicode_type
+from firm_ce.common.typing import DictType, nbfloat, npfloat, nbint, nbintp, unicode_type
 from firm_ce.fast_methods import ltcosts_m
 from firm_ce.system.topology import Line, Line_InstanceType, Node, Node_InstanceType
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def create_dynamic_copy(
-    line_instance: Line_InstanceType, nodes_typed_dict: DictType(int64, Node_InstanceType), line_type: unicode_type
+    line_instance: Line_InstanceType, nodes_typed_dict: DictType(nbintp, Node_InstanceType), line_type: unicode_type
 ) -> Line_InstanceType:
     """
     A 'static' instance of the Line jitclass (Line.static_instance=True) is copied
@@ -38,7 +38,7 @@ def create_dynamic_copy(
     Parameters:
     -------
     line_instance (Line_InstanceType): A static instance of the Line jitclass.
-    nodes_typed_dict (DictType(int64, Node_InstanceType)): A typed dictionary of
+    nodes_typed_dict (DictType(nbintp, Node_InstanceType)): A typed dictionary of
         all Node jitclass instances for the scenario. Key defined as Node.order.
     lines_type (unicode_type): Text that specifies if the Line is a 'major_line' or 'minor_line'.
 
@@ -76,14 +76,14 @@ def create_dynamic_copy(
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def build_capacity(line_instance: Line_InstanceType, new_build_power_capacity: float64) -> None:
+def build_capacity(line_instance: Line_InstanceType, new_build_power_capacity: nbfloat) -> None:
     """
     Takes a new_build_power_capacity and adds it to the existing capacity and new_build attributes.
 
     Parameters:
     -------
     line_instance (Line_InstanceType): A dynamic instance of the Line jitclass.
-    new_build_power_capacity (float64): Additional capacity [GW] to be built for the line.
+    new_build_power_capacity (nbfloat): Additional capacity [GW] to be built for the line.
 
     Returns:
     -------
@@ -101,7 +101,7 @@ def build_capacity(line_instance: Line_InstanceType, new_build_power_capacity: f
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def allocate_memory(line_instance: Line_InstanceType, intervals_count: int64) -> None:
+def allocate_memory(line_instance: Line_InstanceType, intervals_count: nbint) -> None:
     """
     Memory associated with time-series data for a Line is only allocated after a dynamic copy of the Line instance
     is created. This is to minimise memory usage of the static instances.
@@ -109,7 +109,7 @@ def allocate_memory(line_instance: Line_InstanceType, intervals_count: int64) ->
     Parameters:
     -------
     line_instance (Line_InstanceType): A dynamic instance of the Line jitclass.
-    intervals_count (int64): Total number of time intervals in the unit committment formulation.
+    intervals_count (nbint): Total number of time intervals in the unit committment formulation.
 
     Returns:
     -------
@@ -121,12 +121,12 @@ def allocate_memory(line_instance: Line_InstanceType, intervals_count: int64) ->
     """
     if line_instance.static_instance:
         raise_static_modification_error()
-    line_instance.flows = np.zeros(intervals_count, dtype=np.float64)
+    line_instance.flows = np.zeros(intervals_count, dtype=npfloat)
     return None
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def calculate_lt_flow(line_instance: Line_InstanceType, interval_resolutions: float64[:]) -> None:
+def calculate_lt_flow(line_instance: Line_InstanceType, interval_resolutions: nbfloat[:]) -> None:
     line_instance.lt_flows = sum(np.abs(line_instance.flows) * interval_resolutions)
     return None
 
@@ -134,19 +134,19 @@ def calculate_lt_flow(line_instance: Line_InstanceType, interval_resolutions: fl
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_variable_costs(
     line_instance: Line_InstanceType,
-    year_float: float64,
-) -> float64:
+    year_float: nbfloat,
+) -> nbfloat:
     """
     Calculate the total variable costs for a Line system at the end of unit committment.
 
     Parameters:
     -------
     line_instance (Line_InstanceType): An instance of the Line jitclass.
-    year_float (float64): Number of years. Leap days provide additional fractional value.
+    year_float (nbfloat): Number of years. Leap days provide additional fractional value.
 
     Returns:
     -------
-    float64: Total variable costs ($), equal to sum of fuel and VO&M costs.
+    nbfloat: Total variable costs ($), equal to sum of fuel and VO&M costs.
 
     Side-effects:
     -------
@@ -173,7 +173,7 @@ def calculate_variable_costs(
 def calculate_fixed_costs(
     line_instance: Line_InstanceType,
     include_existing: bool,
-) -> float64:
+) -> nbfloat:
     """
     Calculate the total fixed costs for a Line system.
 
@@ -183,7 +183,7 @@ def calculate_fixed_costs(
 
     Returns:
     -------
-    float64: Total fixed costs ($), equal to sum of annualised build and FO&M costs.
+    nbfloat: Total fixed costs ($), equal to sum of annualised build and FO&M costs.
 
     Side-effects:
     -------
@@ -220,7 +220,7 @@ def calculate_fixed_costs(
 @njit(fastmath=FASTMATH)
 def get_partial_cost(
     line_instance: Line_InstanceType,
-    year_float: float64,
+    year_float: nbfloat,
 ):
     return ltcosts_m.get_partial_cost_power(
         line_instance.new_build,

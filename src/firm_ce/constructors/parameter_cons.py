@@ -6,6 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from firm_ce.common.constants import LEAPDAYS
+from firm_ce.common.typing import npint, npintp, npfloat
 from firm_ce.system.parameters import ScenarioParameters, ScenarioParameters_InstanceType
 
 
@@ -31,7 +32,7 @@ def determine_interval_parameters(
         a numpy array specifying the first time interval of each year, and the total number
         of time intervals in the scenario.
     """
-    year_first_t = np.zeros(year_count, dtype=np.int64)
+    year_first_t = np.zeros(year_count, dtype=npintp)
 
     leap_days = 0
     for i in range(year_count):
@@ -98,13 +99,13 @@ def construct_ScenarioParameters_object(
         )
 
     return ScenarioParameters(
-        resolution,
-        allowance,
-        first_year,
-        final_year,
-        year_count,
-        leap_year_count,
-        year_first_t,
-        intervals_count,
-        node_count,
+        npfloat(resolution),
+        npfloat(allowance),
+        npintp(first_year),
+        npintp(final_year),
+        npint(year_count),
+        npint(leap_year_count),
+        npintp(year_first_t),
+        npint(intervals_count),
+        npint(node_count),
     )

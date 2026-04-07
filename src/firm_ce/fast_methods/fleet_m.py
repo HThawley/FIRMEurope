@@ -2,7 +2,7 @@
 from firm_ce.common.constants import FASTMATH, TOLERANCE, BOUNDSCHECK
 from firm_ce.common.exceptions import raise_static_modification_error
 from firm_ce.common.jit_overload import njit
-from firm_ce.common.typing import DictType, TypedDict, boolean, float64, int64, unicode_type
+from firm_ce.common.typing import DictType, TypedDict, boolean, nbfloat, nbint, nbintp, unicode_type
 from firm_ce.fast_methods import generator_m, storage_m, fuel_m
 from firm_ce.system.components import Fleet, Fleet_InstanceType, Generator_InstanceType, Storage_InstanceType, Fuel_InstanceType
 from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
@@ -11,8 +11,8 @@ from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def create_dynamic_copy(
     fleet_instance: Fleet_InstanceType,
-    nodes_typed_dict: DictType(int64, Node_InstanceType),
-    lines_typed_dict: DictType(int64, Line_InstanceType),
+    nodes_typed_dict: DictType(nbintp, Node_InstanceType),
+    lines_typed_dict: DictType(nbintp, Line_InstanceType),
 ) -> Fleet_InstanceType:
     """
     A 'static' instance of the Fleet jitclass (Fleet.static_instance=True) is copied
@@ -34,18 +34,18 @@ def create_dynamic_copy(
     Parameters:
     -------
     fleet_instance (Fleet_InstanceType): A static instance of the Fleet jitclass.
-    nodes_typed_dict (DictType(int64, Node_InstanceType)): A typed dictionary of
+    nodes_typed_dict (DictType(nbintp, Node_InstanceType)): A typed dictionary of
         all Node jitclass instances for the scenario. Key defined as Node.order.
-    lines_typed_dict (DictType(int64, Line_InstanceType)): A typed dictionary of
+    lines_typed_dict (DictType(nbintp, Line_InstanceType)): A typed dictionary of
         all Line jitclass instances for the scenario. Key defined as Line.order.
 
     Returns:
     -------
     Fleet_InstanceType: A dynamic instance of the Fleet jitclass.
     """
-    generators_copy = TypedDict.empty(key_type=int64, value_type=Generator_InstanceType)
-    storages_copy = TypedDict.empty(key_type=int64, value_type=Storage_InstanceType)
-    fuels_copy = TypedDict.empty(key_type=int64, value_type=Fuel_InstanceType)
+    generators_copy = TypedDict.empty(key_type=nbintp, value_type=Generator_InstanceType)
+    storages_copy = TypedDict.empty(key_type=nbintp, value_type=Storage_InstanceType)
+    fuels_copy = TypedDict.empty(key_type=nbintp, value_type=Fuel_InstanceType)
 
     for order, fuel in fleet_instance.fuels.items():
         fuels_copy[order] = fuel_m.create_dynamic_copy(fuel)
@@ -74,8 +74,8 @@ def create_dynamic_copy(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def build_capacities(
     fleet_instance: Fleet_InstanceType,
-    decision_x: float64[:],
-    interval_resolutions: float64[:],
+    decision_x: nbfloat[:],
+    interval_resolutions: nbfloat[:],
 ) -> None:
     """
     The candidate solution defines new build capacity for each Generator, Storage, and Line (major_lines) object. This
@@ -85,10 +85,10 @@ def build_capacities(
     Parameters:
     -------
     fleet_instance (Fleet_InstanceType): A dynamic instance of the Fleet jitclass.
-    decision_x (float64[:]): A 1-dimensional array containing the candidate solution for the differential
+    decision_x (nbfloat[:]): A 1-dimensional array containing the candidate solution for the differential
         evolution. The candidate solution defines new build capacity for each decision variable (either power
         or energy capacity).
-    interval_resolutions (float64[:]): A 1-dimensional array containing the resolution for every time interval
+    interval_resolutions (nbfloat[:]): A 1-dimensional array containing the resolution for every time interval
         in the unit committment formulation (hours per time interval). An array is used instead of a single
         scalar value to allow for variable time step simplified balancing methods to be developed in future.
 
@@ -122,7 +122,7 @@ def build_capacities(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def allocate_memory(
     fleet_instance: Fleet_InstanceType,
-    intervals_count: int64,
+    intervals_count: nbint,
 ) -> None:
     """
     Memory associated with time-series data for flexible generators and storage systems is only
@@ -132,7 +132,7 @@ def allocate_memory(
     Parameters:
     -------
     fleet_instance (Fleet_InstanceType): A dynamic instance of the Fleet jitclass.
-    intervals_count (int64): Total number of time intervals in the unit committment formulation.
+    intervals_count (nbint): Total number of time intervals in the unit committment formulation.
 
     Returns:
     -------
@@ -189,8 +189,8 @@ def initialise_stored_energies(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_annual_limits(
     fleet_instance: Fleet_InstanceType,
-    year: int64,
-    first_t: int64,
+    year: nbintp,
+    first_t: nbintp,
 ) -> None:
     """
     The energy generation constraint for each flexible Generator is initialised. This is done once
@@ -199,9 +199,9 @@ def initialise_annual_limits(
     Parameters:
     -------
     fleet_instance (Fleet_InstanceType): A dynamic instance of the Fleet jitclass.
-    year (int64): Defines the number of years that have completed balancing since the start of the
+    year (nbintp): Defines the number of years that have completed balancing since the start of the
         optimisation. Used as the index for the Generator.annual_constraints_data array.
-    first_t (int64): Index for the first time interval in the year.
+    first_t (nbintp): Index for the first time interval in the year.
 
     Returns:
     -------
@@ -222,7 +222,7 @@ def initialise_annual_limits(
 def count_generator_unit_type(
     fleet_instance: Fleet_InstanceType,
     unit_type: unicode_type,
-) -> int64:
+) -> nbint:
     """
     Returns a count of the number of generators of the specified unit_type within the Fleet.
 
@@ -233,7 +233,7 @@ def count_generator_unit_type(
 
     Returns:
     -------
-    int64: The count of the number of generators of the specified unit_type.
+    nbint: The count of the number of generators of the specified unit_type.
     """
     count = 0
     for generator in fleet_instance.generators.values():
@@ -245,8 +245,8 @@ def count_generator_unit_type(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_stored_energies(
     fleet_instance: Fleet_InstanceType,
-    interval: int64,
-    resolution: float64,
+    interval: nbintp,
+    resolution: nbfloat,
     forward_time_flag: boolean,
 ) -> None:
     """
@@ -257,8 +257,8 @@ def update_stored_energies(
     Parameters:
     -------
     fleet_instance (Fleet_InstanceType): An instance of the Fleet jitclass.
-    interval (int64): Index for the time interval.
-    resolution (float64): Resolution of the time interval (hours per time interval).
+    interval (nbintp): Index for the time interval.
+    resolution (nbfloat): Resolution of the time interval (hours per time interval).
     forward_time_flag (boolean): True indicates the unit committment is iterating forwards through time. False
         indicates that it is moving backwards through time during precharging.
 
@@ -280,8 +280,8 @@ def update_stored_energies(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_remaining_flexible_energies(
     fleet_instance: Fleet_InstanceType,
-    interval: int64,
-    resolution: float64,
+    interval: nbintp,
+    resolution: nbfloat,
     forward_time_flag: boolean,
 ) -> None:
     """
@@ -292,8 +292,8 @@ def update_remaining_flexible_energies(
     Parameters:
     -------
     fleet_instance (Fleet_InstanceType): An instance of the Fleet jitclass.
-    interval (int64): Index for the time interval.
-    resolution (float64): Resolution of the time interval (hours per time interval).
+    interval (nbintp): Index for the time interval.
+    resolution (nbfloat): Resolution of the time interval (hours per time interval).
     forward_time_flag (boolean): True indicates the unit committment is iterating forwards through time. False
         indicates that it is moving backwards through time during precharging.
     previous_year_flag (boolean): True indicates that the interval for the precharging process has crossed into the previous
@@ -326,7 +326,7 @@ def update_remaining_flexible_energies(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_lt_generations(
     fleet_instance: Fleet_InstanceType,
-    interval_resolutions: float64[:],
+    interval_resolutions: nbfloat[:],
 ) -> None:
     """
     The total energy generated by each flexible Generator and discharged from each Storage system during
@@ -335,7 +335,7 @@ def calculate_lt_generations(
     Parameters:
     -------
     fleet_instance (Fleet_InstanceType): An instance of the Fleet jitclass.
-    interval_resolutions (float64[:]): A 1-dimensional array containing the resolution for every time interval
+    interval_resolutions (nbfloat[:]): A 1-dimensional array containing the resolution for every time interval
         in the unit committment formulation (hours per time interval). An array is used instead of a single
         scalar value to allow for variable time step simplified balancing methods to be developed in future.
 
@@ -362,7 +362,7 @@ def calculate_lt_generations(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_deficit_block(
     fleet_instance: Fleet_InstanceType,
-    interval_after_deficit_block: int64,
+    interval_after_deficit_block: nbintp,
 ) -> None:
     """
     Initialise temporary energy constraint parameters and deficit block min/max energies for flexible Generator and
@@ -373,7 +373,7 @@ def initialise_deficit_block(
     Parameters:
     -------
     fleet_instance (Fleet_InstanceType): An instance of the Fleet jitclass.
-    interval_after_deficit_block (int64): Index for the time interval immediatly following the deficit block.
+    interval_after_deficit_block (nbintp): Index for the time interval immediatly following the deficit block.
 
     Returns:
     -------
@@ -398,7 +398,7 @@ def initialise_deficit_block(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def reset_flexible(
     fleet_instance: Fleet_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     Reset dispatch for all flexible Generator objects in a given time interval.
@@ -406,7 +406,7 @@ def reset_flexible(
     Parameters:
     -------
     fleet_instance (Fleet_InstanceType): An instance of the Fleet jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
 
     Returns:
     -------
@@ -425,7 +425,7 @@ def reset_flexible(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def reset_dispatch(
     fleet_instance: Fleet_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     Reset dispatch for all Storage systems and flexible Generator objects in a given time interval.
@@ -433,7 +433,7 @@ def reset_dispatch(
     Parameters:
     -------
     fleet_instance (Fleet_InstanceType): An instance of the Fleet jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
 
     Returns:
     -------
@@ -485,9 +485,9 @@ def update_deficit_block(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def assign_precharging_values(
     fleet_instance: Fleet_InstanceType,
-    interval: int64,
-    resolution: float64,
-    year: int64,
+    interval: nbintp,
+    resolution: nbfloat,
+    year: nbintp,
 ) -> None:
     """
     Once the first time interval in a deficit block is located (during reverse-time precharging),
@@ -500,9 +500,9 @@ def assign_precharging_values(
     Parameters:
     -------
     fleet_instance (Fleet_InstanceType): An instance of the Fleet jitclass.
-    interval (int64): Index for the current time interval.
-    resolution (float64): Resolution of the interval (hours per time interval).
-    year (int64): Defines the number of years that have completed balancing since the start of the
+    interval (nbintp): Index for the current time interval.
+    resolution (nbfloat): Resolution of the interval (hours per time interval).
+    year (nbintp): Defines the number of years that have completed balancing since the start of the
         optimisation. Used as the index for the Generator.annual_constraints_data array.
 
     Returns:
@@ -546,7 +546,7 @@ def assign_precharging_values(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_precharging_flags(
     fleet_instance: Fleet_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     Initialise boolean flags that control precharging and trickling
@@ -558,7 +558,7 @@ def initialise_precharging_flags(
     Parameters:
     -------
     fleet_instance (Fleet_InstanceType): An instance of the Fleet jitclass.
-    interval (int64): Index for the first interval in the deficit block.
+    interval (nbintp): Index for the first interval in the deficit block.
 
     Returns:
     -------
@@ -581,7 +581,7 @@ def initialise_precharging_flags(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_precharging_flags(
     fleet_instance: Fleet_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     Update boolean flags and remaining_trickling_reserves that control precharging and trickling
@@ -593,7 +593,7 @@ def update_precharging_flags(
     Parameters:
     -------
     fleet_instance (Fleet_InstanceType): An instance of the Fleet jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
 
     Returns:
     -------
@@ -666,7 +666,7 @@ def check_trickling_remaining(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def determine_feasible_storage_dispatch(
     fleet_instance: Fleet_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> boolean:
     """
     Determine whether the Storage dispatch_powers for a time interval calculated during reverse time precharging are
@@ -675,7 +675,7 @@ def determine_feasible_storage_dispatch(
     Parameters:
     -------
     fleet_instance (Fleet_InstanceType): An instance of the Fleet jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
 
     Returns:
     -------
@@ -703,7 +703,7 @@ def determine_feasible_storage_dispatch(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def determine_feasible_flexible_dispatch(
     fleet_instance: Fleet_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> boolean:
     """
     Determine whether the flexible Generator dispatch_powers for a time interval calculated during reverse time precharging are
@@ -712,7 +712,7 @@ def determine_feasible_flexible_dispatch(
     Parameters:
     -------
     fleet_instance (Fleet_InstanceType): An instance of the Fleet jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
 
     Returns:
     -------
@@ -738,7 +738,7 @@ def determine_feasible_flexible_dispatch(
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def calculate_available_storage_dispatch(fleet_instance: Fleet_InstanceType, interval: int64) -> None:
+def calculate_available_storage_dispatch(fleet_instance: Fleet_InstanceType, interval: nbintp) -> None:
     """
     Calculates the maximum amount that dispatch_power for each Storage system in a particular time interval can be adjusted.
     The remaining_discharge_max_t accounts for charging power reduction and discharging power increases. Vice versa for
@@ -747,7 +747,7 @@ def calculate_available_storage_dispatch(fleet_instance: Fleet_InstanceType, int
     Parameters:
     -------
     fleet_instance (Fleet_InstanceType): An instance of the Fleet jitclass.
-    interval (int64): Index for the time interval.
+    interval (nbintp): Index for the time interval.
 
     Returns:
     -------

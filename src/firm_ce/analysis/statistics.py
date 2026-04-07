@@ -9,6 +9,7 @@ import pandas as pd
 from numpy.typing import NDArray
 
 from firm_ce.common.constants import SAVE_POPULATION
+from firm_ce.common.typing import npfloat
 from firm_ce.fast_methods import static_m
 from firm_ce.analysis.accessor import Accessor
 from firm_ce.io.file_manager import ResultFile
@@ -21,7 +22,7 @@ from firm_ce.system.topology import Network_InstanceType
 class Statistics:
     def __init__(
         self,
-        x_candidate: NDArray[np.float64],
+        x_candidate: NDArray[npfloat],
         parameters_static: ScenarioParameters_InstanceType,
         fleet_static: Fleet_InstanceType,
         network_static: Network_InstanceType,
@@ -655,7 +656,7 @@ class Statistics:
     def dump(self):
         residual_load_header = [node.name for node in self.solution.network.nodes.values()]
         residual_load_data = np.array(
-            [node.residual_load for node in self.solution.network.nodes.values()], dtype=np.float64
+            [node.residual_load for node in self.solution.network.nodes.values()], dtype=npfloat
         ).T
         ResultFile("residual_load", self.results_directory, residual_load_header, residual_load_data).write()
         ResultFile(

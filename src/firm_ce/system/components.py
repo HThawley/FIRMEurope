@@ -3,7 +3,7 @@ import numpy as np
 
 from firm_ce.common.constants import JIT_ENABLED
 from firm_ce.common.jit_overload import jitclass
-from firm_ce.common.typing import DictType, boolean, float64, int64, unicode_type
+from firm_ce.common.typing import DictType, boolean, nbfloat, npfloat, nbintp, unicode_type
 from firm_ce.system.costs import LTCosts, LTCosts_InstanceType, UnitCost_InstanceType
 from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
 
@@ -11,23 +11,23 @@ if JIT_ENABLED:
     fuel_spec = [
         ("object_class", unicode_type),
         ("static_instance", boolean),
-        ("id", int64),
+        ("id", nbintp),
         ("name", unicode_type),
-        ("cost", float64),
-        ("emissions", float64),
-        ("annual_limit", float64[:]),
-        ("remaining_energy", float64[:]),
+        ("cost", nbfloat),
+        ("emissions", nbfloat),
+        ("annual_limit", nbfloat[:]),
+        ("remaining_energy", nbfloat[:]),
         ("data_status", boolean),
         # Precharging
-        ("remaining_energy_temp_reverse", float64),
-        ("remaining_energy_temp_forward", float64),
-        ("deficit_block_max_energy", float64),
-        ("deficit_block_min_energy", float64),
+        ("remaining_energy_temp_reverse", nbfloat),
+        ("remaining_energy_temp_forward", nbfloat),
+        ("deficit_block_max_energy", nbfloat),
+        ("deficit_block_min_energy", nbfloat),
         ("trickling_flag", boolean),
-        ("trickling_reserves", float64),
-        ("remaining_trickling_reserves", float64),
-        ("allocated_energy", float64),
-        ("allocated_trickling", float64),
+        ("trickling_reserves", nbfloat),
+        ("remaining_trickling_reserves", nbfloat),
+        ("allocated_energy", nbfloat),
+        ("allocated_trickling", nbfloat),
     ]
 else:
     fuel_spec = []
@@ -42,33 +42,33 @@ class Fuel:
     -------
     static_instance (boolean): True value indicates 'static' instance, False indicates 'dynamic' instance.
         A static instance is unsafe to modify within a worker process for the unit committment process.
-    id (int64): A model-level identifier for the Fuel instance.
+    id (nbintp): A model-level identifier for the Fuel instance.
     name (unicode_type): A string providing the oridinary name of the Fuel.
-    cost (float64): Cost in currency/MWh (thermal)
-    emissions (float64): Carbon emissions in tCO2-e / MWh (thermal)
+    cost (nbfloat): Cost in currency/MWh (thermal)
+    emissions (nbfloat): Carbon emissions in tCO2-e / MWh (thermal)
 
-    annual_limit (float64[:]): Annual generation constraints in GWh/year.
-    remaining_energy (float64[:]): Amount of energy left in the annual limit
+    annual_limit (nbfloat[:]): Annual generation constraints in GWh/year.
+    remaining_energy (nbfloat[:]): Amount of energy left in the annual limit
 
-    remaining_energy_temp_reverse (float64): Temporary value for remaining energy when balancing deficit block in reverse time,
+    remaining_energy_temp_reverse (nbfloat): Temporary value for remaining energy when balancing deficit block in reverse time,
         units GWh.
-    remaining_energy_temp_forward (float64): Temporary value for remaining energy when balancing deficit block in forward time,
+    remaining_energy_temp_forward (nbfloat): Temporary value for remaining energy when balancing deficit block in forward time,
         units GWh.
-    deficit_block_max_energy (float64): Maximum value of remaining energy within a deficit block, units GWh.
-    deficit_block_min_energy (float64): Minimum value of remaining energy within a deficit block, units GWh.
+    deficit_block_max_energy (nbfloat): Maximum value of remaining energy within a deficit block, units GWh.
+    deficit_block_min_energy (nbfloat): Minimum value of remaining energy within a deficit block, units GWh.
     trickling_flag (boolean): Flag indicating if flexible Generator is a trickle-charger and can precharge Storage systems.
-    trickling_reserves (float64): Energy that must be retained during precharging so that flexible Generator can dispatch
+    trickling_reserves (nbfloat): Energy that must be retained during precharging so that flexible Generator can dispatch
         during deficit block, units GWh.
-    remaining_trickling_reserves (float64): Energy remaining for trickle charging in the precharging period, units GWh.
+    remaining_trickling_reserves (nbfloat): Energy remaining for trickle charging in the precharging period, units GWh.
     """
 
     def __init__(
         self,
         static_instance: boolean,
-        idx: int64,
+        idx: nbintp,
         name: unicode_type,
-        cost: float64,
-        emissions: float64,
+        cost: nbfloat,
+        emissions: nbfloat,
     ) -> None:
         """
         Initialize a Fuel object.
@@ -85,8 +85,8 @@ class Fuel:
         self.name = name
         self.cost = cost  # $/GJ
         self.emissions = emissions  # kg/GJ
-        self.annual_limit = np.zeros((0,), dtype=np.float64)  # GWh/year
-        self.remaining_energy = np.zeros((0,), dtype=np.float64)  # GWh
+        self.annual_limit = np.zeros((0,), dtype=npfloat)  # GWh/year
+        self.remaining_energy = np.zeros((0,), dtype=npfloat)  # GWh
 
         self.data_status = False
         # Precharging
@@ -110,15 +110,15 @@ if JIT_ENABLED:
     generator_spec = [
         ("object_class", unicode_type),
         ("static_instance", boolean),
-        ("id", int64),
-        ("order", int64),
+        ("id", nbintp),
+        ("order", nbintp),
         ("name", unicode_type),
         ("node", Node_InstanceType),
         ("fuel", Fuel_InstanceType),
-        ("unit_size", float64),
-        ("max_build", float64),
-        ("min_build", float64),
-        ("initial_capacity", float64),
+        ("unit_size", nbfloat),
+        ("max_build", nbfloat),
+        ("min_build", nbfloat),
+        ("initial_capacity", nbfloat),
         ("line", Line_InstanceType),
         ("unit_type", unicode_type),
         ("is_flexible", boolean),
@@ -126,17 +126,17 @@ if JIT_ENABLED:
         ("group", unicode_type),
         ("cost", UnitCost_InstanceType),
         ("data_status", boolean),
-        ("data", float64[:]),
-        ("candidate_x_idx", int64),
+        ("data", nbfloat[:]),
+        ("candidate_x_idx", nbintp),
         # Dynamic
-        ("new_build", float64),
-        ("capacity", float64),
-        ("dispatch_power", float64[:]),
-        ("flexible_max_t", float64),
-        ("lt_generation", float64),
-        ("unit_lt_hours", float64),
+        ("new_build", nbfloat),
+        ("capacity", nbfloat),
+        ("dispatch_power", nbfloat[:]),
+        ("flexible_max_t", nbfloat),
+        ("lt_generation", nbfloat),
+        ("unit_lt_hours", nbfloat),
         ("lt_costs", LTCosts_InstanceType),
-        ("heat_base_consumption", float64),
+        ("heat_base_consumption", nbfloat),
     ]
 else:
     generator_spec = []
@@ -165,13 +165,13 @@ class Generator:
     -------
     static_instance (boolean): True value indicates 'static' instance, False indicates 'dynamic' instance.
         A static instance is unsafe to modify within a worker process for the unit committment process.
-    id (int64): A model-level identifier for the Generator instance.
-    order (int64): A scenario-level identifier for the Generator instance.
+    id (nbintp): A model-level identifier for the Generator instance.
+    order (nbintp): A scenario-level identifier for the Generator instance.
     name (unicode_type): A string providing the oridinary name of the Generator.
-    unit_size (float64): Nameplate unit size in GW. A Generator could be formed from multiple units.
-    max_build (float64): Maximum build limit in GW.
-    min_build (float64): Minimum build limit in GW.
-    initial_capacity (float64): Installed capacity at model start in GW.
+    unit_size (nbfloat): Nameplate unit size in GW. A Generator could be formed from multiple units.
+    max_build (nbfloat): Maximum build limit in GW.
+    min_build (nbfloat): Minimum build limit in GW.
+    initial_capacity (nbfloat): Installed capacity at model start in GW.
     unit_type (unicode_type): Type of Generator (e.g., 'solar', 'wind', 'baseload', 'flexible').
     is_flexible (unicode_type): Whether Generator is flexible (e.g. ccgt).
     near_optimum_check (boolean): Flag to perform near-optimum optimisation.
@@ -182,16 +182,16 @@ class Generator:
         when minimising/maximising installed capacity within the broad optimum space.
     cost (UnitCost_InstanceType): Exogenously defined cost assumptions.
     data_status (boolean): Status of data loading.
-    data (float64[:]): Interval capacity factor trace data. Each value represents the capacity factor of the solar, wind
+    data (nbfloat[:]): Interval capacity factor trace data. Each value represents the capacity factor of the solar, wind
         or baseload Generator in each time interval of the modelling horizon.
-    candidate_x_idx (int64): Index of the Generator's decision variable (new build capacity) in the candidate solution vector.
-    new_build (float64): Capacity built for the candidate solution, units GW.
-    capacity (float64): Current installed capacity, units GW.
-    dispatch_power (float64[:]): Interval dispatch power of a flexible Generator, units GW.
-    remaining_energy (float64[:]): Remaining annual energy for flexible Generators, units GWh.
-    flexible_max_t (float64): Maximum dispatchable power in the current interval for a flexible Generator, units GW.
-    lt_generation (float64): Long-term total generation over the entire modelling horizon, units GWh.
-    unit_lt_hours (float64): Total hours of operation per unit, units hours.
+    candidate_x_idx (nbintp): Index of the Generator's decision variable (new build capacity) in the candidate solution vector.
+    new_build (nbfloat): Capacity built for the candidate solution, units GW.
+    capacity (nbfloat): Current installed capacity, units GW.
+    dispatch_power (nbfloat[:]): Interval dispatch power of a flexible Generator, units GW.
+    remaining_energy (nbfloat[:]): Remaining annual energy for flexible Generators, units GWh.
+    flexible_max_t (nbfloat): Maximum dispatchable power in the current interval for a flexible Generator, units GW.
+    lt_generation (nbfloat): Long-term total generation over the entire modelling horizon, units GWh.
+    unit_lt_hours (nbfloat): Total hours of operation per unit, units hours.
     lt_costs (LTCosts_InstanceType): Endogenously calculated long-term costs of the Generator over the modelling horizon.
 
     """
@@ -199,13 +199,13 @@ class Generator:
     def __init__(
         self,
         static_instance: boolean,
-        idx: int64,
-        order: int64,
+        idx: nbintp,
+        order: nbintp,
         name: unicode_type,
-        unit_size: float64,
-        max_build: float64,
-        min_build: float64,
-        capacity: float64,
+        unit_size: nbfloat,
+        max_build: nbfloat,
+        min_build: nbfloat,
+        capacity: nbfloat,
         unit_type: unicode_type,
         is_flexible: boolean,
         near_optimum_check: boolean,
@@ -246,14 +246,14 @@ class Generator:
         self.cost = cost
 
         self.data_status = False
-        self.data = np.empty((0,), dtype=np.float64)
+        self.data = np.empty((0,), dtype=npfloat)
 
         self.candidate_x_idx = -1
 
         # Dynamic
         self.new_build = 0.0  # GW
         self.capacity = capacity  # GW
-        self.dispatch_power = np.empty((0,), dtype=np.float64)  # GW
+        self.dispatch_power = np.empty((0,), dtype=npfloat)  # GW
 
         self.flexible_max_t = 0.0  # GW
         self.lt_generation = 0.0  # GWh
@@ -273,54 +273,54 @@ if JIT_ENABLED:
     storage_spec = [
         ("object_class", unicode_type),
         ("static_instance", boolean),
-        ("id", int64),
-        ("order", int64),
+        ("id", nbintp),
+        ("order", nbintp),
         ("name", unicode_type),
         ("node", Node_InstanceType),
-        ("initial_power_capacity", float64),
-        ("initial_energy_capacity", float64),
-        ("duration", float64),
+        ("initial_power_capacity", nbfloat),
+        ("initial_energy_capacity", nbfloat),
+        ("duration", nbfloat),
         ("chargeable", boolean),
         ("inflows", boolean),
-        ("charge_efficiency", float64),
-        ("discharge_efficiency", float64),
-        ("max_build_p", float64),
-        ("max_build_e", float64),
-        ("min_build_p", float64),
-        ("min_build_e", float64),
+        ("charge_efficiency", nbfloat),
+        ("discharge_efficiency", nbfloat),
+        ("max_build_p", nbfloat),
+        ("max_build_e", nbfloat),
+        ("min_build_p", nbfloat),
+        ("min_build_e", nbfloat),
         ("line", Line_InstanceType),
         ("unit_type", unicode_type),
         ("near_optimum_check", boolean),
         ("group", unicode_type),
         ("cost", UnitCost_InstanceType),
-        ("candidate_p_x_idx", int64),
-        ("candidate_e_x_idx", int64),
+        ("candidate_p_x_idx", nbintp),
+        ("candidate_e_x_idx", nbintp),
         ("data_status", boolean),
-        ("data", float64[:]),
+        ("data", nbfloat[:]),
         # Dynamic
-        ("new_build_p", float64),
-        ("new_build_e", float64),
-        ("power_capacity", float64),
-        ("energy_capacity", float64),
-        ("dispatch_power", float64[:]),
-        ("stored_energy", float64[:]),
-        ("discharge_max_t", float64),
-        ("charge_max_t", float64),
-        ("lt_generation", float64),
-        ("unit_lt_hours", float64),
+        ("new_build_p", nbfloat),
+        ("new_build_e", nbfloat),
+        ("power_capacity", nbfloat),
+        ("energy_capacity", nbfloat),
+        ("dispatch_power", nbfloat[:]),
+        ("stored_energy", nbfloat[:]),
+        ("discharge_max_t", nbfloat),
+        ("charge_max_t", nbfloat),
+        ("lt_generation", nbfloat),
+        ("unit_lt_hours", nbfloat),
         ("lt_costs", LTCosts_InstanceType),
         # Precharging & Reserves
-        ("deficit_block_min_storage", float64),
-        ("deficit_block_max_storage", float64),
-        ("stored_energy_temp_reverse", float64),
-        ("stored_energy_temp_forward", float64),
-        ("precharge_energy", float64),
-        ("trickling_reserves", float64),
-        ("remaining_trickling_reserves", float64),
+        ("deficit_block_min_storage", nbfloat),
+        ("deficit_block_max_storage", nbfloat),
+        ("stored_energy_temp_reverse", nbfloat),
+        ("stored_energy_temp_forward", nbfloat),
+        ("precharge_energy", nbfloat),
+        ("trickling_reserves", nbfloat),
+        ("remaining_trickling_reserves", nbfloat),
         ("precharge_flag", boolean),
         ("trickling_flag", boolean),
-        ("remaining_discharge_max_t", float64),
-        ("remaining_charge_max_t", float64),
+        ("remaining_discharge_max_t", nbfloat),
+        ("remaining_charge_max_t", nbfloat),
     ]
 else:
     storage_spec = []
@@ -331,20 +331,20 @@ class Storage:
     def __init__(
         self,
         static_instance: boolean,
-        idx: int64,
-        order: int64,
+        idx: nbintp,
+        order: nbintp,
         name: unicode_type,
-        power_capacity: float64,
-        energy_capacity: float64,
-        duration: float64,
+        power_capacity: nbfloat,
+        energy_capacity: nbfloat,
+        duration: nbfloat,
         chargeable: boolean,
         inflows: boolean,
-        charge_efficiency: float64,
-        discharge_efficiency: float64,
-        max_build_p: float64,
-        max_build_e: float64,
-        min_build_p: float64,
-        min_build_e: float64,
+        charge_efficiency: nbfloat,
+        discharge_efficiency: nbfloat,
+        max_build_p: nbfloat,
+        max_build_e: nbfloat,
+        min_build_p: nbfloat,
+        min_build_e: nbfloat,
         unit_type: unicode_type,
         near_optimum_check: boolean,
         node: Node_InstanceType,
@@ -379,15 +379,15 @@ class Storage:
         self.candidate_e_x_idx = -1
         if self.inflows:
             self.data_status = False
-            self.data = np.empty((0,), dtype=np.float64)
+            self.data = np.empty((0,), dtype=npfloat)
 
         # Dynamic
         self.new_build_p = 0.0  # GW
         self.new_build_e = 0.0  # GWh
         self.power_capacity = power_capacity  # GW
         self.energy_capacity = self.initial_energy_capacity  # GWh
-        self.dispatch_power = np.empty((0,), dtype=np.float64)  # GW
-        self.stored_energy = np.empty((0,), dtype=np.float64)  # GWh
+        self.dispatch_power = np.empty((0,), dtype=npfloat)  # GW
+        self.stored_energy = np.empty((0,), dtype=npfloat)  # GWh
 
         self.discharge_max_t = 0.0  # GW
         self.charge_max_t = 0.0  # GW
@@ -420,9 +420,9 @@ if JIT_ENABLED:
     fleet_spec = [
         ("object_class", unicode_type),
         ("static_instance", boolean),
-        ("generators", DictType(int64, Generator_InstanceType)),
-        ("storages", DictType(int64, Storage_InstanceType)),
-        ("fuels", DictType(int64, Fuel_InstanceType)),
+        ("generators", DictType(nbintp, Generator_InstanceType)),
+        ("storages", DictType(nbintp, Storage_InstanceType)),
+        ("fuels", DictType(nbintp, Fuel_InstanceType)),
     ]
 else:
     fleet_spec = []
@@ -437,26 +437,29 @@ class Fleet:
     -------
     static_instance (boolean): True value indicates 'static' instance, False indicates 'dynamic' instance.
         A static instance is unsafe to modify within a worker process for the unit commitment process.
-    generators (DictType(int64, Generator_InstanceType)): Typed dictionary of Generator instances keyed by their
+    generators (DictType(nbintp, Generator_InstanceType)): Typed dictionary of Generator instances keyed by their
         scenario-level orders.
-    storages (DictType(int64, Storage_InstanceType)): Typed dictionary of Storage instances keyed by their scenario-level orders.
+    storages (DictType(nbintp, Storage_InstanceType)): Typed dictionary of Storage instances keyed by their scenario-level orders.
+    fuels (DictType(nbintp, Fuel_InstanceType)): Typed dictionary of Fuel instances keyed by their scenario-level orders.
     """
 
     def __init__(
         self,
         static_instance: boolean,
-        generators: DictType(int64, Generator_InstanceType),
-        storages: DictType(int64, Storage_InstanceType),
-        fuels: DictType(int64, Fuel_InstanceType),
+        generators: DictType(nbintp, Generator_InstanceType),
+        storages: DictType(nbintp, Storage_InstanceType),
+        fuels: DictType(nbintp, Fuel_InstanceType),
     ):
         """
         Parameters:
         -------
         static_instance (boolean): True value indicates 'static' instance, False indicates 'dynamic' instance.
             A static instance is unsafe to modify within a worker process for the unit commitment process.
-        generators (DictType(int64, Generator_InstanceType)): Typed dictionary of Generator instances keyed by their
+        generators (DictType(nbintp, Generator_InstanceType)): Typed dictionary of Generator instances keyed by their
             scenario-level orders.
-        storages (DictType(int64, Storage_InstanceType)): Typed dictionary of Storage instances keyed by their
+        storages (DictType(nbintp, Storage_InstanceType)): Typed dictionary of Storage instances keyed by their
+            scenario-level orders.
+        fuels (DictType(nbintp, Fuels_InstanceType)): Typed dictionary of Fuel instances keyed by their
             scenario-level orders.
         """
         self.object_class = "fleet"

@@ -1,7 +1,7 @@
 # type: ignore
 from firm_ce.common.constants import FASTMATH, TOLERANCE, BOUNDSCHECK
 from firm_ce.common.jit_overload import njit
-from firm_ce.common.typing import boolean, float64, int64, unicode_type
+from firm_ce.common.typing import boolean, nbfloat, nbintp, unicode_type
 from firm_ce.fast_methods import (
     fleet_m,
     generator_m,
@@ -16,10 +16,10 @@ from firm_ce.system.topology import Network_InstanceType
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_interval(
-    interval: int64,
+    interval: nbintp,
     network: Network_InstanceType,
     fleet: Fleet_InstanceType,
-    resolution: float64,
+    resolution: nbfloat,
     forward_time_flag: boolean,
 ) -> None:
     """
@@ -30,10 +30,10 @@ def initialise_interval(
 
     Parameters:
     -------
-    interval (int64): Index of the time interval to initialise.
+    interval (nbintp): Index of the time interval to initialise.
     network (Network_InstanceType): An instance of the Network jitclass.
     fleet (Fleet_InstanceType): An instance of the Fleet jitclass.
-    resolution (float64): Length of the time interval, units hours.
+    resolution (nbfloat): Length of the time interval, units hours.
     forward_time_flag (boolean): True for forward-time balancing and when resolving the discontinuity
         created after the precharging period, False for reverse-time deficit block balancing.
 
@@ -72,7 +72,7 @@ def initialise_interval(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def balance_with_transmission(
-    interval: int64,
+    interval: nbintp,
     network: Network_InstanceType,
     transmission_case: unicode_type,
     precharging_flag: boolean,
@@ -87,7 +87,7 @@ def balance_with_transmission(
 
     Parameters:
     -------
-    interval (int64): Index of the time interval to initialise.
+    interval (nbintp): Index of the time interval to initialise.
     network (Network_InstanceType): An instance of the Network jitclass.
     transmission_case (unicode_type): String that sets the transmission case defining the fill and surplus available
         at each Node. Refer to network_m.set_node_fills_and_surpluses pseudo-method for specifics on each case.
@@ -116,7 +116,7 @@ def balance_with_transmission(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def balance_with_storage(
-    interval: int64,
+    interval: nbintp,
     network: Network_InstanceType,
     fleet: Fleet_InstanceType,
 ) -> None:
@@ -132,7 +132,7 @@ def balance_with_storage(
 
     Parameters:
     -------
-    interval (int64): Index of the time interval to balance.
+    interval (nbintp): Index of the time interval to balance.
     network (Network_InstanceType): An instance of the Network jitclass.
     fleet (Fleet_InstanceType): An instance of the Fleet jitclass.
 
@@ -156,10 +156,10 @@ def balance_with_storage(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def balance_with_flexible(
-    interval: int64,
+    interval: nbintp,
     network: Network_InstanceType,
     fleet: Fleet_InstanceType,
-    resolution: float64,
+    resolution: nbfloat,
     forward_time_flag: boolean,
 ) -> None:
     """
@@ -173,7 +173,7 @@ def balance_with_flexible(
 
     Parameters:
     -------
-    interval (int64): Index of the time interval to balance.
+    interval (nbintp): Index of the time interval to balance.
     network (Network_InstanceType): An instance of the Network jitclass.
     fleet (Fleet_InstanceType): An instance of the Fleet jitclass.
 
@@ -198,7 +198,7 @@ def balance_with_flexible(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def energy_balance_for_interval(
     solution,
-    interval: int64,
+    interval: nbintp,
     forward_time_flag: boolean,
 ) -> None:
     """
@@ -219,7 +219,7 @@ def energy_balance_for_interval(
     -------
     solution (Solution_InstanceType): An instance of the Solution jitclass providing a complete description
         of the system for this candidate solution.
-    interval (int64): Index of the time interval to balance.
+    interval (nbintp): Index of the time interval to balance.
     forward_time_flag (boolean): True for forward-time balancing and when resolving the discontinuity
         created after the precharging period, False for reverse-time deficit block balancing.
 
@@ -276,11 +276,11 @@ def energy_balance_for_interval(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def balance_for_period(
-    start_t: int64,
-    end_t: int64,
+    start_t: nbintp,
+    end_t: nbintp,
     precharging_allowed: boolean,
     solution,
-    year: int64,
+    year: nbintp,
 ) -> None:
     """
     Iterates through the time intervals within a specified period and performs the unit committment.
@@ -288,13 +288,13 @@ def balance_for_period(
 
     Parameters:
     -------
-    start_t (int64): First time interval index for the period (inclusive).
-    end_t (int64): Final time interval index for the period (exclusive).
+    start_t (nbintp): First time interval index for the period (inclusive).
+    end_t (nbintp): Final time interval index for the period (exclusive).
     precharging_allowed (boolean): True if the precharging business rules can be execute. During balancing of a
         deficit block, this argument is False.
     solution (Solution_InstanceType): An instance of the Solution jitclass providing a complete description
         of the system for this candidate solution.
-    year (int64): Year index used manage flexible Generator remaining energy constraints during precharging.
+    year (nbintp): Year index used manage flexible Generator remaining energy constraints during precharging.
 
     Returns:
     -------
@@ -341,10 +341,10 @@ def balance_for_period(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def determine_precharge_energies_for_deficit_block(
-    interval: int64,
+    interval: nbintp,
     solution,
-    year: int64,
-) -> int64:
+    year: nbintp,
+) -> nbintp:
     """
     Iterate backwards through the time intervals in a deficit block, dispatching Storage systems
     and flexible Generators according to reverse-time rules. Determines the amount of energy each
@@ -353,14 +353,14 @@ def determine_precharge_energies_for_deficit_block(
 
     Parameters:
     -------
-    interval (int64): Interval immediately after the deficit block.
+    interval (nbintp): Interval immediately after the deficit block.
     solution (Solution_InstanceType): An instance of the Solution jitclass providing a complete description
         of the system for this candidate solution.
-    year (int64): Year index for the time interval immediately after the deficit block.
+    year (nbintp): Year index for the time interval immediately after the deficit block.
 
     Returns:
     -------
-    int64: Index of the first interval of the deficit block. Returns 0 if deficit block intersects with the
+    nbintp: Index of the first interval of the deficit block. Returns 0 if deficit block intersects with the
         start of the modelling period.
 
     Side-effects:
@@ -408,10 +408,10 @@ def determine_precharge_energies_for_deficit_block(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_precharging_interval(
-    interval: int64,
+    interval: nbintp,
     network: Network_InstanceType,
     fleet: Fleet_InstanceType,
-    resolution: float64,
+    resolution: nbfloat,
 ) -> None:
     """
     Initialise state of all Node, Storage, and flexible Generator instances for a time interval in the
@@ -419,10 +419,10 @@ def initialise_precharging_interval(
 
     Parameters:
     -------
-    interval (int64): Index of the time interval within the precharging period to initialise.
+    interval (nbintp): Index of the time interval within the precharging period to initialise.
     network (Network_InstanceType): An instance of the Network jitclass.
     fleet (Fleet_InstanceType): An instance of the Fleet jitclass.
-    resolution (float64): Length of the time interval, units hours.
+    resolution (nbfloat): Length of the time interval, units hours.
 
     Returns:
     -------
@@ -455,10 +455,10 @@ def initialise_precharging_interval(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_local_surplus_transfers(
-    interval: int64,
+    interval: nbintp,
     network: Network_InstanceType,
     fleet: Fleet_InstanceType,
-    resolution: float64,
+    resolution: nbfloat,
 ) -> None:
     """
     Use any existing local (intranode) surplus generation to charge Storage prechargers.
@@ -471,10 +471,10 @@ def perform_local_surplus_transfers(
 
     Parameters:
     -------
-    interval (int64): Index of the time interval within the precharging period.
+    interval (nbintp): Index of the time interval within the precharging period.
     network (Network_InstanceType): An instance of the Network jitclass.
     fleet (Fleet_InstanceType): An instance of the Fleet jitclass.
-    resolution (float64): Length of the time interval, units hours.
+    resolution (nbfloat): Length of the time interval, units hours.
 
     Returns:
     -------
@@ -508,10 +508,10 @@ def perform_local_surplus_transfers(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_transmitted_surplus_transfers(
-    interval: int64,
+    interval: nbintp,
     network: Network_InstanceType,
     fleet: Fleet_InstanceType,
-    resolution: float64,
+    resolution: nbfloat,
 ) -> None:
     """
     Transmit any existing surplus generation between Nodes to charge Storage prechargers.
@@ -524,10 +524,10 @@ def perform_transmitted_surplus_transfers(
 
     Parameters:
     -------
-    interval (int64): Index of the time interval within the precharging period.
+    interval (nbintp): Index of the time interval within the precharging period.
     network (Network_InstanceType): An instance of the Network jitclass.
     fleet (Fleet_InstanceType): An instance of the Fleet jitclass.
-    resolution (float64): Length of the time interval, units hours.
+    resolution (nbfloat): Length of the time interval, units hours.
 
     Returns:
     -------
@@ -568,10 +568,10 @@ def perform_transmitted_surplus_transfers(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_intranode_interstorage_transfers(
-    interval: int64,
+    interval: nbintp,
     network: Network_InstanceType,
     fleet: Fleet_InstanceType,
-    resolution: float64,
+    resolution: nbfloat,
 ) -> None:
     """
     Transfer energy within a Node from Storage trickle-chargers to Storage prechargers.
@@ -584,10 +584,10 @@ def perform_intranode_interstorage_transfers(
 
     Parameters:
     -------
-    interval (int64): Index of the time interval within the precharging period.
+    interval (nbintp): Index of the time interval within the precharging period.
     network (Network_InstanceType): An instance of the Network jitclass.
     fleet (Fleet_InstanceType): An instance of the Fleet jitclass.
-    resolution (float64): Length of the time interval, units hours.
+    resolution (nbfloat): Length of the time interval, units hours.
 
     Returns:
     -------
@@ -629,10 +629,10 @@ def perform_intranode_interstorage_transfers(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_internode_interstorage_transfers(
-    interval: int64,
+    interval: nbintp,
     network: Network_InstanceType,
     fleet: Fleet_InstanceType,
-    resolution: float64,
+    resolution: nbfloat,
 ) -> None:
     """
     Transfer energy between Nodes from Storage trickle-chargers to Storage prechargers.
@@ -645,10 +645,10 @@ def perform_internode_interstorage_transfers(
 
     Parameters:
     -------
-    interval (int64): Index of the time interval within the precharging period.
+    interval (nbintp): Index of the time interval within the precharging period.
     network (Network_InstanceType): An instance of the Network jitclass.
     fleet (Fleet_InstanceType): An instance of the Fleet jitclass.
-    resolution (float64): Length of the time interval, units hours.
+    resolution (nbfloat): Length of the time interval, units hours.
 
     Returns:
     -------
@@ -700,10 +700,10 @@ def perform_internode_interstorage_transfers(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_intranode_flexible_transfers(
-    interval: int64,
+    interval: nbintp,
     network: Network_InstanceType,
     fleet: Fleet_InstanceType,
-    resolution: float64,
+    resolution: nbfloat,
 ) -> None:
     """
     Transfer energy within a Node from flexible Generator trickle-chargers to Storage prechargers.
@@ -716,10 +716,10 @@ def perform_intranode_flexible_transfers(
 
     Parameters:
     -------
-    interval (int64): Index of the time interval within the precharging period.
+    interval (nbintp): Index of the time interval within the precharging period.
     network (Network_InstanceType): An instance of the Network jitclass.
     fleet (Fleet_InstanceType): An instance of the Fleet jitclass.
-    resolution (float64): Length of the time interval, units hours.
+    resolution (nbfloat): Length of the time interval, units hours.
 
     Returns:
     -------
@@ -768,10 +768,10 @@ def perform_intranode_flexible_transfers(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_internode_flexible_transfers(
-    interval: int64,
+    interval: nbintp,
     network: Network_InstanceType,
     fleet: Fleet_InstanceType,
-    resolution: float64,
+    resolution: nbfloat,
 ) -> None:
     """
     Transfer energy between Nodes from flexible Generator trickle-chargers to Storage prechargers.
@@ -784,10 +784,10 @@ def perform_internode_flexible_transfers(
 
     Parameters:
     -------
-    interval (int64): Index of the time interval within the precharging period.
+    interval (nbintp): Index of the time interval within the precharging period.
     network (Network_InstanceType): An instance of the Network jitclass.
     fleet (Fleet_InstanceType): An instance of the Fleet jitclass.
-    resolution (float64): Length of the time interval, units hours.
+    resolution (nbfloat): Length of the time interval, units hours.
 
     Returns:
     -------
@@ -845,7 +845,7 @@ def perform_internode_flexible_transfers(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_flexible_precharging(
     solution,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     Use flexible Generators to trickle-charge Storage prechargers for a given time interval within the
@@ -853,10 +853,10 @@ def perform_flexible_precharging(
 
     Parameters:
     -------
-    interval (int64): Index of the time interval within the precharging period.
+    interval (nbintp): Index of the time interval within the precharging period.
     network (Network_InstanceType): An instance of the Network jitclass.
     fleet (Fleet_InstanceType): An instance of the Fleet jitclass.
-    resolution (float64): Length of the time interval, units hours.
+    resolution (nbfloat): Length of the time interval, units hours.
 
     Returns:
     -------
@@ -898,10 +898,10 @@ def perform_flexible_precharging(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def determine_power_adjustments_for_precharging_period(
-    interval: int64,
+    interval: nbintp,
     solution,
-    year: int64,
-) -> int64:
+    year: nbintp,
+) -> nbintp:
     """
     Iterate backwards through the time intervals in the precharging period, adjusting the dispatch power of
     Storage systems and flexible Generators to transfer enough energy to Storage precharges to balance the
@@ -922,14 +922,14 @@ def determine_power_adjustments_for_precharging_period(
 
     Parameters:
     -------
-    interval (int64): Index of the first interval of the deficit block.
+    interval (nbintp): Index of the first interval of the deficit block.
     solution (Solution_InstanceType): An instance of the Solution jitclass providing a complete description
         of the system for this candidate solution.
-    year (int64): Year index for the time interval immediately after the deficit block.
+    year (nbintp): Year index for the time interval immediately after the deficit block.
 
     Returns:
     -------
-    int64: Index of the first interval of the precharging period. Returns 0 if precharging period intersects with the
+    nbintp: Index of the first interval of the precharging period. Returns 0 if precharging period intersects with the
         start of the modelling period.
 
     Side-effects:
@@ -1012,7 +1012,7 @@ def determine_power_adjustments_for_precharging_period(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def perform_fill_adjustment(
-    interval: int64,
+    interval: nbintp,
     network: Network_InstanceType,
     fleet: Fleet_InstanceType,
 ) -> None:
@@ -1025,7 +1025,7 @@ def perform_fill_adjustment(
 
     Parameters:
     -------
-    interval (int64): Index of the time interval within the precharging period.
+    interval (nbintp): Index of the time interval within the precharging period.
     network (Network_InstanceType): An instance of the Network jitclass.
     fleet (Fleet_InstanceType): An instance of the Fleet jitclass.
 
@@ -1049,8 +1049,8 @@ def perform_fill_adjustment(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def resolve_energy_discontinuities(
-    first_interval_precharge: int64,
-    interval_after_deficit_block: int64,
+    first_interval_precharge: nbintp,
+    interval_after_deficit_block: nbintp,
     solution,
 ) -> None:
     """
@@ -1068,8 +1068,8 @@ def resolve_energy_discontinuities(
 
     Parameters:
     -------
-    first_interval_precharge (int64): First interval of the precharging period.
-    interval_after_deficit_block (int64): First interval after the deficit block.
+    first_interval_precharge (nbintp): First interval of the precharging period.
+    interval_after_deficit_block (nbintp): First interval after the deficit block.
     solution (Solution_InstanceType): An instance of the Solution jitclass providing a complete description
         of the system for this candidate solution.
 
@@ -1143,8 +1143,8 @@ def resolve_energy_discontinuities(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def precharge_storage(
     solution,
-    interval_after_deficit_block: int64,
-    year: int64,
+    interval_after_deficit_block: nbintp,
+    year: nbintp,
 ) -> None:
     """
     Core unit committment business rules for precharging Storage systems. The high-level process is:
@@ -1164,8 +1164,8 @@ def precharge_storage(
     -------
     solution (Solution_InstanceType): An instance of the Solution jitclass providing a complete description
         of the system for this candidate solution.
-    interval_after_deficit_block (int64): First interval after the deficit block.
-    year (int64): Year index for the time interval immediately after the deficit block.
+    interval_after_deficit_block (nbintp): First interval after the deficit block.
+    year (nbintp): Year index for the time interval immediately after the deficit block.
 
     Returns:
     -------

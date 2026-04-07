@@ -3,7 +3,7 @@ from typing import Dict
 
 import numpy as np
 
-from firm_ce.common.typing import DictType, TypedDict, int64
+from firm_ce.common.typing import DictType, TypedDict, nbintp
 from firm_ce.common.helpers import parse_boolean
 from firm_ce.constructors.cost_cons import construct_UnitCost_object
 from firm_ce.system.components import (
@@ -45,8 +45,8 @@ def construct_Fuel_object(
 def construct_Generator_object(
     generator_dict: Dict[str, str],
     fuels_imported_dict: Dict[str, Dict[str, str]],
-    nodes_object_dict: DictType(int64, Node_InstanceType),
-    lines_object_dict: DictType(int64, Line_InstanceType),
+    nodes_object_dict: DictType(nbintp, Node_InstanceType),
+    lines_object_dict: DictType(nbintp, Line_InstanceType),
     order: int,
 ) -> Generator_InstanceType:
     """
@@ -60,9 +60,9 @@ def construct_Generator_object(
         a single generator object in `config/generators.csv`.
     fuels_imported_dict (Dict[str, Dict[str, str]]): A dictionary containing data for all fuels
         imported from `config/fules.csv`.
-    nodes_object_dict (DictType(int64, Node_InstanceType)): A typed dictionary of
+    nodes_object_dict (DictType(nbintp, Node_InstanceType)): A typed dictionary of
         all Node jitclass instances for the scenario. Key defined as Node.order.
-    lines_object_dict (DictType(int64, Line_InstanceType)): A typed dictionary of
+    lines_object_dict (DictType(nbintp, Line_InstanceType)): A typed dictionary of
         all Line jitclass instances for the scenario. Key defined as Line.order.
     order (int): The scenario-specific id for the Generator instance.
 
@@ -128,8 +128,8 @@ def construct_Generator_object(
 
 def construct_Storage_object(
     storage_dict: Dict[str, str],
-    nodes_object_dict: DictType(int64, Node_InstanceType),
-    lines_object_dict: DictType(int64, Line_InstanceType),
+    nodes_object_dict: DictType(nbintp, Node_InstanceType),
+    lines_object_dict: DictType(nbintp, Line_InstanceType),
     order: int,
 ) -> Storage_InstanceType:
     """
@@ -141,9 +141,9 @@ def construct_Storage_object(
     -------
     storage_dict (Dict[str,str]): A dictionary containing the attributes of
         a single storage object in `config/storages.csv`.
-    nodes_object_dict (DictType(int64, Node_InstanceType)): A typed dictionary of
+    nodes_object_dict (DictType(nbintp, Node_InstanceType)): A typed dictionary of
         all Node jitclass instances for the scenario. Key defined as Node.order.
-    lines_object_dict (DictType(int64, Line_InstanceType)): A typed dictionary of
+    lines_object_dict (DictType(nbintp, Line_InstanceType)): A typed dictionary of
         all Line jitclass instances for the scenario. Key defined as Line.order.
     order (int): The scenario-specific id for the Storage instance.
 
@@ -222,8 +222,8 @@ def construct_Fleet_object(
     generators_imported_dict: Dict[str, Dict[str, str]],
     storages_imported_dict: Dict[str, Dict[str, str]],
     fuels_imported_dict: Dict[str, Dict[str, str]],
-    lines_object_dict: DictType(int64, Line_InstanceType),
-    nodes_object_dict: DictType(int64, Node_InstanceType),
+    lines_object_dict: DictType(nbintp, Line_InstanceType),
+    nodes_object_dict: DictType(nbintp, Node_InstanceType),
 ) -> Fleet_InstanceType:
     """
     Takes data required to initialise a single fleet object, casts values into Numba-compatible
@@ -240,17 +240,17 @@ def construct_Fleet_object(
         storages imported from `config/storages.csv`.
     fuels_imported_dict (Dict[str, Dict[str, str]]): A dictionary containing data for all fuels
         imported from `config/fules.csv`.
-    nodes_object_dict (DictType(int64, Node_InstanceType)): A typed dictionary of
+    nodes_object_dict (DictType(nbintp, Node_InstanceType)): A typed dictionary of
         all Node jitclass instances for the scenario. Key defined as Node.order.
-    lines_object_dict (DictType(int64, Line_InstanceType)): A typed dictionary of
+    lines_object_dict (DictType(nbintp, Line_InstanceType)): A typed dictionary of
         all Line jitclass instances for the scenario. Key defined as Line.order.
 
     Returns:
     -------
     Fleet_InstanceType: A static instance of the Fleet jitclass.
     """
-    fuels = TypedDict.empty(key_type=int64, value_type=Fuel_InstanceType)
-    generators = TypedDict.empty(key_type=int64, value_type=Generator_InstanceType)
+    fuels = TypedDict.empty(key_type=nbintp, value_type=Fuel_InstanceType)
+    generators = TypedDict.empty(key_type=nbintp, value_type=Generator_InstanceType)
     for order, idx in enumerate(generators_imported_dict):
         generators[order] = construct_Generator_object(
             generators_imported_dict[idx],
@@ -262,7 +262,7 @@ def construct_Fleet_object(
         if generators[order].fuel.id not in fuels:
             fuels[generators[order].fuel.id] = generators[order].fuel
 
-    storages = TypedDict.empty(key_type=int64, value_type=Storage_InstanceType)
+    storages = TypedDict.empty(key_type=nbintp, value_type=Storage_InstanceType)
     for order, idx in enumerate(storages_imported_dict):
         storages[order] = construct_Storage_object(
             storages_imported_dict[idx],

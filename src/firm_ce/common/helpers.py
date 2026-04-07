@@ -6,7 +6,7 @@ from numba import njit
 import numpy as np
 from numpy.typing import NDArray
 
-from firm_ce.common.typing import float64
+from firm_ce.common.typing import nbfloat
 from firm_ce.common.constants import FASTMATH
 
 
@@ -65,10 +65,10 @@ def safe_divide(num: float, denom: float, fail: float = 0.0) -> float:
 
 @njit(fastmath=FASTMATH)
 def njit_safe_divide(
-    num: float64,
-    denom: float64,
-    fail: float64
-) -> float64:
+    num: nbfloat,
+    denom: nbfloat,
+    fail: nbfloat
+) -> nbfloat:
     """Safe division for calculating levelised costs when total dispatch energy from the asset is 0."""
     if not np.isclose(denom, 0):
         return num / denom
@@ -77,10 +77,10 @@ def njit_safe_divide(
 
 @njit(fastmath=FASTMATH)
 def safe_divide_array(
-    num: NDArray[np.float64],
-    denom: NDArray[np.float64],
-    fail: np.float64 = 0.0,
-) -> NDArray[np.float64]:
+    num: NDArray[nbfloat],
+    denom: NDArray[nbfloat],
+    fail: nbfloat = 0.0,
+) -> NDArray[nbfloat]:
     """ Zero-safe division of two arrays. """
     retarr = num.copy().ravel()
     denom_ravel = denom.ravel()
@@ -125,6 +125,5 @@ def parse_boolean(value: str) -> bool:
 
 
 @njit(fastmath=FASTMATH)
-def get_annuity_factor(discount_rate: float64, lifetime: float64) -> float64:
+def get_annuity_factor(discount_rate: nbfloat, lifetime: nbfloat) -> nbfloat:
     return (1 - (1 + discount_rate) ** (-1 * lifetime)) / discount_rate
-

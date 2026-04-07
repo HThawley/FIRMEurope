@@ -3,7 +3,7 @@ from typing import Dict, Any
 
 import numpy as np
 
-from firm_ce.common.typing import DictType, ListType, TypedDict, TypedList, UniTuple, int64
+from firm_ce.common.typing import DictType, ListType, TypedDict, TypedList, UniTuple, nbintp, npint
 from firm_ce.constructors.cost_cons import construct_UnitCost_object
 from firm_ce.fast_methods import route_m
 from firm_ce.io.data_model import is_nan
@@ -42,7 +42,7 @@ def construct_Node_object(order: int, node_dict: dict) -> Node_InstanceType:
 def construct_Line_object(
     order: int,
     line_dict: Dict[str, Any],
-    nodes_object_dict: DictType(int64, Node_InstanceType),
+    nodes_object_dict: DictType(nbintp, Node_InstanceType),
     major: bool,
 ) -> Line_InstanceType:
     """
@@ -55,7 +55,7 @@ def construct_Line_object(
     order (int): The scenario-specific id for the Storage instance.
     line_dict (Dict[str,Any]): A dictionary containing the attributes of
         a single line object in `config/lines.csv`.
-    nodes_object_dict (DictType(int64, Node_InstanceType)): A typed dictionary of
+    nodes_object_dict (DictType(nbintp, Node_InstanceType)): A typed dictionary of
         all Node jitclass instances for the scenario. Key defined as Node.order.
 
     Returns:
@@ -159,7 +159,7 @@ def construct_new_Route_object(
     route_nodes.append(new_node)
     route_lines.append(new_line)
 
-    return Route(True, initial_node, route_nodes, route_lines, np.array([line_direction], dtype=np.int64), leg)
+    return Route(True, initial_node, route_nodes, route_lines, np.array([line_direction], dtype=npint), leg)
 
 
 def extend_route(
@@ -197,14 +197,14 @@ def extend_route(
     route_line_directions.append(line_direction)
 
     return Route(
-        True, route.initial_node, route_nodes, route_lines, np.array(route_line_directions, dtype=np.int64), leg
+        True, route.initial_node, route_nodes, route_lines, np.array(route_line_directions, dtype=npint), leg
     )
 
 
 def get_routes_for_node(
     initial_node: Node_InstanceType,
-    routes_typed_dict: DictType(UniTuple(int64, 2), ListType(Route_InstanceType)),
-    lines_object_dict: DictType(int64, Line_InstanceType),
+    routes_typed_dict: DictType(UniTuple(nbintp, 2), ListType(Route_InstanceType)),
+    lines_object_dict: DictType(nbintp, Line_InstanceType),
     leg: int,
 ) -> ListType(Route_InstanceType):
     """
@@ -217,11 +217,11 @@ def get_routes_for_node(
     Parameters:
     -------
     initial_node (Node_InstanceType): The destination of the route.
-    routes_typed_dict (DictType(UniTuple(int64,2), ListType(Route_InstanceType))):
+    routes_typed_dict (DictType(UniTuple(nbintp,2), ListType(Route_InstanceType))):
         A typed dictionary where values are lists of routes to the initial_node. The key
         is a tuple (intial_node.order, leg) so that routes of a specified length to a node
         can quickly be accessed.
-    lines_object_dict (DictType(int64, Line_InstanceType)): A typed dictionary of
+    lines_object_dict (DictType(nbintp, Line_InstanceType)): A typed dictionary of
         all Line jitclass instances for the scenario. Key defined as Line.order.
     leg (int): The total number of steps (i.e., lines) along the route objects for the
         list returned by this function.
@@ -263,9 +263,9 @@ def get_routes_for_node(
 
 def build_routes_typed_dict(
     networksteps_max: int,
-    nodes_object_dict: DictType(int64, Node_InstanceType),
-    lines_object_dict: DictType(int64, Line_InstanceType),
-) -> DictType(UniTuple(int64, 2), ListType(Route_InstanceType)):
+    nodes_object_dict: DictType(nbintp, Node_InstanceType),
+    lines_object_dict: DictType(nbintp, Line_InstanceType),
+) -> DictType(UniTuple(nbintp, 2), ListType(Route_InstanceType)):
     """
     Builds a typed dictionary where values are lists of routes to the initial_node. The key
     is a tuple (intial_node.order, leg) so that routes of a specified length to a node
@@ -275,18 +275,18 @@ def build_routes_typed_dict(
     -------
     networksteps_max (int): The maximum number of legs allowed in a route for a given scenario.
         Can be adjusted in `config/scenarios.csv`.
-    nodes_object_dict (DictType(int64, Node_InstanceType)): A typed dictionary of
+    nodes_object_dict (DictType(nbintp, Node_InstanceType)): A typed dictionary of
         all Node jitclass instances for the scenario. Key defined as Node.order.
-    lines_object_dict (DictType(int64, Line_InstanceType)): A typed dictionary of
+    lines_object_dict (DictType(nbintp, Line_InstanceType)): A typed dictionary of
         all Line jitclass instances for the scenario. Key defined as Line.order.
 
     Returns:
     -------
-    DictType(UniTuple(int64,2), ListType(Route_InstanceType)): A typed dictionary where values are
+    DictType(UniTuple(nbintp,2), ListType(Route_InstanceType)): A typed dictionary where values are
         lists of routes to the initial_node. The key is a tuple (intial_node.order, leg) so that
         routes of a specified length to a node can quickly be accessed.
     """
-    routes_typed_dict = TypedDict.empty(key_type=UniTuple(int64, 2), value_type=ListType(Route_InstanceType))
+    routes_typed_dict = TypedDict.empty(key_type=UniTuple(nbintp, 2), value_type=ListType(Route_InstanceType))
 
     for leg in range(networksteps_max):
         for node in nodes_object_dict.values():
@@ -297,7 +297,7 @@ def build_routes_typed_dict(
                 leg,
             )
 
-            routes_typed_dict[(node.order, leg)] = routes_typed_list
+            routes_typed_dict[(node.order, nbintp(leg))] = routes_typed_list
     return routes_typed_dict
 
 
@@ -329,12 +329,12 @@ def construct_Network_object(
     Network_InstanceType: A static instance of the Network jitclass.
     """
 
-    nodes = TypedDict.empty(key_type=int64, value_type=Node_InstanceType)
+    nodes = TypedDict.empty(key_type=nbintp, value_type=Node_InstanceType)
     for order in nodes_imported_dict:
         nodes[order] = construct_Node_object(order, nodes_imported_dict[order])
 
-    major_lines = TypedDict.empty(key_type=int64, value_type=Line_InstanceType)
-    minor_lines = TypedDict.empty(key_type=int64, value_type=Line_InstanceType)
+    major_lines = TypedDict.empty(key_type=nbintp, value_type=Line_InstanceType)
+    minor_lines = TypedDict.empty(key_type=nbintp, value_type=Line_InstanceType)
     order_major = 0
     order_minor = 0
     for idx in lines_imported_dict:

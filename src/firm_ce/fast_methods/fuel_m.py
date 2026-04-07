@@ -3,7 +3,7 @@ import numpy as np
 
 from firm_ce.common.constants import FASTMATH, TOLERANCE, BOUNDSCHECK
 from firm_ce.common.exceptions import raise_static_modification_error, raise_getting_unloaded_data_error
-from firm_ce.common.typing import float64, unicode_type, int64
+from firm_ce.common.typing import nbfloat, unicode_type, npfloat, nbintp, nbintp
 from firm_ce.common.jit_overload import njit
 from firm_ce.system.components import Fuel, Fuel_InstanceType
 
@@ -32,9 +32,9 @@ def create_dynamic_copy(
     Parameters:
     -------
     fuel_instance (Fuel_InstanceType): A static instance of the Fuel jitclass.
-    nodes_typed_dict (DictType(int64, Node_InstanceType)): A typed dictionary of
+    nodes_typed_dict (DictType(nbintp, Node_InstanceType)): A typed dictionary of
         all Node jitclass instances for the scenario. Key defined as Node.order.
-    lines_typed_dict (DictType(int64, Line_InstanceType)): A typed dictionary of
+    lines_typed_dict (DictType(nbintp, Line_InstanceType)): A typed dictionary of
         all Line jitclass instances for the scenario. Key defined as Line.order.
 
     Returns:
@@ -68,14 +68,14 @@ def allocate_memory(fuel_instance: Fuel_InstanceType, intervals_count: int) -> N
     intervals_count (int): The number of time intervals in the scenario, used to dimension arrays.
     """
     if len(fuel_instance.annual_limit) > 0:
-        fuel_instance.remaining_energy = np.zeros(intervals_count, dtype=float64)
+        fuel_instance.remaining_energy = np.zeros(intervals_count, dtype=npfloat)
     return None
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def load_data(
     fuel_instance: Fuel_InstanceType,
-    annual_limit: float64[:],
+    annual_limit: nbfloat[:],
 ) -> None:
     """
     Load the c annual constraint data to the Fuel instance. This is done before solving a Scenario.
@@ -83,7 +83,7 @@ def load_data(
     Parameters:
     -------
     fuel_instance (Fuel_InstanceType): An instance of the Fuel jitclass.
-    annual_limits (float64[:]): Array containing the annual limits for a flexible Fuel.
+    annual_limits (nbfloat[:]): Array containing the annual limits for a flexible Fuel.
         Each element provides the maximum annual generation (GWh) for a given year for the Fuel.
 
     Returns:
@@ -125,7 +125,7 @@ def unload_data(fuel_instance: Fuel_InstanceType) -> None:
     -------
     Attributes modified for the Fuel instance: data_status, annual_limit.
     """
-    fuel_instance.annual_limit = np.empty((0,), dtype=np.float64)
+    fuel_instance.annual_limit = np.empty((0,), dtype=npfloat)
     fuel_instance.data_status = False
     return None
 
@@ -134,7 +134,7 @@ def unload_data(fuel_instance: Fuel_InstanceType) -> None:
 def get_data(
     fuel_instance: Fuel_InstanceType,
     data_type: unicode_type,
-) -> float64[:]:
+) -> nbfloat[:]:
     """
     Gets the specified data_type from the Fuel instance.
 
@@ -145,7 +145,7 @@ def get_data(
 
     Returns:
     -------
-    float64[:]: The data array associated with data_type.
+    nbfloat[:]: The data array associated with data_type.
 
     Raises:
     -------
@@ -165,7 +165,7 @@ def get_data(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def get_annual_limit(
     fuel_instance: Fuel_InstanceType,
-    year: int64,
+    year: nbintp,
 ) -> None:
     return get_data(fuel_instance, "annual_limit")[year]
 
@@ -200,7 +200,7 @@ def assign_trickling_reserves(fuel_instance: Fuel_InstanceType) -> None:
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_deficit_block_bounds(
     fuel_instance: Fuel_InstanceType,
-    remaining_energy: float64,
+    remaining_energy: nbfloat,
 ) -> None:
     """
     Update the temporary minimum and maximum remaining energy values for the flexible Generator in the
@@ -212,7 +212,7 @@ def update_deficit_block_bounds(
     Parameters:
     -------
     fuel_instance (Fuel_InstanceType): An instance of the Fuel jitclass.
-    remaining_energy (float64): The remaining energy in a time interval that a flexible Generator has
+    remaining_energy (nbfloat): The remaining energy in a time interval that a flexible Generator has
         available for the calendar year such that it complies with its annual generation constraint.
 
     Returns:
@@ -231,7 +231,7 @@ def update_deficit_block_bounds(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_deficit_block(
     fuel_instance: Fuel_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     Upon resolving a deficit block, initialise the temporary remaining energy,
@@ -242,7 +242,7 @@ def initialise_deficit_block(
     Parameters:
     -------
     fuel_instance (Fuel_InstanceType): An instance of the Fuel jitclass.
-    interval (int64): Index for the first time interval immediately following the deficit block.
+    interval (nbintp): Index for the first time interval immediately following the deficit block.
         During unit committment for the deficit block, time intervals will decrease in value (reverse
         time).
 
@@ -263,7 +263,7 @@ def initialise_deficit_block(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def initialise_precharging_flags(
     fuel_instance: Fuel_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     Initialises the trickling flag for a flexible Generator once precharging in the lead-up to the deficit
@@ -275,7 +275,7 @@ def initialise_precharging_flags(
     Parameters:
     -------
     fuel_instance (Fuel_InstanceType): An instance of the Fuel jitclass.
-    interval (int64): Index for the first time interval of the deficit block (immediately following the
+    interval (nbintp): Index for the first time interval of the deficit block (immediately following the
         precharging period). Time intervals during the precharging period will decrease in value (reverse
         time).
 
@@ -296,7 +296,7 @@ def initialise_precharging_flags(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def update_precharging_flags(
     fuel_instance: Fuel_InstanceType,
-    interval: int64,
+    interval: nbintp,
 ) -> None:
     """
     At the start of a time interval within the precharging period, the remaining trickling reserves and
@@ -312,7 +312,7 @@ def update_precharging_flags(
     Parameters:
     -------
     fuel_instance (Fuel_InstanceType): An instance of the Fuel jitclass.
-    interval (int64): Index for the current time interval in the precharging period. Time intervals during
+    interval (nbintp): Index for the current time interval in the precharging period. Time intervals during
         the precharging period will decrease in value (reverse time).
 
     Returns:

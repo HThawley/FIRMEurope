@@ -5,6 +5,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from firm_ce.common.exceptions import ValidationError
+from firm_ce.common.typing import npfloat
 from firm_ce.fast_methods import generator_m, storage_m, node_m, fuel_m
 from firm_ce.io.file_manager import DataFile
 from firm_ce.system.components import Fleet_InstanceType
@@ -29,7 +30,7 @@ def select_datafile(
     limit_timesteps: int = None,
     yeartuple: tuple[int] = None,
     error_on_fail: bool = True,
-) -> NDArray[np.float64]:
+) -> NDArray[npfloat]:
     """
     Locates and returns the a data trace of a specified datafile_type associated with
     either a Generator or Node object based upon the object's name.
@@ -44,16 +45,16 @@ def select_datafile(
 
     Returns:
     -------
-    NDArray[np.float64]: A 1-dimensional numpy array containing the data trace for the
+    NDArray[npfloat]: A 1-dimensional numpy array containing the data trace for the
         specified datafile_type and object_name. If no trace was found, an empty array
         is returned.
     """
     matching_datafiles = [df for df in datafiles_imported_dict.values() if df.type == datafile_type]
 
-    trace = np.empty((0,), dtype=np.float64)
+    trace = np.empty((0,), dtype=npfloat)
     for datafile in matching_datafiles:
         if object_name in datafile.data.keys():
-            trace = np.array(datafile.data[object_name], dtype=np.float64)
+            trace = np.array(datafile.data[object_name], dtype=npfloat)
             if limit_timesteps is not None:
                 # debug supercedes yeartuple specified in scenario
                 trace = trim_with_timesteps(trace, limit_timesteps)
@@ -70,41 +71,41 @@ def select_datafile(
 
 
 def trim_with_timesteps(
-    data: NDArray[np.float64],
+    data: NDArray[npfloat],
     limit_timesteps: int,
-) -> NDArray[np.float64]:
+) -> NDArray[npfloat]:
     """
     Trims the data array to only include the first `limit_timesteps` entries.
 
     Parameters:
     -------
-    data (NDArray[np.float64]): The full data array.
+    data (NDArray[npfloat]): The full data array.
     limit_timesteps (int): The number of timesteps to retain.
 
     Returns:
     -------
-    NDArray[np.float64]: The trimmed data array.
+    NDArray[npfloat]: The trimmed data array.
     """
     return data[:limit_timesteps]
 
 
 def trim_with_years(
-    data: NDArray[np.float64],
-    year_trace: NDArray[np.float64],
+    data: NDArray[npfloat],
+    year_trace: NDArray[npfloat],
     yeartuple: tuple[int],
-) -> NDArray[np.float64]:
+) -> NDArray[npfloat]:
     """
     Trims the data array to only include entries within the specified year range.
 
     Parameters:
     -------
-    data (NDArray[np.float64]): The full data array.
-    year_trace (NDArray[np.float64]): An array indicating the year corresponding to each entry in `data`.
+    data (NDArray[npfloat]): The full data array.
+    year_trace (NDArray[npfloat]): An array indicating the year corresponding to each entry in `data`.
     yeartuple (tuple[int]): A tuple containing the first and last year to retain (inclusive).
 
     Returns:
     -------
-    NDArray[np.float64]: The trimmed data array.
+    NDArray[npfloat]: The trimmed data array.
     """
     firstyear, finalyear = yeartuple
     in_time_mask = np.ones(data.shape, np.bool_)

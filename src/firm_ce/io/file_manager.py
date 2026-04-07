@@ -162,7 +162,7 @@ class ResultFile:
         file_type (str): Identifier for the file (used as the filename base).
         target_directory (str): Directory where the file will be saved.
         header (List[str]): List of column headers for the CSV file.
-        data_array (Union[NDArray[np.float64], NDArray[np.int64]]): Data to
+        data_array (Union[NDArray[npfloat], NDArray[npint]]): Data to
             write into the CSV file.
         decimals (Union[int, None], optional): Number of decimal places to round
             data values to. If None, values are written without rounding.

@@ -5,28 +5,28 @@ import numpy as np
 
 from firm_ce.common.constants import JIT_ENABLED, LEAPDAYS
 from firm_ce.common.jit_overload import jitclass
-from firm_ce.common.typing import float64, int64
+from firm_ce.common.typing import nbfloat, npfloat, nbint, npint, nbintp
 from firm_ce.common.helpers import parse_comma_separated, parse_ditherable_hyperparameter
 
 
 if JIT_ENABLED:
     scenario_parameters_spec = [
-        ("resolution", float64),
-        ("interval_resolutions", float64[:]),
-        ("allowance", float64),
-        ("first_year", int64),
-        ("final_year", int64),
-        ("year_count", int64),
-        ("leap_year_count", int64),
-        ("year_first_t", int64[:]),
-        ("intervals_count", int64),
-        ("block_lengths", int64[:]),
-        ("node_count", int64),
-        ("fom_scalar", float64),
-        ("year_float", float64),
-        ("year_energy_demand", float64[:]),
-        ("mean_annual_demand_mwh", float64),
-        ("demand_sum_mwh", float64),
+        ("resolution", nbfloat),
+        ("interval_resolutions", nbfloat[:]),
+        ("allowance", nbfloat),
+        ("first_year", nbintp),
+        ("final_year", nbintp),
+        ("year_count", nbint),
+        ("leap_year_count", nbint),
+        ("year_first_t", nbintp[:]),
+        ("intervals_count", nbint),
+        ("block_lengths", nbint[:]),
+        ("node_count", nbint),
+        ("fom_scalar", nbfloat),
+        ("year_float", nbfloat),
+        ("year_energy_demand", nbfloat[:]),
+        ("mean_annual_demand_mwh", nbfloat),
+        ("demand_sum_mwh", nbfloat),
     ]
 else:
     scenario_parameters_spec = []
@@ -36,20 +36,20 @@ else:
 class ScenarioParameters:
     def __init__(
         self,
-        resolution: float64,
-        allowance: float64,
-        first_year: int64,
-        final_year: int64,
-        year_count: int64,
-        leap_year_count: int64,
-        year_first_t: int64[:],
-        intervals_count: int64,
-        node_count: int64,
+        resolution: nbfloat,
+        allowance: nbfloat,
+        first_year: nbintp,
+        final_year: nbintp,
+        year_count: nbint,
+        leap_year_count: nbint,
+        year_first_t: nbintp[:],
+        intervals_count: nbint,
+        node_count: nbint,
     ):
 
         self.resolution = resolution  # length of time interval in hours
         self.interval_resolutions = resolution * np.ones(
-            intervals_count, dtype=np.float64
+            intervals_count, dtype=npfloat
         )  # length of blocks in hours, for future 'simple' balancing_method
         self.allowance = allowance  # % annual demand allowed as unserved energy
         self.first_year = first_year  # YYYY
@@ -58,7 +58,7 @@ class ScenarioParameters:
         self.leap_year_count = leap_year_count if LEAPDAYS else 0
         self.year_first_t = year_first_t
         self.intervals_count = intervals_count
-        self.block_lengths = np.ones(intervals_count, dtype=np.int64)
+        self.block_lengths = np.ones(intervals_count, dtype=npint)
         self.node_count = node_count
         if LEAPDAYS:
             self.fom_scalar = (
@@ -67,7 +67,7 @@ class ScenarioParameters:
         else:
             self.fom_scalar = 1.0
         self.year_float = self.year_count * self.fom_scalar
-        self.year_energy_demand = np.zeros(self.year_count, dtype=np.float64)
+        self.year_energy_demand = np.zeros(self.year_count, dtype=npfloat)
         self.mean_annual_demand_mwh = 0.0
         self.demand_sum_mwh = 0.0
 

@@ -8,14 +8,14 @@ from typing import Dict, List, Tuple
 import numpy as np
 from numpy.typing import NDArray
 
-from firm_ce.common.constants import JIT_ENABLED
+from firm_ce.common.constants import JIT_ENABLED, BITDEPTH
 
-EvaluationRecord_Type = Tuple[str, str, float, float, float, NDArray[np.float64]]
+EvaluationRecord_Type = Tuple[str, str, float, float, float, NDArray[np.float64], NDArray[np.float32]]
 BroadOptimumVars_Type = Tuple[int, str, bool, str]
 BandCandidates_Type = Dict[str, Tuple[List[float], List[float]]]
 
 if JIT_ENABLED:
-    from numba.core.types import DictType, ListType, UniTuple, boolean, float64, int64, unicode_type
+    from numba.core.types import DictType, ListType, UniTuple, boolean, float64, float32, int64, int32, unicode_type
     from numba.typed.typeddict import Dict as TypedDict
     from numba.typed.typedlist import List as TypedList
 else:
@@ -24,11 +24,21 @@ else:
         @classmethod
         def __class_getitem__(cls, key):
             return NDArray[np.int64]
+        
+    class _Int32:
+        @classmethod
+        def __class_getitem__(cls, key):
+            return NDArray[np.int32]
 
     class _Float64:
         @classmethod
         def __class_getitem__(cls, key):
             return NDArray[np.float64]
+
+    class _Float32:
+        @classmethod
+        def __class_getitem__(cls, key):
+            return NDArray[np.float32]
 
     class _Boolean:
         @classmethod
@@ -41,14 +51,18 @@ else:
             return NDArray[np.unicode_]
 
     int64 = _Int64
+    int32 = _Int64
     float64 = _Float64
+    float32 = _Float64
     boolean = _Boolean
     unicode_type = _Unicode
 
     def UniTuple(ty, n: int):
         _map = {
             _Float64: float,
+            _Float32: float,
             _Int64: int,
+            _Int32: int,
             _Boolean: bool,
             _Unicode: str,
             float: float,
@@ -89,3 +103,21 @@ else:
         @staticmethod
         def empty_list(value_type=None):
             return TypedList(value_type)
+
+if BITDEPTH == 64:
+    nbfloat = float64
+    nbint = int64
+    nbintp = int64
+
+    npfloat = np.float64
+    npint = np.int64
+    npintp = np.int64
+
+if BITDEPTH == 32:
+    nbfloat = float32
+    nbint = int32
+    nbintp = int64  # native 64 bit indexing
+
+    npfloat = np.float32
+    npint = np.int32
+    npintp = np.int64  # native 64 bit indexing

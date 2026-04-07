@@ -2,6 +2,7 @@ import numpy as np
 from typing import Any
 from numpy.typing import NDArray
 
+from firm_ce.common.typing import npfloat
 from firm_ce.common.helpers import safe_divide_array
 
 
@@ -351,7 +352,7 @@ class Accessor:
         raise ValueError(f"Unknown asset type for efficiency retrival: {asset.name} ({asset.object_class})")
 
     # -- Traces --
-    def get_power_trace(self, asset: Any) -> NDArray[np.float64]:
+    def get_power_trace(self, asset: Any) -> NDArray[npfloat]:
         """
         Returns the power output time series for an object.
         """
@@ -380,13 +381,13 @@ class Accessor:
             case _:
                 raise ValueError(f"Unknown asset type for power retrieval: {asset.name} ({asset.unit_type})")
 
-    def get_imports_exports_trace(self, asset: Any) -> NDArray[np.float64]:
+    def get_imports_exports_trace(self, asset: Any) -> NDArray[npfloat]:
         """
         Returns the import/export trace of a node
         """
         return asset.imports_exports
 
-    def get_discharge_trace(self, asset: Any) -> NDArray[np.float64]:
+    def get_discharge_trace(self, asset: Any) -> NDArray[npfloat]:
         """
         Returns only the POSITIVE generation component (clipping pumping/charging).
         Useful for 'Energy Mix' charts where load is treated separately.
@@ -395,7 +396,7 @@ class Accessor:
         trace = self.get_power_trace(asset)
         return np.maximum(0, trace)
 
-    def get_charge_trace(self, asset: Any) -> NDArray[np.float64]:
+    def get_charge_trace(self, asset: Any) -> NDArray[npfloat]:
         """
         Returns only the NEGATIVE generation component (clipping pumping/charging).
         Useful for 'Energy Mix' charts where load is treated separately.
@@ -404,7 +405,7 @@ class Accessor:
         trace = self.get_power_trace(asset)
         return np.minimum(0, trace)
 
-    def get_spillage_trace(self, asset: Any) -> NDArray[np.float64]:
+    def get_spillage_trace(self, asset: Any) -> NDArray[npfloat]:
         """
         Returns the spillage power time series (MW) for nodes.
         """
@@ -412,7 +413,7 @@ class Accessor:
             raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Node and therefore has no spillage.")
         return asset.spillage * self.factor
 
-    def get_deficit_trace(self, asset: Any) -> NDArray[np.float64]:
+    def get_deficit_trace(self, asset: Any) -> NDArray[npfloat]:
         """
         Returns the deficit power time series (MW) for nodes.
         """
@@ -420,7 +421,7 @@ class Accessor:
             raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Node and therefore has no deficit.")
         return asset.deficits * self.factor
 
-    def get_transmission_trace(self, asset: Any) -> NDArray[np.float64]:
+    def get_transmission_trace(self, asset: Any) -> NDArray[npfloat]:
         """
         Returns the transmission power time series (MW) for lines.
         Positive values indicate flows from initial_node to terminal_node.
@@ -430,7 +431,7 @@ class Accessor:
             raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Line and therefore has no transmission power.")
         return asset.flows * self.factor
 
-    def get_inflow_trace(self, asset: Any) -> NDArray[np.float64]:
+    def get_inflow_trace(self, asset: Any) -> NDArray[npfloat]:
         """
         Return the inflow energy time series (MWh) for reservoir Storages.
         """
@@ -444,7 +445,7 @@ class Accessor:
             return asset.data * self.factor
         raise ValueError(f"Asset {asset.name} ({asset.object_class}) has inflows flag =False")
 
-    def get_storage_level_trace(self, asset: Any) -> NDArray[np.float64]:
+    def get_storage_level_trace(self, asset: Any) -> NDArray[npfloat]:
         """
         Returns the storage level time series (MWh) for storage units and reservoirs.
         """
@@ -452,7 +453,7 @@ class Accessor:
             raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not Storage and has no 'stored_energy' attr.")
         return asset.stored_energy * self.factor
 
-    def get_remaining_energy_trace(self, asset: Any) -> NDArray[np.float64]:
+    def get_remaining_energy_trace(self, asset: Any) -> NDArray[npfloat]:
         """
         Returns the remaining energy (GWh) for fuels.
         """
@@ -461,7 +462,7 @@ class Accessor:
                              "and has no 'remaining_energy' attr.")
         return asset.remaining_energy * self.factor
 
-    def get_nodal_generation_trace(self, asset: Any) -> NDArray[np.float64]:
+    def get_nodal_generation_trace(self, asset: Any) -> NDArray[npfloat]:
         """
         get time series of total supply at the node of an asset (including the asset's contribution)
         gets generation only. charging is not included, only discharging.
@@ -478,7 +479,7 @@ class Accessor:
         )
         return node_generation * self.factor
 
-    def get_nominal_curtailment_trace(self, asset: Any) -> NDArray[np.float64]:
+    def get_nominal_curtailment_trace(self, asset: Any) -> NDArray[npfloat]:
         """
         get time series of curtailment for a given asset (calculated by apportioning spillage)
         nominal curtailment is all spillage apportioned according to the asset's share of generation at the node
@@ -490,7 +491,7 @@ class Accessor:
         curtailment = spillage * safe_divide_array(asset_generation, nodal_generation)
         return curtailment
 
-    def get_expected_curtailment_trace(self, asset: Any) -> NDArray[np.float64]:
+    def get_expected_curtailment_trace(self, asset: Any) -> NDArray[npfloat]:
         """
         Returns the expected curtailment time series for an asset.
         Calculated based on priority order (storage/flexible, then wind/solar/ror, then hydro reservoir, then others)
@@ -573,7 +574,7 @@ class Accessor:
         # TODO: line losses
         return self.get_zero()
 
-    def get_nominal_curtailment_net(self, asset: Any) -> NDArray[np.float64]:
+    def get_nominal_curtailment_net(self, asset: Any) -> NDArray[npfloat]:
         """
         get time series of curtailment for a given asset (calculated by apportioning spillage)
         nominal curtailment is all spillage apportioned according to the asset's share of generation at the node
@@ -581,7 +582,7 @@ class Accessor:
         curtailment = self.get_nominal_curtailment_trace(asset)
         return np.sum(curtailment) * self.resolution
 
-    def get_post_curtailment_energy_net(self, asset: Any) -> NDArray[np.float64]:
+    def get_post_curtailment_energy_net(self, asset: Any) -> NDArray[npfloat]:
         trace = self.get_post_curtailment_power_trace(asset)
         return np.sum(trace) * self.resolution
 
