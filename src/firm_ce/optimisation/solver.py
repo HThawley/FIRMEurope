@@ -3,6 +3,7 @@ import csv
 import os
 from typing import Dict, Tuple, Union, Callable, TYPE_CHECKING
 from datetime import datetime
+import json
 
 import numpy as np
 from numpy.typing import NDArray
@@ -126,12 +127,8 @@ class Solver:
             evaluate_vectorised_xs, self.get_differential_evolution_args()
         )[0, :]  # just cost + penalties * penalty_multiplier
 
-    def generate_alternatives(self) -> None:
-        self.logger.info("[MHMGA] Initialising MGA algorithm.")
-
-        # fkwargs = self.get_mhmga_kwargs()
+    def instantiate_mhmga_algorithm(self, log_path: str) -> MGAProblem:
         fargs = self.get_differential_evolution_args()
-        jacobian = self.get_approximate_jacobian()
 
         problem = OptimizationProblem(
             objective=mga_parallel_wrapper,
@@ -144,21 +141,31 @@ class Solver:
             known_optimum=self.decision_x0,
         )
 
-        path_name = os.path.join(self.mga_log_dir, "mga_log")
-
-        # create callback folder
-        results_dir = os.path.join("results", "temp")
-        os.makedirs(results_dir, exist_ok=True)
-
         algorithm = MGAProblem(
             problem=problem,
-            log_dir=path_name,
+            log_dir=log_path,
             log_freq=self.config.mga_log_freq,
             random_seed=None,
             parallelize=False,  # we will implement parallelisation independently
             callback=mga_callback,
             include_obj_in_fitness=True,
         )
+        return algorithm
+
+    def generate_alternatives(self) -> None:
+        self.logger.info("[MHMGA] Initialising MGA algorithm.")
+
+        jacobian = self.get_approximate_jacobian()
+        path_name = os.path.join(self.mga_log_dir, "mga_log")
+
+        # create callback folder
+        results_dir = os.path.join("results", "temp")
+        os.makedirs(results_dir, exist_ok=True)
+
+        self._write_mhmga_config_summary()
+
+        algorithm = self.instantiate_mhmga_algorithm(path_name)
+
         algorithm.add_niches(num_niches=self.config.mga_start_niches)
         self.logger.info(f"[MHMGA] MGA algorithm initialised with {self.config.mga_start_niches} niches.")
 
@@ -196,6 +203,27 @@ class Solver:
             self.logger.info("[MHMGA] MGA complete. Results saved.")
 
         self.result = algorithm.population.optima_points[0]
+
+    def _write_mhmga_config_summary(self) -> None:
+        """Writes a JSON summary of MHMGA hyperparameters to the solution directory."""
+        summary_path = os.path.join(self.solution_dir, "mhmga_config.json")
+
+        mhmga_config = {}
+        for key, value in self.config.__dict__.items():
+            if key.startswith("mga_"):
+                # Convert numpy arrays to lists for JSON serialization
+                if isinstance(value, np.ndarray):
+                    mhmga_config[key] = value.tolist()
+                else:
+                    mhmga_config[key] = value
+
+        # Inject structural data possibly relevant for loading populations later
+        mhmga_config["ndim"] = len(self.lower_bounds)
+        mhmga_config["lower_bounds"] = self.lower_bounds.tolist()
+        mhmga_config["upper_bounds"] = self.upper_bounds.tolist()
+
+        with open(summary_path, "w") as f:
+            json.dump(mhmga_config, f, indent=4)
 
     def save_mga_results(self, results: Dict) -> None:
         filepath = os.path.join(self.mga_log_dir, "mga_alternatives.csv")
@@ -377,6 +405,58 @@ class Solver:
         jacobian = np.array(jacobian, dtype=np.float64)
         jacobian /= (self.parameters_static.mean_annual_demand_mwh)  # $/MWh
         return jacobian
+
+    def inspect_mhmga_recombination(
+        self,
+        starting_population: np.ndarray,
+        objectives: np.ndarray = None,
+        constraints: np.ndarray = None,
+        evaluate_offspring: bool = True,
+        **hyperparameters,
+    ) -> None:
+        """
+        Runs the reocmbination process with provided population as parents and displays resulting offspring.
+        Used for hyperparameter tuning.
+        """
+        self.logger.info("[MHMGA] Initialising MGA algorithm for recombination inspection.")
+        jacobian = self.get_approximate_jacobian()
+
+        algorithm = self.instantiate_mhmga_algorithm(None)
+        algorithm.add_niches(num_niches=1)
+
+        config_hyperparameters = dict(
+            max_iter=0,
+            pop_size=self.config.mga_pop_size[0],
+            elite_count=self.config.mga_elite_count[0],
+            tourn_count=self.config.mga_tourn_count[0],
+            tourn_size=self.config.mga_tourn_size[0],
+            mutation_prob=self.config.mga_mutation_prob[0],
+            mutation_sigma=self.config.mga_mutation_sigma[0],
+            crossover_prob=self.config.mga_crossover_prob[0],
+            niche_elitism=self.config.mga_niche_elitism[0],
+            noptimal_rel=self.config.mga_noptimal_rel[0],
+            noptimal_abs=self.config.mga_noptimal_abs[0],
+            violation_factor=PENALTY_MULTIPLIER,
+            mutation_scaler=np.abs(jacobian),
+            objective_scaler=1.0,
+        )
+
+        config_hyperparameters.update(hyperparameters)
+
+        algorithm.update_hyperparameters(**config_hyperparameters)
+
+        self.logger.info("[MHMGA] Beginning recombination inspection.")
+
+        result = algorithm.inspect_recombination(
+            starting_points=starting_population,
+            point_objectives=objectives,
+            point_constraints=constraints,
+            evaluate_offspring=evaluate_offspring,
+        )
+
+        self.logger.info("[MHMGA] Finished recombination inspection. Returning results.")
+
+        return result
 
     def capacity_expansion(self):
         pass

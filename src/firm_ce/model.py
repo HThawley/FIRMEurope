@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import List
 
+from numba import np
+
 from firm_ce.common.constants import DEBUG
 from firm_ce.common.exceptions import ValidationError
 from firm_ce.io.data_model import ModelData
@@ -238,3 +240,38 @@ class Model:
                 self.mhmga(scenario)
 
         return None
+
+    def inspect_recombination(
+        self,
+        scenario_name: str,
+        starting_population: np.ndarray,
+        objectives: np.ndarray = None,
+        constraints: np.ndarray = None,
+        evaluate_offspring: bool = True,
+        **hyperparameters,
+    ) -> dict:
+        scenario = None
+        for s in self.scenarios.values():
+            if s.name.lower() == scenario_name.lower():
+                scenario = s
+                break
+
+        if scenario is None:
+            raise ValueError(f"Scenario '{scenario_name}' not found.")
+
+        scenario.logger.info(f"[Inspect] Loading datafiles for {scenario.name}...")
+        scenario.load_datafiles(self.datafile_filenames_dict, self.data_directory)
+
+        results = scenario.inspect_mhmga_recombination(
+            self.config,
+            starting_population,
+            objectives,
+            constraints,
+            evaluate_offspring,
+            **hyperparameters,
+        )
+
+        scenario.unload_datafiles()
+        scenario.logger.info(f"[Inspect] Completed for {scenario.name}.")
+
+        return results

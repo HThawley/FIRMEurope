@@ -6,6 +6,7 @@ from warnings import warn
 
 from firm_ce.analysis.accessor import Accessor
 from firm_ce.common.constants import VALIDATION_TOL
+from firm_ce.optimisation.single_time import evaluate
 
 
 class ValidationWarning(UserWarning):
@@ -13,17 +14,13 @@ class ValidationWarning(UserWarning):
 
 
 class Validation:
-    def __init__(self, scenario, statistics_attr="statistics"):
-        if not hasattr(scenario, statistics_attr):
-            raise RuntimeError("Run statistics before validating!")
+    def __init__(self, solution, results_dir):
 
-        self.statistics = getattr(scenario, statistics_attr)
-        if not self.statistics.statistics_generated:
-            raise RuntimeError("Statistics must be generated before running Validation.")
-
-        self.solution = self.statistics.solution
+        self.solution = solution
         if getattr(self.solution, "evaluated", False) is False:
-            raise RuntimeError("Solution must be evaluated before validation.")
+            evaluate(solution)
+
+        self.results_dir = results_dir
 
         self.accessor = Accessor(self.solution, 1.0)
         self.verbose = True
@@ -66,7 +63,7 @@ class Validation:
 
     def dump_logs(self, filename: str = "validation_report.txt") -> None:
         """Dumps formatted logs to a human-readable text file."""
-        filepath = os.path.join(self.statistics.results_directory, filename)
+        filepath = os.path.join(self.results_dir, filename)
 
         with open(filepath, "w") as f:
             f.write("=" * 70 + "\n")
@@ -169,7 +166,7 @@ class Validation:
         nodes = self.solution.network.nodes
 
         # Pre-allocate zero arrays for rapid vectorized nodal summation
-        node_balances = {n.id: np.zeros_like(n.data, dtype=np.float64) for n in nodes.values()}
+        node_balances = {n.id: np.zeros_like(n.data) for n in nodes.values()}
 
         for node in nodes.values():
             node_balances[node.id] -= self.accessor.get_power_trace(node)

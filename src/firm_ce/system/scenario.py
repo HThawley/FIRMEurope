@@ -278,6 +278,24 @@ class Scenario:
             x_index += 1
         return None
 
+    def inspect_mhmga_recombination(
+        self,
+        config: ModelConfig,
+        starting_population: np.ndarray,
+        objectives: np.ndarray = None,
+        constraints: np.ndarray = None,
+        evaluate_offspring: bool = True,
+        **hyperparameters,
+    ) -> dict:
+        solver = Solver(self, config)
+        return solver.inspect_mhmga_recombination(
+            starting_population,
+            objectives,
+            constraints,
+            evaluate_offspring,
+            **hyperparameters,
+        )
+
     def solve(self, config: ModelConfig) -> OptimizeResult:
         self.create_solution_directory()
 
