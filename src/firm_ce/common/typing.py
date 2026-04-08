@@ -20,51 +20,33 @@ if JIT_ENABLED:
     from numba.typed.typedlist import List as TypedList
 else:
 
-    class _Int64:
-        @classmethod
-        def __class_getitem__(cls, key):
-            return NDArray[np.int64]
-        
-    class _Int32:
-        @classmethod
-        def __class_getitem__(cls, key):
-            return NDArray[np.int32]
+    def _make_mock_type(np_type):
+        class MockType:
+            def __new__(cls, value=0):
+                return np_type(value)
 
-    class _Float64:
-        @classmethod
-        def __class_getitem__(cls, key):
-            return NDArray[np.float64]
+            @classmethod
+            def __class_get_item__(cls, key):
+                return NDArray[np_type]
 
-    class _Float32:
-        @classmethod
-        def __class_getitem__(cls, key):
-            return NDArray[np.float32]
+        MockType.__name__ = f"_{np_type.__name__.capitalize()}"
+        return MockType
 
-    class _Boolean:
-        @classmethod
-        def __class_getitem__(cls, key):
-            return NDArray[np.bool_]
-
-    class _Unicode:
-        @classmethod
-        def __class_getitem__(cls, key):
-            return NDArray[np.unicode_]
-
-    int64 = _Int64
-    int32 = _Int64
-    float64 = _Float64
-    float32 = _Float64
-    boolean = _Boolean
-    unicode_type = _Unicode
+    int64 = _make_mock_type(np.int64)
+    int32 = _make_mock_type(np.int32)
+    float64 = _make_mock_type(np.float64)
+    float32 = _make_mock_type(np.float32)
+    boolean = _make_mock_type(np.bool_)
+    unicode_type = _make_mock_type(np.unicode_)
 
     def UniTuple(ty, n: int):
         _map = {
-            _Float64: float,
-            _Float32: float,
-            _Int64: int,
-            _Int32: int,
-            _Boolean: bool,
-            _Unicode: str,
+            float64: float,
+            float32: float,
+            int64: int,
+            int32: int,
+            boolean: bool,
+            unicode_type: str,
             float: float,
             int: int,
             bool: bool,
