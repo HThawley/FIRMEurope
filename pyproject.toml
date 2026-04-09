@@ -16,6 +16,8 @@ dependencies = [
     "seaborn>=0.13",
     "geopandas>=1.1",
     "matplotlib>=3.10",
+    "polars>=1.0",
+    "pyarrow>=23.0.1",
 ]
 authors = [
     {name = "Timothy Webster", email = "Timothy.Weber@anu.edu.au"},

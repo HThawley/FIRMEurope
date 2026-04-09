@@ -306,6 +306,65 @@ class Accessor:
             case _:
                 raise ValueError(f"Unknown attribute for build limits retrieval: '{attribute}'")
 
+    @staticmethod
+    def get_annualised_build_cost(asset: Any, errors: str = 'raise') -> float:
+        """Safe retrieval of total annualised capital costs (Power + Energy)."""
+        if hasattr(asset, "lt_costs"):
+            p_cost = getattr(asset.lt_costs, "annualised_build_p", 0.0)
+            e_cost = getattr(asset.lt_costs, "annualised_build_e", 0.0)
+            return p_cost + e_cost
+
+        if errors == 'raise':
+            raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
+        elif errors == 'coerce':
+            return np.nan
+        raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+
+    @staticmethod
+    def get_fixed_om_cost(asset: Any, errors: str = 'raise') -> float:
+        """Safe retrieval of fixed operations & maintenance costs."""
+        if hasattr(asset, "lt_costs"):
+            return getattr(asset.lt_costs, "fom", 0.0)
+
+        if errors == 'raise':
+            raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
+        elif errors == 'coerce':
+            return np.nan
+        raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+
+    @staticmethod
+    def get_variable_om_cost(asset: Any, errors: str = 'raise') -> float:
+        """Safe retrieval of variable operations & maintenance costs."""
+        if hasattr(asset, "lt_costs"):
+            return getattr(asset.lt_costs, "vom", 0.0)
+
+        if errors == 'raise':
+            raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
+        elif errors == 'coerce':
+            return np.nan
+        raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+
+    @staticmethod
+    def get_fuel_cost(asset: Any, errors: str = 'raise') -> float:
+        """Safe retrieval of total fuel costs."""
+        if hasattr(asset, "lt_costs"):
+            return getattr(asset.lt_costs, "fuel", 0.0)
+
+        if errors == 'raise':
+            raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
+        elif errors == 'coerce':
+            return np.nan
+        raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+
+    def get_all_costs(self, asset: Any, errors: str = 'raise') -> dict[str, float]:
+        """Returns a dictionary containing all standard long-term costs for an asset."""
+        return {
+            "Annualised Build": self.get_annualised_build_cost(asset, errors=errors),
+            "Fixed O&M": self.get_fixed_om_cost(asset, errors=errors),
+            "Variable O&M": self.get_variable_om_cost(asset, errors=errors),
+            "Fuel Cost": self.get_fuel_cost(asset, errors=errors)
+        }
+
     # -- Other static attributes --
     @staticmethod
     def get_charge_efficiency(asset: Any) -> float:

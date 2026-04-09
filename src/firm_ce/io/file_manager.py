@@ -1,9 +1,12 @@
+import os
 from pathlib import Path
+import shutil
 from typing import Any, Dict, Union
 from numbers import Number
 
 # import numpy as np
 import pandas as pd
+import polars as pl
 from numpy.typing import NDArray
 
 
@@ -149,7 +152,7 @@ class ResultFile:
         self,
         report: str,
         target_directory: str,
-        data: pd.DataFrame,
+        data: Union[pd.DataFrame, pl.DataFrame, pl.LazyFrame],
         decimals: Union[int, None] = None,
         file_ext: str = "csv",
         write_kwargs: dict = None,
@@ -183,8 +186,12 @@ class ResultFile:
         self.data = data
         self.write_kwargs = write_kwargs if write_kwargs is not None else {}
 
+        self._is_polars = isinstance(self.data, (pl.DataFrame, pl.LazyFrame))
+        self._is_lazy = isinstance(self.data, pl.LazyFrame)
+
     def __repr__(self) -> str:
-        return f"ResultFile ({self.report!r})"
+        backend = "Polars Lazy" if self._is_lazy else "Polars" if self._is_polars else "Pandas"
+        return f"ResultFile ({self.report!r}) [{backend}]"
 
     def _round_value(self, value):
         if self.decimals is None:
@@ -196,10 +203,35 @@ class ResultFile:
         except (TypeError, ValueError):
             return value
 
-    def _round_data(self) -> pd.DataFrame:
+    def _apply_rounding(self):
         if self.decimals is None:
-            return self.data
-        return self.data.map(self._round_value)
+            return
+
+        if self._is_polars:
+            self.data = self.data.with_columns(
+                pl.selectors.numeric().round(self.decimals)
+            )
+        else:
+            self.data = self.data.map(self._round_value)
+
+    def _get_multiindex_headers(self, columns: list[str], delimiter: str) -> list[list[str]]:
+        """Parses delimited strings into a 2D list for multi-row CSV writing."""
+        index_col = columns[0]
+        data_cols = columns[1:]
+        levels = len(data_cols[0].split(delimiter))
+        header_rows = [[] for _ in range(levels)]
+
+        for col in columns:
+            if col == index_col:
+                for i in range(levels):
+                    header_rows[i].append("")  # Blank top-left corners
+            else:
+                parts = col.split(delimiter)
+                if len(parts) != levels:
+                    raise ValueError(f"Column '{col}' does not match expected depth {levels}")
+                for i in range(levels):
+                    header_rows[i].append(parts[i])
+        return header_rows
 
     def write(self, **write_kwargs):
         """
@@ -221,10 +253,12 @@ class ResultFile:
             self.write_csv(**write_kwargs)
         elif self.file_ext == "xlsx":
             self.write_xlsx(**write_kwargs)
+        elif self.file_ext == "parquet":
+            self.write_parquet(**write_kwargs)
         # elif self.file_ext == "json":
             # self.write_json()
         else:
-            raise NotImplementedError("Only 'csv', 'xlsx' are currently supported.")
+            raise NotImplementedError("Only 'csv', 'xlsx', 'parquet' are currently supported.")
 
     def write_csv(self, **write_kwargs):
         """
@@ -244,25 +278,45 @@ class ResultFile:
         Creates a CSV file in target_directory with the name
         <report>.csv and prints a confirmation message.
         """
-        default_kwargs = {
-            "header": False,
-            "index": True,
-            "mode": "x",
-        }
-        for k, v in self.write_kwargs.items():
-            # overwrite default kwargs with user-supplied kwargs
-            default_kwargs[k] = v
-        for k, v in write_kwargs.items():
-            # overwrite __init__ supplied kwargs with user-supplied kwargs
-            default_kwargs[k] = v
+        self.write_kwargs.update(write_kwargs)
+        self._apply_rounding()
 
-        if self.decimals is not None:
-            self.data = self._round_data()
+        delimiter = self.write_kwargs.pop("multiindex_delimiter", None)
 
-        self.data.to_csv(self.file_path, **default_kwargs)
+        if delimiter and self._is_polars:
+            columns = self.data.collect_schema().names() if self._is_lazy else self.data.columns
+            header_rows = self._get_multiindex_headers(columns, delimiter)
+
+            with open(self.file_path, "w") as f:
+                for row in header_rows:
+                    f.write(",".join(row) + "\n")
+
+            temp_filepath = self.file_path + ".tmp"
+
+            if self._is_lazy:
+                self.data.sink_csv(temp_filepath, include_header=False)
+            else:
+                self.data.write_csv(temp_filepath, include_header=False)
+
+            with open(self.file_path, "a") as fout:
+                with open(temp_filepath, "r") as fin:
+                    shutil.copyfileobj(fin, fout)
+
+            os.remove(temp_filepath)
+
+        else:
+            default_kwargs = {"include_header": True} if self._is_polars else {"header": False, "index": True, "mode": "x"}
+            default_kwargs.update(self.write_kwargs)
+            safe_kwargs = {k: v for k, v in default_kwargs.items() or not self._is_polars}
+
+            if self._is_lazy:
+                self.data.sink_csv(self.file_path, **safe_kwargs)
+            elif self._is_polars:
+                self.data.write_csv(self.file_path, **safe_kwargs)
+            else:
+                self.data.to_csv(self.file_path, **safe_kwargs)
 
         print(f"Saved {self.report} to {self.target_directory}")
-        return None
 
     def write_xlsx(self, **write_kwargs):
         """
@@ -282,27 +336,62 @@ class ResultFile:
         Creates a xlsx file in target_directory with the name
         <report>.xlsx and prints a confirmation message.
         """
-        default_kwargs = {
-            "header": False,
-            "index": True,
-            "mode": "x",
-            "sheet_name": self.report,
-        }
-        for k, v in self.write_kwargs.items():
-            # overwrite default kwargs with user-supplied kwargs
-            default_kwargs[k] = v
-        for k, v in write_kwargs.items():
-            # overwrite __init__ supplied kwargs with user-supplied kwargs
-            default_kwargs[k] = v
+        self.write_kwargs.update(write_kwargs)
+        self._apply_rounding()
 
-        if self.decimals is not None:
-            self.data = self._round_data()
+        delimiter = self.write_kwargs.pop("multiindex_delimiter", None)
 
-        with pd.ExcelWriter(self.file_path, mode=default_kwargs.pop("mode")) as writer:
-            self.data.to_excel(writer, **default_kwargs)
+        if self._is_polars:
+            df = self.data.collect() if self._is_lazy else self.data
+
+            if delimiter:
+                # Convert to Pandas to handle visual Excel MultiIndex writing
+                df_pd = df.to_pandas()
+                index_col = df_pd.columns[0]
+                df_pd = df_pd.set_index(index_col)
+                df_pd.columns = pd.MultiIndex.from_tuples([tuple(c.split(delimiter)) for c in df_pd.columns])
+
+                with pd.ExcelWriter(self.file_path, mode=self.write_kwargs.get("mode", "x")) as writer:
+                    df_pd.to_excel(writer, sheet_name=self.report)
+            else:
+                df.write_excel(self.file_path, worksheet=self.report)
+        else:
+            default_kwargs = {"header": False, "index": True, "mode": "x", "sheet_name": self.report}
+            default_kwargs.update(self.write_kwargs)
+            with pd.ExcelWriter(self.file_path, mode=default_kwargs.pop("mode")) as writer:
+                self.data.to_excel(writer, **default_kwargs)
 
         print(f"Saved {self.report} to {self.target_directory}")
-        return None
+
+    def write_parquet(self, **write_kwargs):
+        """
+        Write the data to a Parquet file.
+
+        Multi-line headers are possible.
+
+        Returns:
+        -------
+        None.
+
+        Side-effects:
+        ------------
+        Creates a parquet file in target_directory with the name
+        <report>.parquet and prints a confirmation message.
+        """
+        self.write_kwargs.update(write_kwargs)
+        self._apply_rounding()
+
+        # Strip multiindex arguments as they are irrelevant for Parquet
+        self.write_kwargs.pop("multiindex_delimiter", None)
+
+        if self._is_lazy:
+            self.data.sink_parquet(self.file_path, **self.write_kwargs)
+        elif self._is_polars:
+            self.data.write_parquet(self.file_path, **self.write_kwargs)
+        else:
+            self.data.to_parquet(self.file_path, **self.write_kwargs)
+
+        print(f"Saved {self.report} to {self.target_directory}")
 
 
 def import_config_csvs(config_directory: str) -> Dict[str, Any]:

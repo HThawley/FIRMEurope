@@ -111,7 +111,7 @@ class Solution:
         self.evaluated = False
         self.annual_cost = 0.0
         self.lcoe = 0.0
-        self.x_lcoe = np.empty(len(x), nbfloat)
+        self.x_lcoe = np.zeros(len(x), nbfloat)
         self.penalties = 0.0
 
         # These are static jitclass instances. It is UNSAFE to modify these
@@ -218,17 +218,26 @@ def calculate_fixed_costs(
         Solution.network.major_lines, Solution.network.minor_lines: lt_costs.
     Attributes modified for LTCosts instances referenced in the lt_costs attributes: fom, annualised_build.
     """
+    # use a small accumulator to help mitigate float32 precision loss when using float32
+    acc = 0.0
     for generator in solution.fleet.generators.values():
-        solution.annual_cost += generator_m.calculate_fixed_costs(generator, include_existing)
+        acc += generator_m.calculate_fixed_costs(generator, include_existing)
+    solution.annual_cost += acc
 
+    acc = 0.0
     for storage in solution.fleet.storages.values():
-        solution.annual_cost += storage_m.calculate_fixed_costs(storage, include_existing)
+        acc += storage_m.calculate_fixed_costs(storage, include_existing)
+    solution.annual_cost += acc
 
+    acc = 0.0
     for line in solution.network.major_lines.values():
-        solution.annual_cost += line_m.calculate_fixed_costs(line, include_existing)
+        acc += line_m.calculate_fixed_costs(line, include_existing)
+    solution.annual_cost += acc
 
+    acc = 0.0
     for line in solution.network.minor_lines.values():
-        solution.annual_cost += line_m.calculate_fixed_costs(line, include_existing)
+        acc += line_m.calculate_fixed_costs(line, include_existing)
+    solution.annual_cost += acc
 
     return None
 
@@ -263,17 +272,26 @@ def calculate_variable_costs(solution: Solution_InstanceType) -> None:
         solution.static.interval_resolutions,
     )
 
+    # use a smaller accumulator to help mitigate float32 precision loss when using float32
+    acc = 0.0
     for generator in solution.fleet.generators.values():
-        solution.annual_cost += generator_m.calculate_variable_costs(generator, solution.static.year_float)
+        acc += generator_m.calculate_variable_costs(generator, solution.static.year_float)
+    solution.annual_cost += acc
 
+    acc = 0.0
     for storage in solution.fleet.storages.values():
-        solution.annual_cost += storage_m.calculate_variable_costs(storage, solution.static.year_float)
+        acc += storage_m.calculate_variable_costs(storage, solution.static.year_float)
+    solution.annual_cost += acc
 
+    acc = 0.0
     for line in solution.network.major_lines.values():
-        solution.annual_cost += line_m.calculate_variable_costs(line, solution.static.year_float)
+        acc += line_m.calculate_variable_costs(line, solution.static.year_float)
+    solution.annual_cost += acc
 
+    acc = 0.0
     for line in solution.network.minor_lines.values():
-        solution.annual_cost += line_m.calculate_variable_costs(line, solution.static.year_float)
+        acc += line_m.calculate_variable_costs(line, solution.static.year_float)
+    solution.annual_cost += acc
 
     return None
 

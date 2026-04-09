@@ -17,18 +17,11 @@ from firm_ce.analysis.statistics import Statistics
 from firm_ce.analysis.validate import Validation
 from firm_ce.analysis.display import Display
 
-RUN_MODE = "new"
 
-start_time = time.time()
-model = Model(results_mode=RUN_MODE)
-model_build_time = time.time()
-print(f"Model build time: {model_build_time - start_time:.4f} seconds")
-
-def run_statistics(scenario):
-    scenario.solution_dir = scenario.solution_dir.replace("full", "simple")
+def run_statistics(scenario, run_mode):
     scenario.load_datafiles(model.datafile_filenames_dict, model.data_directory)
 
-    if RUN_MODE == "new":
+    if run_mode == "new":
         if scenario.x0.size == 0:
             print(f"skipping {scenario.name} as no initial guess provided")
             scenario.unload_datafiles()
@@ -44,7 +37,7 @@ def run_statistics(scenario):
             scenario.unload_datafiles()
             raise FileNotFoundError("Could not find x.csv. Has the solution been run?")
 
-    print(f"Instantiating statistics for scenario: {scenario.name}")
+    print(f"Instantiating statistics for scenario: '{scenario.name}'")
     scenario.statistics = Statistics(
         x,
         scenario.static,
@@ -62,24 +55,36 @@ def run_statistics(scenario):
     scenario.statistics.write_results()
 
     print(f"Validating solution {scenario.name}")
-    scenario.validation = Validation(scenario)
+    scenario.validation = Validation(scenario.statistics.solution, scenario.solution_dir)
     scenario.validation.validate(verbose=True)
     scenario.validation.dump_logs()
 
     print(f"Generating plots {scenario.name}")
     display = Display(scenario, model.config)
-    display.plot_energy_mix(mode="atlas", chart_type="bar", indices=[0, 1, 2])
+
+    display.plot_energy_mix(atlas=True, chart_type="bar", indices=[0, 1, 2])
+    display.plot_energy_mix(atlas=True, delta=True, chart_type="bar", indices=[0, 1, 2])
     display.plot_energy_mix(curtailment=False, alternative=2)
     display.plot_energy_mix(curtailment=True)
     display.plot_power_capacity()
     display.plot_power_capacity(build="existing")
     display.plot_power_capacity(build="new_build")
 
+    # raise KeyboardInterrupt
+
     scenario.unload_datafiles()
     return None
 
 
-for scenario in model.scenarios.values():
-    run_statistics(scenario)
+if __name__ == "__main__":
 
-    
+    RUN_MODE = "latest"
+
+    start_time = time.time()
+    model = Model(results_mode=RUN_MODE)
+    model_build_time = time.time()
+    print(f"Model build time: {model_build_time - start_time:.4f} seconds")
+
+    for name in ("test",):
+        scenario = model.scenarios[name]
+        run_statistics(scenario, RUN_MODE)
