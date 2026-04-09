@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List
 
-from numba import np
+import numpy as np
 
 from firm_ce.common.constants import DEBUG
 from firm_ce.common.exceptions import ValidationError

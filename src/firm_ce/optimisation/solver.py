@@ -102,6 +102,8 @@ class Solver:
         return kwargs
 
     def run_differential_evolution(self, objective_function: Callable, args: Tuple) -> OptimizeResult:
+        clear_callback_files()
+        
         result = differential_evolution(
             x0=self.decision_x0,
             func=objective_function,
@@ -127,7 +129,7 @@ class Solver:
             evaluate_vectorised_xs, self.get_differential_evolution_args()
         )[0, :]  # just cost + penalties * penalty_multiplier
 
-    def instantiate_mhmga_algorithm(self, log_path: str) -> MGAProblem:
+    def instantiate_mhmga_algorithm(self, log_path: str, init_callback: bool) -> MGAProblem:
         fargs = self.get_differential_evolution_args()
 
         problem = OptimizationProblem(
@@ -150,6 +152,10 @@ class Solver:
             callback=mga_callback,
             include_obj_in_fitness=True,
         )
+
+        if init_callback:
+            clear_callback_files()
+
         return algorithm
 
     def generate_alternatives(self) -> None:
@@ -158,13 +164,9 @@ class Solver:
         jacobian = self.get_approximate_jacobian()
         path_name = os.path.join(self.mga_log_dir, "mga_log")
 
-        # create callback folder
-        results_dir = os.path.join("results", "temp")
-        os.makedirs(results_dir, exist_ok=True)
-
         self._write_mhmga_config_summary()
 
-        algorithm = self.instantiate_mhmga_algorithm(path_name)
+        algorithm = self.instantiate_mhmga_algorithm(path_name, True)
 
         algorithm.add_niches(num_niches=self.config.mga_start_niches)
         self.logger.info(f"[MHMGA] MGA algorithm initialised with {self.config.mga_start_niches} niches.")
@@ -415,17 +417,17 @@ class Solver:
         **hyperparameters,
     ) -> None:
         """
-        Runs the reocmbination process with provided population as parents and displays resulting offspring.
+        Runs the recombination process with provided population as parents and displays resulting offspring.
         Used for hyperparameter tuning.
         """
         self.logger.info("[MHMGA] Initialising MGA algorithm for recombination inspection.")
         jacobian = self.get_approximate_jacobian()
 
-        algorithm = self.instantiate_mhmga_algorithm(None)
+        algorithm = self.instantiate_mhmga_algorithm(log_path=None, init_callback=False)
         algorithm.add_niches(num_niches=1)
 
         config_hyperparameters = dict(
-            max_iter=0,
+            max_iter=1,
             pop_size=self.config.mga_pop_size[0],
             elite_count=self.config.mga_elite_count[0],
             tourn_count=self.config.mga_tourn_count[0],
@@ -479,9 +481,19 @@ class Solver:
             )
 
 
+def clear_callback_files() -> None:
+    results_dir = os.path.join("results", "temp")
+
+    if os.path.exists(results_dir):
+        os.remove(os.path.join(results_dir, "callback.csv"))
+        os.remove(os.path.join(results_dir, "population.csv"))
+        os.remove(os.path.join(results_dir, "latest_population.csv"))
+    else:
+        os.makedirs(results_dir)
+
+
 def callback(intermediate_result: OptimizeResult) -> None:
     results_dir = os.path.join("results", "temp")
-    os.makedirs(results_dir, exist_ok=True)
 
     # Save best solution from last iteration
     with open(os.path.join(results_dir, "callback.csv"), "a", newline="") as f:
