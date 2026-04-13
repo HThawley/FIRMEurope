@@ -101,6 +101,7 @@ def validate_model_config(config_dict, model_logger):
         "simple_blocks_per_day": validate_positive_int,
         "fixed_costs_threshold": lambda v: validate_range(v, 0),
         "limit_timesteps": validate_positive_int,
+        "demand_multiple": lambda v: validate_range(v, 0.0, inclusive = False)
     }
 
     for item in config_dict.values():

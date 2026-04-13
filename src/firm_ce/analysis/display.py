@@ -141,10 +141,10 @@ class Display:
             grid = kwargs.get("grid", (2, 2))
             if grid[0] * grid[1] < len(indices):
                 warnings.warn("Not enough axes to plot all graphs. Some graphs will not be rendered"
-                              "Supply via kwarg 'grid'=(nrows, ncols)", UserWarning)
+                              "Supply via kwarg 'grid'=(nrows, ncols)", UserWarning, 4)
             if grid[0] * grid[1] > len(indices):
                 warnings.warn("More axes than graphs to plot. There will be blank graphs."
-                              "Supply via kwarg 'grid'=(nrows, ncols)", UserWarning)
+                              "Supply via kwarg 'grid'=(nrows, ncols)", UserWarning, 4)
             fig, axes = self._setup_map_axis(nrows=grid[0], ncols=grid[1])
             plot_targets = indices
         else:

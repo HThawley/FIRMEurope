@@ -103,7 +103,7 @@ class Solver:
 
     def run_differential_evolution(self, objective_function: Callable, args: Tuple) -> OptimizeResult:
         clear_callback_files()
-        
+
         result = differential_evolution(
             x0=self.decision_x0,
             func=objective_function,
@@ -448,13 +448,12 @@ class Solver:
 
         self.logger.info("[MHMGA] Beginning recombination inspection.")
 
-        if starting_population.shape[0]==1:
+        if starting_population.shape[0] == 1:
             starting_population = starting_population.reshape(starting_population.shape[1:])
-        if objectives is not None and objectives.shape[0]==1:
+        if objectives is not None and objectives.shape[0] == 1:
             objectives = objectives.reshape(objectives.shape[1:])
-        if constraints is not None and constraints.shape[0]==1:
+        if constraints is not None and constraints.shape[0] == 1:
             constraints = constraints.reshape(constraints.shape[1:])
-  
 
         result = algorithm.inspect_recombination(
             starting_points=starting_population,

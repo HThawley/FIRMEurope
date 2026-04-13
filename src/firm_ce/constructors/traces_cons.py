@@ -228,6 +228,7 @@ def load_datafiles_to_network(
     datafiles_imported_dict: Dict[str, DataFile],
     limit_timesteps: int = None,
     yeartuple: tuple[int] = None,
+    demand_multiple: float = 1.0,
 ) -> None:
     """
     Iterates through all nodes in the network and loads their time-series 'demand' data to each
@@ -253,7 +254,14 @@ def load_datafiles_to_network(
     for node in network.nodes.values():
         node_m.load_data(
             node,
-            select_datafile("demand", node.name, datafiles_imported_dict, limit_timesteps, yeartuple),
+            select_datafile(
+                "demand",
+                node.name,
+                datafiles_imported_dict,
+                limit_timesteps,
+                yeartuple,
+                npfloat(demand_multiple)
+            ),
         )
     return None
 

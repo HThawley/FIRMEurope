@@ -25,6 +25,7 @@ def create_dynamic_copy(node_instance: Node_InstanceType) -> Node_InstanceType:
 def load_data(
     node_instance: Node_InstanceType,
     trace: nbfloat[:],
+    demand_multiple: nbfloat,
 ) -> None:
     """
     Load the electricity demand trace and initialise the residual load for a Node instance.
@@ -44,7 +45,7 @@ def load_data(
     Attributes modified for the Node instance: data_status, data, residual_load.
     """
     node_instance.data_status = True
-    node_instance.data = trace
+    node_instance.data = trace * demand_multiple
     node_instance.residual_load = trace.copy()
     return None
 
