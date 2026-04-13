@@ -647,7 +647,7 @@ class Display:
         for asset_class in ("generators", "storages"):
             for asset in accessor.get_assets(asset_class).values():
                 n = asset.node.name
-                tech = self._identify_tech(asset.name)
+                tech = self.scenario.identify_tech(asset.name)
 
                 if n not in data:
                     data[n] = {}
@@ -673,7 +673,7 @@ class Display:
         for asset_class in ("generators", "storages"):
             for asset in accessor.get_assets(asset_class).values():
                 n = asset.node.name
-                tech = self._identify_tech(asset.name)
+                tech = self.scenario.identify_tech(asset.name)
 
                 if n not in data:
                     data[n] = {}
@@ -709,38 +709,6 @@ class Display:
             "Geothermal": self.colors[5],
             "Coal": (0.15, 0.15, 0.15),
         }
-
-    def _identify_tech(self, name):
-        """Maps asset attributes to simplified plotting categories."""
-        name_lower = name.lower()
-        if "solar" in name_lower or "pv" in name_lower or "fix" in name_lower or "sat" in name_lower:
-            return "Utility Solar"
-        if "roof" in name_lower:
-            return "Rooftop Solar"
-        if "onshore" in name_lower or "onsw" in name_lower:
-            return "Onshore Wind"
-        if "offshore" in name_lower or "offw" in name_lower:
-            return "Offshore Wind"
-        if "hydro" in name_lower or "ror" in name_lower or "pond" in name_lower:
-            return "Hydro"
-        if "nuke" in name_lower or "nuclear" in name_lower:
-            return "Nuclear"
-        if "gas" in name_lower or "ccgt" in name_lower or "ocgt" in name_lower:
-            return "Fossil Gas"
-        if "biomass" in name_lower:
-            return "Biomass"
-        if "biogas" in name_lower:
-            return "Biogas"
-        if "coal" in name_lower:
-            return "Coal"
-        if "bess" in name_lower:
-            return "Battery"
-        if "phes" in name_lower:
-            return "PHES"
-        if "geo" in name_lower:
-            return "Geothermal"
-        print(name_lower)
-        return "Other"
 
     def _get_color(self, tech):
         return self.tech_colors.get(tech, (0.5, 0.5, 0.5))

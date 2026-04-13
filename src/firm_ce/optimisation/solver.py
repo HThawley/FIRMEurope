@@ -444,10 +444,17 @@ class Solver:
         )
 
         config_hyperparameters.update(hyperparameters)
-
         algorithm.update_hyperparameters(**config_hyperparameters)
 
         self.logger.info("[MHMGA] Beginning recombination inspection.")
+
+        if starting_population.shape[0]==1:
+            starting_population = starting_population.reshape(starting_population.shape[1:])
+        if objectives is not None and objectives.shape[0]==1:
+            objectives = objectives.reshape(objectives.shape[1:])
+        if constraints is not None and constraints.shape[0]==1:
+            constraints = constraints.reshape(constraints.shape[1:])
+  
 
         result = algorithm.inspect_recombination(
             starting_points=starting_population,
@@ -521,7 +528,7 @@ def mga_callback(population: Population) -> None:
         writer = csv.writer(f)
         best_row = [
             population.optima_raw_objectives[0],
-            population.optima_penalized_objectives[0],
+            population.optima_violations[0],
             population.optima_fitnesses[0],
             *population.optima_points[0]
         ]

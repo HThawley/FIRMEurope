@@ -219,13 +219,13 @@ class Scenario:
 
         factors = {
             # 'name': <approx energy fraction> / <approx capacity factor>
-            "ccgt": 0.2 / 0.2,
+            "ccgt": 0.2 / 0.3,
             "pv_fixed": 0.5 / 0.15,
-            "pv_track": 0.2 / 0.2,
-            "onsw": 0.4 / 0.35,
-            "offw": 0.4 / 0.45,
-            "biogas": 0.02 / 0.4,
-            "biomass": 0.02 / 0.4,
+            "pv_track": 0.2 / 0.15,
+            "onsw": 0.4 / 0.4,
+            "offw": 0.4 / 0.4,
+            "biogas": 0.02 / 0.2,
+            "biomass": 0.02 / 0.2,
         }
 
         for gen in self.fleet.generators.values():
@@ -249,8 +249,8 @@ class Scenario:
 
             idx_p = sto.candidate_p_x_idx
             idx_e = sto.candidate_e_x_idx
-            heuristic_x[idx_p] = peak * 0.4  # multiple types of storage -> at least 1x peak
-            heuristic_x[idx_e] = avg / 0.25 * 48  # only applies to phes, will be clipped for fixed duration battery
+            heuristic_x[idx_p] = peak * 0.2  # multiple types of storage -> at least 1x peak
+            heuristic_x[idx_e] = avg / 0.25 * 24  # only applies to phes, will be clipped for fixed duration battery
 
         for line in self.network.major_lines.values():
             idx = line.candidate_x_idx
@@ -295,6 +295,44 @@ class Scenario:
             evaluate_offspring,
             **hyperparameters,
         )
+
+    @staticmethod
+    def identify_tech(name: str) -> str:
+        """Maps asset attributes to simplified plotting categories."""
+        name_lower = name.lower()
+        if any(x in name_lower for x in ("solar", "pv", "fix", "sat")): return "Utility Solar"
+        if "roof" in name_lower: return "Rooftop Solar"
+        if any(x in name_lower for x in ("onshore", "onsw")): return "Onshore Wind"
+        if any(x in name_lower for x in ("offshore", "offw")): return "Offshore Wind"
+        if any(x in name_lower for x in ("hydro", "ror", "pond")): return "Hydro"
+        if any(x in name_lower for x in ("nuke", "nuclear")): return "Nuclear"
+        if any(x in name_lower for x in ("gas", "ccgt", "ocgt")): return "Fossil Gas"
+        if "biomass" in name_lower: return "Biomass"
+        if "biogas" in name_lower: return "Biogas"
+        if "coal" in name_lower: return "Coal"
+        if "bess" in name_lower: return "Battery"
+        if "phes" in name_lower: return "PHES"
+        if "geo" in name_lower: return "Geothermal"
+        return "Other"
+
+    def get_tech_index_map(self) -> dict:
+        """Maps technology categories to their specific column indices in the x vector."""
+        from collections import defaultdict
+        tech_map = defaultdict(list)
+
+        for gen in self.fleet.generators.values():
+            tech = self.identify_tech(gen.name)
+            tech_map[tech].append(gen.candidate_x_idx)
+
+        for sto in self.fleet.storages.values():
+            tech = self.identify_tech(sto.name)
+            tech_map[f"{tech} Power (GW)"].append(sto.candidate_p_x_idx)
+            tech_map[f"{tech} Energy (GWh)"].append(sto.candidate_e_x_idx)
+
+        for line in self.network.major_lines.values():
+            tech_map["Transmission (GW)"].append(line.candidate_x_idx)
+
+        return dict(tech_map)
 
     def solve(self, config: ModelConfig) -> OptimizeResult:
         self.create_solution_directory()
