@@ -85,6 +85,6 @@ if __name__ == "__main__":
     model_build_time = time.time()
     print(f"Model build time: {model_build_time - start_time:.4f} seconds")
 
-    for name in ("test",):
+    for name in ("base",):
         scenario = model.scenarios[name]
         run_statistics(scenario, RUN_MODE)

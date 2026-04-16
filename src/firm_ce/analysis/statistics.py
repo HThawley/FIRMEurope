@@ -182,20 +182,16 @@ class Statistics:
             shutil.copy(os.path.join(temp_dir, "callback.csv"), os.path.join(self.results_directory, "callback.csv"))
 
             if SAVE_POPULATION:
-                shutil.copy(
-                    os.path.join(temp_dir, "latest_population.csv"),
-                    os.path.join(self.results_directory, "latest_population.csv"),
-                )
-                shutil.copy(
-                    os.path.join(temp_dir, "population.csv"), os.path.join(self.results_directory, "population.csv")
-                )
-                shutil.copy(
-                    os.path.join(temp_dir, "population_energies.csv"),
-                    os.path.join(self.results_directory, "population_energies.csv"),
-                )
+                for file in ("latest_population.csv", "population.csv", "population_energies.csv"):
+                    temp_path = os.path.join(temp_dir, file)
+                    if os.path.exist(temp_path):
+                        shutil.copy(
+                            temp_path,
+                            os.path.join(self.results_directory, file),
+                        )
         return None
 
-    def generate_result_files(self, file='all') -> None:
+    def generate_result_files(self, file='all', write=True, delete=True) -> None:
         """
         Generates all result files using the high-level master DataFrames.
         """
@@ -204,19 +200,24 @@ class Statistics:
             if not hasattr(self, "df_static"):
                 self.df_static = self._build_master_tables()
 
-        if file == 'all':
-            self.result_files["capacities"] = self._view_capacities()
-            self.result_files["component_costs"] = self._view_component_costs()
-            self.result_files["energy_balance_ASSETS"] = self._view_energy_balance("assets")
-            self.result_files["energy_balance_NODES"] = self._view_energy_balance("nodes")
-            self.result_files["energy_balance_NETWORK"] = self._view_energy_balance("network")
-            self.result_files["levelised_costs"] = self._view_levelised_costs()
-            self.result_files["summary"] = self._view_summary()
-            self.result_files["x"] = self.generate_x_file()
+        file_functions = {
+            "x": self.generate_x_file,
+            "summary": self._view_summary,
+            "capacities": self._view_capacities,
+            "component_costs": self._view_component_costs,
+            "levelised_costs": self._view_levelised_costs,
+            "energy_balance_NETWORK": self._view_energy_balance_network,
+            "energy_balance_NODES": self._view_energy_balance_nodes,
+            "energy_balance_ASSETS": self._view_energy_balance_assets,
+        }
 
-        else:
-            raise NotImplementedError
-            self.results_files  # TODO
+        for name, func in file_functions.items():
+            if name in file or file == 'all':
+                self.result_files[name] = func()
+            if write:
+                self.result_files[name].write()
+            if delete:
+                del self.result_files[name]
 
         self.statistics_generated = True
         return None
@@ -365,6 +366,15 @@ class Statistics:
             decimals=3,
             write_kwargs={"multiindex_delimiter": "|"}
         )
+
+    def _view_energy_balance_assets(self) -> ResultFile:
+        return self._view_energy_balance("assets")
+
+    def _view_energy_balance_nodes(self) -> ResultFile:
+        return self._view_energy_balance("nodes")
+
+    def _view_energy_balance_network(self) -> ResultFile:
+        return self._view_energy_balance("network")
 
     def _view_energy_balance(self, aggregation: str) -> ResultFile:
         aggregation = aggregation.lower()

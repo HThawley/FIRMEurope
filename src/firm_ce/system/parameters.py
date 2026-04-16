@@ -236,6 +236,15 @@ expected_mga_hyperparameters = {
             (int, -1, np.inf),
         ),
     },
+    "mga_champ_count": {
+        "default": 0,
+        "ditherable": False,
+        "broadcastable": True,
+        "types": (
+            (float, 0, 1),
+            (int, -1, np.inf),
+        ),
+    },
     "mga_start_niches": {
         "default": 10,
         "ditherable": False,

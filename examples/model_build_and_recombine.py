@@ -236,6 +236,15 @@ def generate_recombination_reports(results: dict, scenario, save_plot: bool = Fa
     )
 
 
+def _try_path(folder, filename):
+    path = os.path.join(folder, filename)
+    if os.path.exists(path):
+        print(f"Using '{filename}' in {folder}.")
+        return path
+    print(f"No '{filename}' found in {folder}.")
+    return False
+
+
 def load_population(scenario, run_mode, pop_size, population):
     if population == "x0":
         return scenario.x0, None, None
@@ -246,27 +255,27 @@ def load_population(scenario, run_mode, pop_size, population):
             return np.random.uniform(scenario.lower_bounds, scenario.upper_bounds, (pop_size, ndim)), None, None
 
     if population == "latest":
-        filename = 'latest_population.csv'
         trim = -pop_size
+        pop_path = _try_path(scenario.solution_dir, "latest_population.csv")
+        if not pop_path: 
+            pop_path = _try_path("results/temp", "latest_population.csv")
+        if not pop_path:
+            raise FileNotFoundError(f"No 'latest_population.csv' found.")
         
     elif population == "optimum":
-        filename = 'callback.csv'
         trim = -1
-
-    pop_path = os.path.join(scenario.solution_dir, filename)
-    if not os.path.exists(pop_path):
-        print(f"No '{filename}' found in {scenario.solution_dir}. Resorting to 'results/temp'.")
-        pop_path = f'results/temp/{filename}'
-
-    if not os.path.exists(pop_path):
-        raise FileNotFoundError(f"No latest '{filename}' found at {scenario.solution_dir} or {pop_path}.")
+        pop_path = _try_path(scenario.solution_dir, "callback.csv")
+        if not pop_path:
+            pop_path = _try_path("results/temp", "callback.csv")
+        if not pop_path:
+            raise FileNotFoundError(f"No 'callback.csv' found.")
 
     df = pd.read_csv(pop_path, header=None).iloc[trim:, :]
 
     return df.iloc[:, 3:].to_numpy(), df.iloc[:, 0].to_numpy(), df.iloc[:, 1].to_numpy()
 
 
-def run_recombination_and_inspect(scenario, model, run_mode, population):
+def run_recombination_and_inspect(scenario, model, run_mode, population, **hyperparameters):
     print(f"\n--- Inspecting Recombination: {scenario.name} ---")
 
     if run_mode == "new":
@@ -275,6 +284,7 @@ def run_recombination_and_inspect(scenario, model, run_mode, population):
         with open(os.path.join(scenario.solution_dir, "mhmga_config.json")) as f:
             pop_size = json.load(f)["mga_pop_size"][-1]
 
+    hyperparameters["pop_size"] = pop_size
     points, objectives, constraints = load_population(scenario, run_mode, pop_size, population)
 
     t0 = dt.now()
@@ -285,17 +295,7 @@ def run_recombination_and_inspect(scenario, model, run_mode, population):
         constraints=constraints,
         evaluate_offspring=True,
         # custom hyperparameters overriding config
-        pop_size=pop_size,
-        # elite_count=self.config.mga_elite_count[0],
-        # tourn_count=self.config.mga_tourn_count[0],
-        # tourn_size=self.config.mga_tourn_size[0],
-        mutation_prob=0.1,
-        mutation_sigma=5.0,
-        # crossover_prob=self.config.mga_crossover_prob[0],
-        # niche_elitism=self.config.mga_niche_elitism[0],
-        # noptimal_rel=self.config.mga_noptimal_rel[0],
-        # noptimal_abs=self.config.mga_noptimal_abs[0],
-        # objective_scaler=1.0,
+        **hyperparameters,
     )
 
     print(f"Inspection finished in {(dt.now() - t0).total_seconds():.4f}s")
@@ -315,7 +315,20 @@ if __name__ == "__main__":
     model = Model(results_mode=RUN_MODE)
     print(f"Model build time: {(dt.now() - t0).total_seconds():.4f}s")
 
+    hyperparameters = dict(
+        # elite_count=self.config.mga_elite_count[0],
+        # tourn_count=self.config.mga_tourn_count[0],
+        # tourn_size=self.config.mga_tourn_size[0],
+        mutation_prob=0.2,
+        mutation_sigma=0.1,
+        # crossover_prob=self.config.mga_crossover_prob[0],
+        # niche_elitism=self.config.mga_niche_elitism[0],
+        # noptimal_rel=self.config.mga_noptimal_rel[0],
+        # noptimal_abs=self.config.mga_noptimal_abs[0],
+        # objective_scaler=1.0,
+    )
+
     for name in ("base",):
         scenario = model.scenarios[name]
-        results = run_recombination_and_inspect(scenario, model, RUN_MODE, 'optimum')
-        generate_recombination_reports(results, scenario, save_plot=True, suffix="_o")
+        results = run_recombination_and_inspect(scenario, model, RUN_MODE, 'optimum', **hyperparameters)
+        generate_recombination_reports(results, scenario, save_plot=True, suffix="_o4")

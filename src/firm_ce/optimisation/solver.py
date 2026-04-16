@@ -140,11 +140,11 @@ class Solver:
             vectorized=True,
             constraints=True,
             return_scaled=True,
-            known_optimum=self.decision_x0,
         )
 
         algorithm = MGAProblem(
             problem=problem,
+            x0=self.decision_x0,
             log_dir=log_path,
             log_freq=self.config.mga_log_freq,
             random_seed=None,
@@ -182,6 +182,7 @@ class Solver:
             algorithm.update_hyperparameters(
                 max_iter=self.config.mga_iter[step],
                 pop_size=self.config.mga_pop_size[step],
+                champ_count=self.config.mga_champ_count[step],
                 elite_count=self.config.mga_elite_count[step],
                 tourn_count=self.config.mga_tourn_count[step],
                 tourn_size=self.config.mga_tourn_size[step],
@@ -192,7 +193,8 @@ class Solver:
                 noptimal_rel=self.config.mga_noptimal_rel[step],
                 noptimal_abs=self.config.mga_noptimal_abs[step],
                 violation_factor=PENALTY_MULTIPLIER,
-                mutation_scaler=np.abs(jacobian),
+                mutation_scaler='bounds',
+                # mutation_scaler=np.abs(jacobian),
                 objective_scaler=1.0,
             )
 
@@ -423,12 +425,18 @@ class Solver:
         self.logger.info("[MHMGA] Initialising MGA algorithm for recombination inspection.")
         jacobian = self.get_approximate_jacobian()
 
+        # jacobian = abs(jacobian)
+        # with open("results/temp/jacobian.csv", "w") as f:
+        #     writer = csv.writer(f)
+        #     writer.writerow(jacobian)
+
         algorithm = self.instantiate_mhmga_algorithm(log_path=None, init_callback=False)
         algorithm.add_niches(num_niches=1)
 
         config_hyperparameters = dict(
             max_iter=1,
             pop_size=self.config.mga_pop_size[0],
+            champ_count=self.config.mga_champ_count[0],
             elite_count=self.config.mga_elite_count[0],
             tourn_count=self.config.mga_tourn_count[0],
             tourn_size=self.config.mga_tourn_size[0],
@@ -439,7 +447,8 @@ class Solver:
             noptimal_rel=self.config.mga_noptimal_rel[0],
             noptimal_abs=self.config.mga_noptimal_abs[0],
             violation_factor=PENALTY_MULTIPLIER,
-            mutation_scaler=np.abs(jacobian),
+            # mutation_scaler=np.abs(jacobian),
+            mutation_scaler='bounds',
             objective_scaler=1.0,
         )
 
@@ -490,12 +499,11 @@ class Solver:
 def clear_callback_files() -> None:
     results_dir = os.path.join("results", "temp")
 
-    if os.path.exists(results_dir):
-        os.remove(os.path.join(results_dir, "callback.csv"))
-        os.remove(os.path.join(results_dir, "population.csv"))
-        os.remove(os.path.join(results_dir, "latest_population.csv"))
-    else:
-        os.makedirs(results_dir)
+    for file in ("callback", "latest_population", "population"):
+        _path = os.path.join(results_dir, f"{file}.csv")
+        if os.path.exists(_path):
+            os.remove(_path)
+    os.makedirs(results_dir, exist_ok=True)
 
 
 def callback(intermediate_result: OptimizeResult) -> None:

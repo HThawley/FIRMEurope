@@ -260,8 +260,8 @@ def load_datafiles_to_network(
                 datafiles_imported_dict,
                 limit_timesteps,
                 yeartuple,
-                npfloat(demand_multiple)
             ),
+            npfloat(demand_multiple),
         )
     return None
 
