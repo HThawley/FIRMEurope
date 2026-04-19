@@ -50,9 +50,11 @@ def run_statistics(scenario, run_mode):
         False,
     )
     print(f"Generating statistics for scenario {scenario.name}")
-    scenario.statistics.generate_result_files()
+    print("short to long")
+    raise KeyboardInterrupt
+    scenario.statistics.generate_result_files(write=True, delete=True)
     print(f"Writing statistics results for scenario {scenario.name}")
-    scenario.statistics.write_results()
+    # scenario.statistics.write_results()
 
     print(f"Validating solution {scenario.name}")
     scenario.validation = Validation(scenario.statistics.solution, scenario.solution_dir)
@@ -78,7 +80,7 @@ def run_statistics(scenario, run_mode):
 
 if __name__ == "__main__":
 
-    RUN_MODE = "latest"
+    RUN_MODE = "new"
 
     start_time = time.time()
     model = Model(results_mode=RUN_MODE)

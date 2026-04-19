@@ -278,9 +278,14 @@ def assign_storage_merit_order(
         key_dur = temp_durations[i]
         key_ord = temp_orders[i]
         j = i - 1
-        # KEY LOGIC: If the value on the left is SMALLER than the current key,
+        # Logic: If the value on the left is SMALLER than the current key,
         # move it to the right. This pushes LARGER values to the front (index 0).
+
+        # sort longest to shortest
         while j >= 0 and temp_durations[j] < key_dur:
+
+        # sort shortest to longest
+        # while j >= 0 and temp_durations[j] > key_dur:
             temp_durations[j + 1] = temp_durations[j]
             temp_orders[j + 1] = temp_orders[j]
             j -= 1
