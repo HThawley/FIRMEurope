@@ -50,9 +50,7 @@ def run_statistics(scenario, run_mode):
         False,
     )
     print(f"Generating statistics for scenario {scenario.name}")
-    print("short to long")
-    raise KeyboardInterrupt
-    scenario.statistics.generate_result_files(write=True, delete=True)
+    # scenario.statistics.generate_result_files(write=True, delete=True)
     print(f"Writing statistics results for scenario {scenario.name}")
     # scenario.statistics.write_results()
 
@@ -60,9 +58,9 @@ def run_statistics(scenario, run_mode):
     scenario.validation = Validation(scenario.statistics.solution, scenario.solution_dir)
     scenario.validation.validate(verbose=True)
     scenario.validation.dump_logs()
-
+    
     print(f"Generating plots {scenario.name}")
-    display = Display(scenario, model.config)
+    display = Display(scenario, model.config, solution=scenario.statistics.solution)
 
     display.plot_energy_mix(atlas=True, chart_type="bar", indices=[0, 1, 2])
     display.plot_energy_mix(atlas=True, delta=True, chart_type="bar", indices=[0, 1, 2])
@@ -74,7 +72,7 @@ def run_statistics(scenario, run_mode):
 
     # raise KeyboardInterrupt
 
-    scenario.unload_datafiles()
+    # scenario.unload_datafiles()
     return None
 
 

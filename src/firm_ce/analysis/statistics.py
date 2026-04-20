@@ -56,7 +56,6 @@ class Statistics:
             self.solution.static.block_lengths
         )
 
-        self.df_static = self._build_master_tables()
         self.result_files = {}
         self.master_tables_built = False
         self.statistics_generated = False
