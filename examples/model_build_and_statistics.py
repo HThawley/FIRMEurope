@@ -60,7 +60,7 @@ def run_statistics(scenario, run_mode):
     scenario.validation.dump_logs()
     
     print(f"Generating plots {scenario.name}")
-    display = Display(scenario, model.config)
+    display = Display(scenario, model.config, solution=scenario.statistics.solution)
 
     display.plot_energy_mix(atlas=True, chart_type="bar", indices=[0, 1, 2])
     display.plot_energy_mix(atlas=True, delta=True, chart_type="bar", indices=[0, 1, 2])

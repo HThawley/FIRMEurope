@@ -8,6 +8,7 @@ import os
 import pandas as pd
 import warnings
 
+from firm_ce.common.typing import npfloat
 from firm_ce.system.scenario import Scenario
 from firm_ce.optimisation.single_time import Solution, evaluate
 from firm_ce.system.parameters import ModelConfig
@@ -49,10 +50,12 @@ class Display:
         else:
             if solution is not None:
                 self.solution = solution
-                if not self.solution.evaluated:
-                    evaluate(solution)
+            elif hasattr(scenario, 'statistics'):
+                self.solution = scenario.statistics.solution
             else:
-                self._read_and_evalaute_optimum()
+                self._read_and_evaluate_optimum()
+            if not self.solution.evaluated:
+                    evaluate(solution)
 
         self._load_map_data("./inputs/map/europe.geojson")
         self._init_colors()
@@ -431,7 +434,7 @@ class Display:
         if filepath is None:
             filepath = os.path.join(self.scenario.solution_dir, "x.csv")
         x = pd.read_csv(filepath, header=None).to_numpy().flatten()
-        self.solution = self._construct_solution(x)
+        self.solution = self._construct_solution(x.astype(npfloat))
         evaluate(self.solution)
 
     def _read_and_evaluate_noptima(self, filepath: str = None):
@@ -440,7 +443,7 @@ class Display:
             filepath = os.path.join(mhmga_dir, "mga_alternatives.csv")
         noptima_df = pd.read_csv(filepath)
         noptima_x = [row.to_numpy() for _, row in noptima_df.iloc[:, 3:].iterrows()]
-        self.noptima = [self._construct_solution(x) for x in noptima_x]
+        self.noptima = [self._construct_solution(x.astype(npfloat)) for x in noptima_x]
         [evaluate(sol) for sol in self.noptima]
         # first noptimum is optimum
         self.solution = self.noptima[0]
