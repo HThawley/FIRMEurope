@@ -1,4 +1,4 @@
 id,scenario_name,resolution,load_multiplier,allowance,firstyear,finalyear,networksteps_max,type
 -1,Test,1,2,0.00002,1982,2016,3,single_time
-0,base,1,2,0.00002,1982,2016,4,single_time
+0,base,1,2,0.00002,2013,2016,4,single_time
 1,zerocarbon,1,2,0.00002,1982,2016,4,single_time
