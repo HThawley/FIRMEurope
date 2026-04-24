@@ -286,7 +286,7 @@ class Solver:
                 writer_latest.writerows(combined_block)
 
             num_niches, pop_size, _ = population.points.shape
-            ops_data_flat = self.scenario.ops_data[:num_niches, :pop_size].reshape(num_niches * pop_size, -1)
+            ops_data_flat = self.ops_data[:num_niches, :pop_size].reshape(num_niches * pop_size, -1)
 
             with open("results/temp/operational_data.csv", "a", newline="") as f_op_all, \
                  open("results/temp/latest_operational_data.csv", "w", newline="") as f_op_latest:

@@ -80,7 +80,7 @@ class Scenario:
 
         self.statistics = None
         self.assign_x_indices()
-        self.assign_unit_type_indices()
+        self.assign_op_data_offsets()
 
     def __repr__(self):
         return f"Scenario({self.id!r} {self.name!r})"
@@ -326,8 +326,6 @@ class Scenario:
             line.unit_type_idx = self.op_data_offsets[line.unit_type]
         for line in self.network.minor_lines.values():
             line.unit_type_idx = self.op_data_offsets[line.unit_type]
-
-        self.logger.info(f"Allocated strictly operational data array of length {self.op_data_length}.")
 
     def inspect_mhmga_recombination(
         self,

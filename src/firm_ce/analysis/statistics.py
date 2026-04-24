@@ -181,7 +181,8 @@ class Statistics:
             shutil.copy(os.path.join(temp_dir, "callback.csv"), os.path.join(self.results_directory, "callback.csv"))
 
             if SAVE_POPULATION:
-                for file in ("latest_population.csv", "population.csv", "population_energies.csv"):
+                for file in ("latest_population.csv", "population.csv", "population_energies.csv", 
+                             "operational_data", "latest_operational_data"):
                     temp_path = os.path.join(temp_dir, file)
                     if os.path.exists(temp_path):
                         shutil.copy(
