@@ -206,6 +206,12 @@ expected_mga_hyperparameters = {
         "broadcastable": True,
         "types": ((float, 0, np.inf),),
     },
+    "mga_mutation_alpha": {
+        "default": 0.0,
+        "ditherable": False,
+        "broadcastable": True,
+        "types": ((float, -np.inf, np.inf),),
+    },
     "mga_crossover_prob": {
         "default": 0.2,
         "ditherable": True,

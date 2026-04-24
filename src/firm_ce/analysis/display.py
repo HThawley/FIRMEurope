@@ -55,7 +55,7 @@ class Display:
             else:
                 self._read_and_evaluate_optimum()
             if not self.solution.evaluated:
-                    evaluate(solution)
+                evaluate(solution)
 
         self._load_map_data("./inputs/map/europe.geojson")
         self._init_colors()

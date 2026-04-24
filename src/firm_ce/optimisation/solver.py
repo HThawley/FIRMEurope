@@ -161,7 +161,7 @@ class Solver:
     def generate_alternatives(self) -> None:
         self.logger.info("[MHMGA] Initialising MGA algorithm.")
 
-        jacobian = self.get_approximate_jacobian()
+        # jacobian = self.get_approximate_jacobian()
         path_name = os.path.join(self.mga_log_dir, "mga_log")
 
         self._write_mhmga_config_summary()
@@ -423,7 +423,7 @@ class Solver:
         Used for hyperparameter tuning.
         """
         self.logger.info("[MHMGA] Initialising MGA algorithm for recombination inspection.")
-        jacobian = self.get_approximate_jacobian()
+        # jacobian = self.get_approximate_jacobian()
 
         # jacobian = abs(jacobian)
         # with open("results/temp/jacobian.csv", "w") as f:
@@ -442,6 +442,7 @@ class Solver:
             tourn_size=self.config.mga_tourn_size[0],
             mutation_prob=self.config.mga_mutation_prob[0],
             mutation_sigma=self.config.mga_mutation_sigma[0],
+            mutation_alpha=self.config.mga_mutation_alpha[0],
             crossover_prob=self.config.mga_crossover_prob[0],
             niche_elitism=self.config.mga_niche_elitism[0],
             noptimal_rel=self.config.mga_noptimal_rel[0],

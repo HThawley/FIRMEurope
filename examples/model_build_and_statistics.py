@@ -58,7 +58,7 @@ def run_statistics(scenario, run_mode):
     scenario.validation = Validation(scenario.statistics.solution, scenario.solution_dir)
     scenario.validation.validate(verbose=True)
     scenario.validation.dump_logs()
-    
+
     print(f"Generating plots {scenario.name}")
     display = Display(scenario, model.config, solution=scenario.statistics.solution)
 
