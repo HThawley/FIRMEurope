@@ -5,7 +5,7 @@ import numpy as np
 
 from firm_ce.common.constants import JIT_ENABLED, NUM_THREADS, PENALTY_MULTIPLIER, FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import jitclass, njit, prange
-from firm_ce.common.typing import boolean, nbfloat, npfloat, unicode_type
+from firm_ce.common.typing import boolean, nbintp, nbfloat, npfloat, unicode_type
 from firm_ce.fast_methods import fleet_m, generator_m, line_m, network_m, static_m, storage_m
 from firm_ce.optimisation.balancing import balance_for_period
 from firm_ce.system.components import Fleet_InstanceType
@@ -384,6 +384,35 @@ def objective(solution: Solution_InstanceType) -> tuple[float]:
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
+def extract_operational_data(
+    solution: Solution_InstanceType,
+    op_data_slice: nbfloat[:]
+) -> None:
+    """
+    Aggregates operational data directly into a pre-allocated 1D array slice
+    using hard-coded offset logic.
+    """
+    for gen in solution.fleet.generators.values():
+        offset = gen.unit_type_idx
+        op_data_slice[offset] += gen.lt_generation
+        op_data_slice[offset + 1] += gen.unit_lt_hours
+
+    for sto in solution.fleet.storages.values():
+        offset = sto.unit_type_idx
+        op_data_slice[offset] += sto.lt_generation
+
+    for line in solution.network.major_lines.values():
+        offset = line.unit_type_idx
+        op_data_slice[offset] += line.lt_flows
+
+    for line in solution.network.minor_lines.values():
+        offset = line.unit_type_idx
+        op_data_slice[offset] += line.lt_flows
+
+    return None
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def evaluate(solution: Solution_InstanceType) -> Solution_InstanceType:
     """
     Wrapper that evaluates the objective function and updates the evaluation state.
@@ -410,15 +439,19 @@ def mga_parallel_wrapper(
     network: Network_InstanceType,
     balancing_type: unicode_type,
     fixed_costs_threshold: nbfloat,
-) -> nbfloat[:, :]:
+    ops_data: nbfloat[:, :, :],
+    niche_tracker: nbintp[:],
+) -> tuple[nbfloat[:], nbfloat[:], nbfloat[:, :]]:
     """
-    Behaves identically to `parallel_wrapper` but expects xs.T and returns [lcoe, penalties] only. Used for MGA optimisation.
     """
     xs = xs.astype(nbfloat)
     n_points = xs.shape[0]
     lcoe = np.zeros(n_points, dtype=npfloat)
     penalties = np.zeros(n_points, dtype=npfloat)
     scaled_points = np.zeros(xs.shape, dtype=npfloat)
+
+    niche_idx = niche_tracker[0]
+
     for j in prange(n_points):
         xj = xs[j]
         solution = Solution(xj, static, fleet, network, balancing_type, fixed_costs_threshold)
@@ -426,6 +459,10 @@ def mga_parallel_wrapper(
         lcoe[j] = solution.lcoe
         penalties[j] = solution.penalties
         scaled_points[j] = solution.x_lcoe
+        extract_operational_data(solution, ops_data[niche_idx, j])
+
+    niche_tracker[0] += 1
+
     return lcoe, penalties, scaled_points
 
 

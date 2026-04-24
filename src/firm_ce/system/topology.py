@@ -177,6 +177,7 @@ if JIT_ENABLED:
         ("min_build", nbfloat),
         ("initial_capacity", nbfloat),
         ("unit_type", unicode_type),
+        ("unit_type_idx", nbintp),
         ("major", boolean),
         ("near_optimum_check", boolean),
         ("group", unicode_type),

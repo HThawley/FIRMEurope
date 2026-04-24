@@ -71,6 +71,7 @@ def create_dynamic_copy(
         line_instance.group,
         line_instance.cost,  # This remains static
     )
+    line_copy.unit_type_idx = line_instance.unit_type_idx
     line_copy.candidate_x_idx = line_instance.candidate_x_idx
     return line_copy
 

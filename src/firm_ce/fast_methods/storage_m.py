@@ -45,6 +45,7 @@ def create_dynamic_copy(
         storage_instance.group,
         storage_instance.cost,  # This remains static
     )
+    storage_copy.unit_type_idx = storage_instance.unit_type_idx
 
     if storage_instance.inflows:
         storage_copy.data_status = storage_instance.data_status

@@ -41,6 +41,7 @@ def create_dynamic_copy(
         generator_instance.group,
         generator_instance.cost,  # This remains static
     )
+    generator_copy.unit_type_idx = generator_instance.unit_type_idx
     generator_copy.data_status = generator_instance.data_status
     generator_copy.data = generator_instance.data  # This remains static
     generator_copy.candidate_x_idx = generator_instance.candidate_x_idx
