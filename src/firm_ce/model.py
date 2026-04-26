@@ -174,7 +174,7 @@ class Model:
         scenario.statistics.generate_result_files()
         scenario.statistics.write_results()
 
-        scenario.validation = Validation(scenario)
+        scenario.validation = Validation(scenario, scenario.solution_dir)
         scenario.validation.validate()
         scenario.validation.dump_logs()
 
