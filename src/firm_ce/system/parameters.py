@@ -83,7 +83,7 @@ class ModelConfig:
         config_dict = {item["name"]: item["value"] for item in config_dict.values()}
         self.type = config_dict["type"]
         self.model_name = config_dict["model_name"]
-        self.restart_from_temp = config_dict.get("restart_from_temp", False)
+        self.restart_from_temp = bool(config_dict.get("restart_from_temp", False))
         if self.restart_from_temp and self.type != "mhmga":
             raise NotImplementedError("Restart from temp only implemented for mhmga")
         self.balancing_type = str(config_dict["balancing_type"])

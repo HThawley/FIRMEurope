@@ -136,20 +136,7 @@ class Solver:
         fargs = self.get_mhmga_args()
 
         if init_callback:
-            self.initialise_callback('mhmga', not self.restart_from_temp)
-
-        if self.restart_from_temp:
-            import pandas as pd
-            ndim = len(self.scenario.lower_bounds)
-            previous = pd.read_csv(
-                "results/temp/latest_population.csv",
-                header=None,
-                dtype=npfloat,
-                usecols=range(3, ndim+3)
-            ).to_numpy()
-            num_niches = self.config.mga_start_niches + self.config.mga_new_niches[0]
-            previous = previous.reshape(num_niches, self.config.mga_pop_size[0], ndim)
-            self.decision_x0 = previous
+            self.initialise_callback(not self.config.restart_from_temp)
 
         problem = OptimizationProblem(
             objective=mga_parallel_wrapper,
@@ -171,6 +158,19 @@ class Solver:
             callback=self.mga_callback,
             include_obj_in_fitness=True,
         )
+
+        if self.config.restart_from_temp:
+            import pandas as pd
+            ndim = len(self.scenario.lower_bounds)
+            previous = pd.read_csv(
+                "results/temp/latest_population.csv",
+                header=None,
+                dtype=float,
+                usecols=range(3, ndim+3)
+            ).to_numpy()
+            num_niches = self.config.mga_start_niches + self.config.mga_new_niches[0]
+            previous = previous.reshape(num_niches, self.config.mga_pop_size[0], ndim)
+            algorithm.starting_points = previous
 
         return algorithm
 
