@@ -188,6 +188,11 @@ class Solver:
         self.scenario.logger.info(f"[MHMGA] MGA algorithm initialised with {self.config.mga_start_niches} niches.")
 
         for step in range(self.config.mga_steps):
+            algorithm.set_verbosity(
+                self.config.mga_disp_rate[step],
+                self.config.mga_verbose_level[step],
+            )
+
             start_time_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             self.scenario.logger.info(f"[MHMGA] Starting step {step+1}/{self.config.mga_steps} at {start_time_str}")
 
@@ -214,7 +219,7 @@ class Solver:
                 objective_scaler=1.0,
             )
 
-            algorithm.step(disp_rate=self.config.mga_disp_rate)
+            algorithm.step()
 
             # 4. Terminate and get results
             results = algorithm.get_results()

@@ -22,3 +22,5 @@ id,name,value
 20,mga_niche_elitism,selfish
 21,mga_iter,"500"
 22,mga_pop_size,64
+22,mga_disp_rate,1
+22,mga_verbose_level,3

@@ -281,7 +281,13 @@ expected_mga_hyperparameters = {
     "mga_disp_rate": {
         "default": 1,
         "ditherable": False,
-        "broadcastable": False,
+        "broadcastable": True,
         "types": ((int, -1, np.inf),),
+    },
+    "mga_verbose_level": {
+        "default": 3,
+        "ditherable": False,
+        "broadcastable": True,
+        "types": ((int, 0, np.inf),),
     },
 }
