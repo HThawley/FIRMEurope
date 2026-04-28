@@ -46,7 +46,7 @@ def load_data(
     """
     node_instance.data_status = True
     node_instance.data = trace * demand_multiple
-    node_instance.residual_load = trace.copy()
+    node_instance.residual_load = node_instance.data.copy()
     return None
 
 
