@@ -29,8 +29,8 @@ from firm_ce.optimisation.broad_optimum import (
     write_broad_optimum_bands,
     write_broad_optimum_records,
 )
-from firm_ce.optimisation.single_time import Solution, evaluate_vectorised_xs, mga_parallel_wrapper
-
+from firm_ce.optimisation.st_solution import Solution
+from firm_ce.optimisation.single_time import evaluate_vectorised_xs
 from firm_ce.system.components import Fleet_InstanceType
 from firm_ce.system.parameters import ModelConfig, ScenarioParameters_InstanceType
 from firm_ce.system.topology import Network_InstanceType
@@ -54,7 +54,7 @@ class Solver:
         self.optimal_lcoe = None
         self.initial_population = initial_population
 
-        if config.type != "mhmga":
+        if self.config.type != "mhmga":
             if polish_flag:
                 self.iterations = int(self.config.iterations // 2)
             else:
@@ -68,7 +68,7 @@ class Solver:
         os.makedirs(temp_dir, exist_ok=True)
 
         if wipe:
-            files = ["callback", "latest_population", "population"]
+            files = ["callback", "latest_population", "population", "operations", "latest_operations"]
 
             for file in files:
                 with open(os.path.join(temp_dir, file), "w", newline="") as csvfile:
@@ -113,23 +113,33 @@ class Solver:
         )[0, :]  # just cost + penalties * penalty_multiplier
 
     def get_mhmga_args(self) -> dict:
-        self.ops_data = np.empty(
-            (
-                self.config.mga_start_niches + sum(self.config.mga_new_niches),  # max niches
-                max(self.config.mga_pop_size),
-                self.scenario.op_data_length
-            ), dtype=npfloat)
-        self.niche_tracker = np.array([0], dtype=npintp)  # scalar array for mutability and njit compat
 
-        args = (
-            self.scenario.static,
-            self.scenario.fleet,
-            self.scenario.network,
-            self.config.balancing_type,
-            self.config.fixed_costs_threshold,
-            self.ops_data,
-            self.niche_tracker,
-        )
+        if self.config.save_operations:
+            self.niche_tracker = np.array([0], dtype=npintp)  # scalar array for mutability and njit compat
+            self.ops_data = np.empty(
+                (
+                    self.config.mga_start_niches + sum(self.config.mga_new_niches),  # max niches
+                    max(self.config.mga_pop_size),
+                    self.scenario.op_data_length
+                ), dtype=npfloat)
+
+            args = (
+                self.scenario.static,
+                self.scenario.fleet,
+                self.scenario.network,
+                self.config.balancing_type,
+                self.config.fixed_costs_threshold,
+                self.ops_data,
+                self.niche_tracker,
+            )
+        else:
+            args = (
+                self.scenario.static,
+                self.scenario.fleet,
+                self.scenario.network,
+                self.config.balancing_type,
+                self.config.fixed_costs_threshold,
+            )
         return args
 
     def instantiate_mhmga_algorithm(self, log_path: str, init_callback: bool) -> MGAProblem:
@@ -137,6 +147,11 @@ class Solver:
 
         if init_callback:
             self.initialise_callback(not self.config.restart_from_temp)
+
+        if self.config.save_operations:
+            from firm_ce.optimisation.mhmga import mga_wrapper_with_operations as mga_parallel_wrapper
+        else:
+            from firm_ce.optimisation.mhmga import mga_wrapper as mga_parallel_wrapper
 
         problem = OptimizationProblem(
             objective=mga_parallel_wrapper,
@@ -246,7 +261,7 @@ class Solver:
         mhmga_config["ndim"] = len(self.scenario.lower_bounds)
         mhmga_config["lower_bounds"] = self.scenario.lower_bounds.tolist()
         mhmga_config["upper_bounds"] = self.scenario.upper_bounds.tolist()
-        mhmga_config["op_data_offsets"] = self.scenario.op_data_offsets
+        mhmga_config["unit_type_idxs"] = self.scenario.unit_type_idx
 
         with open(summary_path, "w") as f:
             json.dump(mhmga_config, f, indent=4)
@@ -270,7 +285,8 @@ class Solver:
                 writer.writerow(row)
 
     def mga_callback(self, population: Population) -> None:
-        self.niche_tracker[:] = 0
+        if self.config.save_operations:
+            self.niche_tracker[:] = 0
 
         # Save best solution from last iteration
         with open("results/temp/callback.csv", "a", newline="") as f:
@@ -307,13 +323,14 @@ class Solver:
             num_niches, pop_size, _ = population.points.shape
             ops_data_flat = self.ops_data[:num_niches, :pop_size].reshape(num_niches * pop_size, -1)
 
-            with open("results/temp/operational_data.csv", "a", newline="") as f_op_all, \
-                 open("results/temp/latest_operational_data.csv", "w", newline="") as f_op_latest:
-                writer_op_all = csv.writer(f_op_all)
-                writer_op_latest = csv.writer(f_op_latest)
+            if self.config.save_operations:
+                with open("results/temp/operations.csv", "a", newline="") as f_op_all, \
+                     open("results/temp/latest_operations.csv", "w", newline="") as f_op_latest:
+                    writer_op_all = csv.writer(f_op_all)
+                    writer_op_latest = csv.writer(f_op_latest)
 
-                writer_op_all.writerows(ops_data_flat)
-                writer_op_latest.writerows(ops_data_flat)
+                    writer_op_all.writerows(ops_data_flat)
+                    writer_op_latest.writerows(ops_data_flat)
 
     def get_band_lcoe_max(self) -> float:
         solution = Solution(self.decision_x0, *self.get_differential_evolution_args())

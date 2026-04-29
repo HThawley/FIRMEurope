@@ -50,6 +50,10 @@ class ModelData:
         return model_name
 
 
+def validate_bool(val):
+    return str(val).lower() in ("true", "false", "t", "f", "1", "0", "1.0", "0.0", "yes", "no", "y", "n")
+
+
 def validate_range(val, min_val, max_val=None, inclusive=True):
     try:
         val = float(val)
@@ -86,6 +90,8 @@ def validate_model_config(config_dict, model_logger):
         "mutation": lambda v: validate_range(v, 0, 2, inclusive=False),
         "iterations": validate_positive_int,
         "population": validate_positive_int,
+        "restart_from_temp": validate_bool,
+        "save_operations": validate_bool,
         "recombination": lambda v: validate_range(v, 0, 1),
         "type": lambda v: validate_enum(
             v,

@@ -178,11 +178,15 @@ class Statistics:
     def copy_temp_files(self, copy_callback: bool) -> None:
         if copy_callback:
             temp_dir = os.path.join("results", "temp")
-            shutil.copy(os.path.join(temp_dir, "callback.csv"), os.path.join(self.results_directory, "callback.csv"))
+            if os.path.exists(os.path.join(temp_dir, "callback.csv")):
+                shutil.copy(
+                    os.path.join(temp_dir, "callback.csv"),
+                    os.path.join(self.results_directory, "callback.csv")
+                )
 
             if SAVE_POPULATION:
-                for file in ("latest_population.csv", "population.csv", "population_energies.csv", 
-                             "operational_data", "latest_operational_data"):
+                for file in ("latest_population.csv", "population.csv", "population_energies.csv",
+                             "operations.csv", "latest_operations.csv"):
                     temp_path = os.path.join(temp_dir, file)
                     if os.path.exists(temp_path):
                         shutil.copy(

@@ -216,8 +216,17 @@ def calculate_vom(
     year_float: nbfloat,
     unit_costs: UnitCost_InstanceType,
 ) -> None:
-    ltcosts_instance.vom = generation * 1e3 * unit_costs.vom / year_float
+    ltcosts_instance.vom = calculate_vom_generic(generation, unit_costs.vom, year_float)
     return None
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
+def calculate_vom_generic(
+    generation: nbfloat,
+    vom: nbfloat,
+    year_float: nbfloat,
+) -> nbfloat:
+    return generation * 1e3 * vom / year_float
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
@@ -228,5 +237,18 @@ def calculate_fuel(
     unit_hours: nbfloat,
     unit_costs: UnitCost_InstanceType,
 ) -> None:
-    ltcosts_instance.fuel = (generation * 1e3 * unit_costs.fuel_cost_mwh + unit_hours * unit_costs.fuel_cost_h) / year_float
+    ltcosts_instance.fuel = calculate_fuel_generic(
+        generation, year_float, unit_hours, unit_costs.fuel_cost_mwh, unit_costs.fuel_cost_h
+    )
     return None
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
+def calculate_fuel_generic(
+    generation: nbfloat,
+    year_float: nbfloat,
+    unit_hours: nbfloat,
+    fuel_cost_mwh: nbfloat,
+    fuel_cost_h: nbfloat,
+) -> nbfloat:
+    return (generation * 1e3 * fuel_cost_mwh + unit_hours * fuel_cost_h) / year_float

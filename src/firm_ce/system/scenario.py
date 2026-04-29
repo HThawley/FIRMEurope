@@ -80,7 +80,7 @@ class Scenario:
 
         self.statistics = None
         self.assign_x_indices()
-        self.assign_op_data_offsets()
+        self.assign_unit_type_idx()
 
     def __repr__(self):
         return f"Scenario({self.id!r} {self.name!r})"
@@ -284,7 +284,7 @@ class Scenario:
             x_index += 1
         return None
 
-    def assign_op_data_offsets(self) -> None:
+    def assign_unit_type_idx(self) -> None:
         """
         Calculates exact memory requirements for operational data and assigns
         1D array offsets to each asset based on its unit type.
@@ -297,35 +297,35 @@ class Scenario:
         line_types_set.update(line.unit_type for line in self.network.minor_lines.values())
         line_types = sorted(list(line_types_set))
 
-        self.op_data_offsets = {}
+        self.unit_type_idx = {}
         current_offset = 0
 
         # Generators need 2 slots (lt_generation, unit_lt_hours)
         for t in gen_types:
-            self.op_data_offsets[t] = current_offset
+            self.unit_type_idx[t] = current_offset
             current_offset += 2
 
         # Storages need 1 slot (lt_generation)
         for t in sto_types:
-            self.op_data_offsets[t] = current_offset
+            self.unit_type_idx[t] = current_offset
             current_offset += 1
 
         # Lines need 1 slot (lt_flows)
         for t in line_types:
-            self.op_data_offsets[t] = current_offset
+            self.unit_type_idx[t] = current_offset
             current_offset += 1
 
         self.op_data_length = current_offset
 
         # Assign to instances
         for g in self.fleet.generators.values():
-            g.unit_type_idx = self.op_data_offsets[g.unit_type]
+            g.unit_type_idx = self.unit_type_idx[g.unit_type]
         for s in self.fleet.storages.values():
-            s.unit_type_idx = self.op_data_offsets[s.unit_type]
+            s.unit_type_idx = self.unit_type_idx[s.unit_type]
         for line in self.network.major_lines.values():
-            line.unit_type_idx = self.op_data_offsets[line.unit_type]
+            line.unit_type_idx = self.unit_type_idx[line.unit_type]
         for line in self.network.minor_lines.values():
-            line.unit_type_idx = self.op_data_offsets[line.unit_type]
+            line.unit_type_idx = self.unit_type_idx[line.unit_type]
 
     def inspect_mhmga_recombination(
         self,

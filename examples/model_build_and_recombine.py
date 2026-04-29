@@ -55,7 +55,7 @@ def write_recombination_summary(results: dict, output_dir: str, scenario_name: s
 def plot_performance_metrics(
         results: dict,
         output_dir: str,
-        scenario_name: str, 
+        scenario_name: str,
         save_plot: bool = False,
         suffix: str = ''
 ):
@@ -132,7 +132,7 @@ def plot_capacity_distributions(results: dict, scenario, save_plot: bool = False
             if not indices:
                 continue
             tech_sums = points[:, indices].sum(axis=1)
-            
+
             for i in range(len(points)):
                 status = "Feasible" if is_feasible[i] else "Infeasible"
                 records.append({
@@ -161,9 +161,9 @@ def plot_capacity_distributions(results: dict, scenario, save_plot: bool = False
     axes = axes.flatten()
 
     palette = {
-        "Parents (Feasible)": "skyblue", 
+        "Parents (Feasible)": "skyblue",
         "Parents (Infeasible)": "lightcoral",
-        "Offspring (Feasible)": "steelblue", 
+        "Offspring (Feasible)": "steelblue",
         "Offspring (Infeasible)": "firebrick"
     }
 
@@ -257,18 +257,18 @@ def load_population(scenario, run_mode, pop_size, population):
     if population == "latest":
         trim = -pop_size
         pop_path = _try_path(scenario.solution_dir, "latest_population.csv")
-        if not pop_path: 
+        if not pop_path:
             pop_path = _try_path("results/temp", "latest_population.csv")
         if not pop_path:
-            raise FileNotFoundError(f"No 'latest_population.csv' found.")
-        
+            raise FileNotFoundError("No 'latest_population.csv' found.")
+
     elif population == "optimum":
         trim = -1
         pop_path = _try_path(scenario.solution_dir, "callback.csv")
         if not pop_path:
             pop_path = _try_path("results/temp", "callback.csv")
         if not pop_path:
-            raise FileNotFoundError(f"No 'callback.csv' found.")
+            raise FileNotFoundError("No 'callback.csv' found.")
 
     df = pd.read_csv(pop_path, header=None).iloc[trim:, :]
 
