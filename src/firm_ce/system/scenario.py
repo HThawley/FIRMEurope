@@ -77,7 +77,6 @@ class Scenario:
                 self.x0 = np.clip(self.x0, self.lower_bounds, self.upper_bounds)
 
         self.statistics = None
-        self.assign_x_indices()
         self.assign_unit_type_idx()
 
     def __repr__(self):

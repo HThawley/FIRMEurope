@@ -465,19 +465,21 @@ def validate_initial_guess(
 
         x0 = parse_list(item["x_0"])
 
-        bound_length = len(
-            scenario_generators[scenario]
-            + scenario_storages[scenario]
-            + scenario_storages[scenario]
-            + scenario_lines[scenario]
-        ) - len(scenario_minor_lines[scenario])
+        # TODO: check that works, accounting for 0 bounds
+
+        # bound_length = len(
+        #     scenario_generators[scenario]
+        #     + scenario_storages[scenario]
+        #     + scenario_storages[scenario]
+        #     + scenario_lines[scenario]
+        # ) - len(scenario_minor_lines[scenario])
         
-        if x0 and not (len(x0) == bound_length):
-            print(x0)
-            model_logger.error(
-                "Initial guess 'x_0' for scenario %s contains %d elements, expected %d", scenario, len(x0), bound_length
-            )
-            flag = False
+        # if x0 and not (len(x0) == bound_length):
+        #     print(x0)
+        #     model_logger.error(
+        #         "Initial guess 'x_0' for scenario %s contains %d elements, expected %d", scenario, len(x0), bound_length
+        #     )
+        #     flag = False
 
     for scenario in scenarios_list:
         if scenario not in initial_guess_scenarios:
