@@ -68,10 +68,12 @@ class Solver:
         os.makedirs(temp_dir, exist_ok=True)
 
         if wipe:
-            files = ["callback", "latest_population", "population", "operations", "latest_operations"]
+            files = ["callback", "latest_population", "population"]
+            if self.config.save_operations:
+                files.extend(["latest_operations", "operations"])
 
             for file in files:
-                with open(os.path.join(temp_dir, file), "w", newline="") as csvfile:
+                with open(os.path.join(temp_dir, f"{file}.csv"), "w", newline="") as csvfile:
                     csv.writer(csvfile)
 
     def get_differential_evolution_args(
