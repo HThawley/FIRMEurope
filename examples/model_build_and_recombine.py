@@ -306,11 +306,6 @@ if __name__ == "__main__":
 
     RUN_MODE = "latest"
 
-    start_time = dt.now()
-    model = Model(results_mode=RUN_MODE)
-    model_build_time = dt.now()
-    print(f"Model build time: {(model_build_time - start_time).total_seconds():.4f} seconds")
-
     t0 = dt.now()
     model = Model(results_mode=RUN_MODE)
     print(f"Model build time: {(dt.now() - t0).total_seconds():.4f}s")

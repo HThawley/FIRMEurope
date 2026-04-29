@@ -4,22 +4,18 @@ import os
 import numpy as np
 
 from firm_ce.common.helpers import parse_comma_separated
-from firm_ce.common.logging import init_model_logger
 from firm_ce.io.file_manager import import_config_csvs
 
 
 class ModelData:
-    def __init__(self, config_directory: str, logging_flag: bool, results_mode: str) -> None:
+    def __init__(self, config_directory: str) -> None:
         self.config_directory = config_directory
 
         # Get the config settings for the csvs
         self.config_data = import_config_csvs(config_directory=config_directory)
 
         # Get the model name
-        model_name = self.get_model_name()
-
-        # Initialise the logger
-        self.logger, self.results_dir = init_model_logger(model_name, logging_flag, results_mode)
+        self.model_name = self.get_model_name()
 
         # Set all the relevant parameters
         self.scenarios = self.config_data["scenarios"]
@@ -90,8 +86,9 @@ def validate_model_config(config_dict, model_logger):
         "mutation": lambda v: validate_range(v, 0, 2, inclusive=False),
         "iterations": validate_positive_int,
         "population": validate_positive_int,
-        "restart_from_temp": validate_bool,
+        "restart_optimisation": validate_bool,
         "save_operations": validate_bool,
+        "model_location": lambda v: isinstance(v,str),
         "recombination": lambda v: validate_range(v, 0, 1),
         "type": lambda v: validate_enum(
             v,

@@ -81,7 +81,7 @@ if __name__ == "__main__":
     RUN_MODE = "new"
 
     start_time = time.time()
-    model = Model(results_mode=RUN_MODE)
+    model = Model(model_location=RUN_MODE)
     model_build_time = time.time()
     print(f"Model build time: {model_build_time - start_time:.4f} seconds")
 

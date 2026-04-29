@@ -64,16 +64,18 @@ class Solver:
             os.makedirs(self.mga_log_dir, exist_ok=True)
 
     def initialise_callback(self, wipe: bool = True) -> None:
-        temp_dir = os.path.join("results", "temp")
-        os.makedirs(temp_dir, exist_ok=True)
+        out_dir = self.scenario.solution_dir
+        os.makedirs(out_dir, exist_ok=True)
 
         if wipe:
-            files = ["callback", "latest_population", "population"]
-            if self.config.save_operations:
-                files.extend(["latest_operations", "operations"])
+            files = ["callback"]
+            if SAVE_POPULATION:
+                files.extend(["latest_population", "population"])
+                if self.config.save_operations:
+                    files.extend(["latest_operations", "operations"])
 
             for file in files:
-                with open(os.path.join(temp_dir, f"{file}.csv"), "w", newline="") as csvfile:
+                with open(os.path.join(out_dir, f"{file}.csv"), "w", newline="") as csvfile:
                     csv.writer(csvfile)
 
     def get_differential_evolution_args(
@@ -102,17 +104,38 @@ class Solver:
             disp=True,
             polish=False,
             updating="deferred",
-            callback=callback,
+            callback=self.st_callback,
             workers=1,
             vectorized=True,
         )
         return result
 
     def single_time(self) -> None:
-        self.initialise_callback('single_time')
+        self.initialise_callback(not self.config.restart_optimisation)
         self.result = self.run_differential_evolution(
             evaluate_vectorised_xs, self.get_differential_evolution_args()
         )[0, :]  # just cost + penalties * penalty_multiplier
+
+    def st_callback(self, intermediate_result: OptimizeResult) -> None:
+        out_dir = self.scenario.solution_dir
+
+        # Save best solution from last iteration
+        with open(os.path.join(out_dir, "callback.csv"), "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([intermediate_result.fun, *intermediate_result.x])
+
+        if SAVE_POPULATION:
+            combined_block = np.column_stack((intermediate_result.population,
+                                              intermediate_result.population_energies))
+
+            with open(os.path.join(out_dir, "population.csv"), "a", newline="") as f_all, \
+                 open(os.path.join(out_dir, "latest_population.csv"), "w", newline="") as f_latest:
+
+                writer_all = csv.writer(f_all)
+                writer_latest = csv.writer(f_latest)
+
+                writer_all.writerows(combined_block)
+                writer_latest.writerows(combined_block)
 
     def get_mhmga_args(self) -> dict:
 
@@ -147,9 +170,6 @@ class Solver:
     def instantiate_mhmga_algorithm(self, log_path: str, init_callback: bool) -> MGAProblem:
         fargs = self.get_mhmga_args()
 
-        if init_callback:
-            self.initialise_callback(not self.config.restart_from_temp)
-
         if self.config.save_operations:
             from firm_ce.optimisation.mhmga import mga_wrapper_with_operations as mga_parallel_wrapper
         else:
@@ -176,11 +196,21 @@ class Solver:
             include_obj_in_fitness=True,
         )
 
-        if self.config.restart_from_temp:
+        if self.config.restart_optimisation:
+            if self.config.model_location == "new":
+                pop_dir = "results/temp"
+            else:
+                pop_dir = self.scenario.solution_dir
+
             import pandas as pd
             ndim = len(self.scenario.lower_bounds)
+            if not os.path.exists(os.path.join(pop_dir, "latest_population.csv")):
+                raise FileNotFoundError(
+                    f"No population file found for restarting. Expected at {os.path.join(pop_dir, 'latest_population.csv')}"
+                )
+
             previous = pd.read_csv(
-                "results/temp/latest_population.csv",
+                os.path.join(pop_dir, "latest_population.csv"),
                 header=None,
                 dtype=float,
                 usecols=range(3, ndim+3)
@@ -188,6 +218,10 @@ class Solver:
             num_niches = self.config.mga_start_niches + self.config.mga_new_niches[0]
             previous = previous.reshape(num_niches, self.config.mga_pop_size[0], ndim)
             algorithm.starting_points = previous
+
+        if init_callback:
+            # callback inited after "results/temp/latest_population.csv" is loaded (if restarting from temp)
+            self.initialise_callback(not self.config.restart_optimisation)
 
         return algorithm
 
@@ -287,11 +321,13 @@ class Solver:
                 writer.writerow(row)
 
     def mga_callback(self, population: Population) -> None:
+        out_dir = self.scenario.solution_dir
+
         if self.config.save_operations:
             self.niche_tracker[:] = 0
 
         # Save best solution from last iteration
-        with open("results/temp/callback.csv", "a", newline="") as f:
+        with open(os.path.join(out_dir, "callback.csv"), "a", newline="") as f:
             writer = csv.writer(f)
             best_row = [
                 population.optima_raw_objectives[0],
@@ -313,8 +349,8 @@ class Solver:
             # Shape: (total_pop, 3 + ndim)
             combined_block = np.column_stack((obj_flat, viol_flat, fit_flat, pts_flat))
 
-            with open("results/temp/population.csv", "a", newline="") as f_all, \
-                 open("results/temp/latest_population.csv", "w", newline="") as f_latest:
+            with open(os.path.join(out_dir, "population.csv"), "a", newline="") as f_all, \
+                 open(os.path.join(out_dir, "latest_population.csv"), "w", newline="") as f_latest:
 
                 writer_all = csv.writer(f_all)
                 writer_latest = csv.writer(f_latest)
@@ -326,8 +362,8 @@ class Solver:
             ops_data_flat = self.ops_data[:num_niches, :pop_size].reshape(num_niches * pop_size, -1)
 
             if self.config.save_operations:
-                with open("results/temp/operations.csv", "a", newline="") as f_op_all, \
-                     open("results/temp/latest_operations.csv", "w", newline="") as f_op_latest:
+                with open(os.path.join(out_dir, "operations.csv"), "a", newline="") as f_op_all, \
+                     open(os.path.join(out_dir, "latest_operations.csv"), "w", newline="") as f_op_latest:
                     writer_op_all = csv.writer(f_op_all)
                     writer_op_latest = csv.writer(f_op_latest)
 
@@ -582,25 +618,3 @@ class Solver:
                 "Model type in config must be 'single_time', 'capacity_expansion', 'near_optimum',"
                 "'midpoint_explore', or 'mhmga'."
             )
-
-
-def callback(intermediate_result: OptimizeResult) -> None:
-    results_dir = os.path.join("results", "temp")
-
-    # Save best solution from last iteration
-    with open(os.path.join(results_dir, "callback.csv"), "a", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([intermediate_result.fun, *intermediate_result.x])
-
-    if SAVE_POPULATION:
-        combined_block = np.column_stack((intermediate_result.population,
-                                          intermediate_result.population_energies))
-
-        with open(os.path.join(results_dir, "population.csv"), "a", newline="") as f_all, \
-             open(os.path.join(results_dir, "latest_population.csv"), "w", newline="") as f_latest:
-
-            writer_all = csv.writer(f_all)
-            writer_latest = csv.writer(f_latest)
-
-            writer_all.writerows(combined_block)
-            writer_latest.writerows(combined_block)

@@ -84,12 +84,13 @@ class ModelConfig:
         config_dict = {item["name"]: item["value"] for item in config_dict.values()}
         self.type = config_dict["type"]
         self.model_name = config_dict["model_name"]
-        self.restart_from_temp = parse_boolean(config_dict.get("restart_from_temp", False))
-        if self.restart_from_temp and self.type != "mhmga":
+        self.restart_optimisation = parse_boolean(config_dict.get("restart_from_temp", False))
+        if self.restart_optimisation and self.type != "mhmga":
             raise NotImplementedError("Restart from temp only implemented for mhmga")
         self.save_operations = parse_boolean(config_dict.get("save_operations", False))
         if self.save_operations and self.type != "mhmga":
             raise NotImplementedError("Save operations only implemented for mhmga")
+        self.model_location = str(config_dict.get("model_location", "new"))
         self.balancing_type = str(config_dict["balancing_type"])
         self.fixed_costs_threshold = float(config_dict.get("fixed_costs_threshold", 500.0))
         self.limit_timesteps = config_dict.get("limit_timesteps")
@@ -144,6 +145,10 @@ class ModelConfig:
                     valid_type = check_type(param_name, param_dict, string)
                     value = valid_type(string)
                     setattr(self, param_name, value)
+
+    def update(self, new_params: dict) -> None:
+        for key, value in new_params.items():
+            setattr(self, key, value)
 
 
 def check_type(param_name, param_dict, item):

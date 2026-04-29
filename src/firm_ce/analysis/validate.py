@@ -53,6 +53,7 @@ class Validation:
                 warn(f"Validation FAILED for: {', '.join(failed_checks)}", ValidationWarning)
             return False
 
+        print("Validation PASSED: No issues found on any check.")
         return True
 
     def _log(self, msg: str):

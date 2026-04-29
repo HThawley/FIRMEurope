@@ -3,8 +3,8 @@ from typing import List
 
 import numpy as np
 
-from firm_ce.common.constants import DEBUG
 from firm_ce.common.exceptions import ValidationError
+from firm_ce.common.logging import init_results_directory, init_model_logger
 from firm_ce.io.data_model import ModelData
 from firm_ce.analysis.statistics import Statistics
 from firm_ce.analysis.validate import Validation
@@ -42,8 +42,8 @@ class Model:
         self,
         config_directory: str = "inputs/config",
         data_directory: str = "inputs/data",
-        results_mode: str = "new",
         logging_flag: bool = True,
+        **kwargs,
     ) -> None:
         """
         Initialises a Model instance.
@@ -63,18 +63,22 @@ class Model:
 
         model_data = ModelData(
             config_directory=self.config_directory,
-            logging_flag=logging_flag,
-            results_mode=str(results_mode).lower()
         )
+
+        self.config = ModelConfig(model_data.config)
+        self.config.update(kwargs)  # TODO: add method to allow updating as per dict .update method
+        if self.config.type == "mhmga" and not logging_flag:
+            print(f"WARNING: [MHMGA] Most results will be lost if logging is disabled ({logging_flag=})")
+
+        # Initialise the logger
+        model_data.results_dir = init_results_directory(model_data.model_name, logging_flag, self.config.model_location)
+        model_data.logger = init_model_logger(model_data.results_dir)
 
         if not model_data.validate():
             raise ValidationError(
                 "Model failed validation. Check the `log.txt` and modify the config and data files to resolve errors."
             )
 
-        self.config = ModelConfig(model_data.config)
-        if self.config.type == "mhmga" and not logging_flag:
-            print(f"WARNING: [MHMGA] Most results will be lost if logging is disabled ({logging_flag=})")
         self.datafile_filenames_dict = model_data.datafiles
         self.scenarios = {
             model_data.scenarios[scenario_id]["scenario_name"]: Scenario(model_data, scenario_id)
@@ -117,12 +121,10 @@ class Model:
         scenario.statistics.generate_result_files()
         scenario.statistics.write_results()
 
-        scenario.validation = Validation(scenario)
+        scenario.validation = Validation(scenario.statistics.solution, scenario.solution_dir)
         scenario.validation.validate()
         scenario.validation.dump_logs()
 
-        if DEBUG:
-            scenario.statistics.dump()
         results_time = datetime.now()
         results_time_str = results_time.strftime("%d/%m/%Y %H:%M:%S")
         scenario.logger.info(f"[Single Time] Results saved at {results_time_str}"
@@ -178,8 +180,6 @@ class Model:
         scenario.validation.validate()
         scenario.validation.dump_logs()
 
-        if DEBUG:
-            scenario.statistics.dump()
         results_time = datetime.now()
         results_time_str = results_time.strftime("%d/%m/%Y %H:%M:%S")
         scenario.logger.info(
