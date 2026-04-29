@@ -63,11 +63,11 @@ class Solver:
             self.mga_log_dir = os.path.join(self.scenario.solution_dir, "mga_logs")
             os.makedirs(self.mga_log_dir, exist_ok=True)
 
-    def initialise_callback(self, wipe: bool = True) -> None:
+    def initialise_callback(self) -> None:
         out_dir = self.scenario.solution_dir
         os.makedirs(out_dir, exist_ok=True)
 
-        if wipe:
+        if not self.config.restart_optimisation
             files = ["callback"]
             if SAVE_POPULATION:
                 files.extend(["latest_population", "population"])
@@ -111,7 +111,7 @@ class Solver:
         return result
 
     def single_time(self) -> None:
-        self.initialise_callback(not self.config.restart_optimisation)
+        self.initialise_callback()
         self.result = self.run_differential_evolution(
             evaluate_vectorised_xs, self.get_differential_evolution_args()
         )[0, :]  # just cost + penalties * penalty_multiplier
@@ -221,7 +221,7 @@ class Solver:
 
         if init_callback:
             # callback inited after "results/temp/latest_population.csv" is loaded (if restarting from temp)
-            self.initialise_callback(not self.config.restart_optimisation)
+            self.initialise_callback()
 
         return algorithm
 
