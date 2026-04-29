@@ -111,11 +111,14 @@ def build_capacities(
         raise_static_modification_error()
 
     for generator in fleet_instance.generators.values():
-        generator_m.build_capacity(generator, decision_x[generator.candidate_x_idx], interval_resolutions)
+        if generator.candidate_x_idx != -1:
+            generator_m.build_capacity(generator, decision_x[generator.candidate_x_idx], interval_resolutions)
 
     for storage in fleet_instance.storages.values():
-        storage_m.build_capacity(storage, decision_x[storage.candidate_p_x_idx], "power")
-        storage_m.build_capacity(storage, decision_x[storage.candidate_e_x_idx], "energy")
+        if storage.candidate_p_x_idx != -1:
+            storage_m.build_capacity(storage, decision_x[storage.candidate_p_x_idx], "power")
+        if storage.candidate_e_x_idx != -1:
+            storage_m.build_capacity(storage, decision_x[storage.candidate_e_x_idx], "energy")
     return None
 
 

@@ -111,7 +111,8 @@ def build_capacity(
     if network_instance.static_instance:
         raise_static_modification_error()
     for line in network_instance.major_lines.values():
-        line_m.build_capacity(line, decision_x[line.candidate_x_idx])
+        if line.candidate_x_idx != -1:
+            line_m.build_capacity(line, decision_x[line.candidate_x_idx])
     return None
 
 

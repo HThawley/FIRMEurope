@@ -280,6 +280,30 @@ class Solver:
 
         self.result = algorithm.population.optima_points[0]
 
+    def generate_extrema(self):
+        self.scenario.logger.info("[MHMGA-E] Starting extrema generation.")
+
+        # ===================================================================
+        # Before working on this! Implement removal of lower_bound=0, upper_bound=0 exlcusion from x
+        # ===================================================================
+
+        # define groups - generate boolean mask broadcastable to x
+        #   one-at-a-time
+        #   group by unit_type
+        #   group by node
+
+        # loop through groups:
+        #   load population.csv
+        #   calculate 'weighted' sum objective
+        #   select best pop_size
+        #   load mhmga and optimise
+        #       dedicated objective function to handle cost-constraint
+        #       good termination criteria
+        #       log population - dedicated callback func?
+        #   log extremum
+
+        # second pass?
+
     def _write_mhmga_config_summary(self) -> None:
         """Writes a JSON summary of MHMGA hyperparameters to the solution directory."""
         summary_path = os.path.join(self.scenario.solution_dir, "mhmga_config.json")
@@ -613,6 +637,8 @@ class Solver:
             self.capacity_expansion()
         elif self.config.type == "mhmga":
             self.generate_alternatives()
+        elif self.config.type == "mhmga_extrema":
+            self.generate_extrema()
         else:
             raise Exception(
                 "Model type in config must be 'single_time', 'capacity_expansion', 'near_optimum',"

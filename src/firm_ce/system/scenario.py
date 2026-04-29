@@ -1,6 +1,6 @@
 # type: ignore
 import gc
-from typing import Dict, List, Union
+from typing import Dict
 from re import sub
 import os
 
@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult
 
-from firm_ce.common.helpers import parse_comma_separated, chain
+from firm_ce.common.helpers import parse_comma_separated
 from firm_ce.common.typing import npfloat
 from firm_ce.constructors.component_cons import construct_Fleet_object
 from firm_ce.constructors.parameter_cons import construct_ScenarioParameters_object
@@ -28,8 +28,6 @@ from firm_ce.io.file_manager import DataFile
 from firm_ce.io.data_model import ModelData
 from firm_ce.optimisation.solver import Solver
 from firm_ce.system.parameters import ModelConfig
-from firm_ce.system.components import Generator_InstanceType, Storage_InstanceType
-from firm_ce.system.topology import Line_InstanceType
 
 
 class Scenario:
@@ -70,7 +68,7 @@ class Scenario:
             self.network.nodes,
         )
 
-        self.lower_bounds, self.upper_bounds = self.get_bounds()
+        self.lower_bounds, self.upper_bounds, self.dim_mask = self.assign_indices_and_get_bounds()
         self.x0 = self._get_x0(model_data.x0s)
 
         if len(self.x0) > 0:
@@ -88,46 +86,55 @@ class Scenario:
     def create_solution_directory(self) -> None:
         os.makedirs(self.solution_dir, exist_ok=True)
 
-    def get_bounds(self) -> NDArray[npfloat]:
-        def power_capacity_bounds(
-            asset_list: Union[List[Generator_InstanceType], List[Storage_InstanceType], List[Line_InstanceType]],
-            build_cap_constraint: str,
-        ) -> List[float]:
-            return [getattr(asset, build_cap_constraint) for asset in asset_list]
+    def assign_indices_and_get_bounds(self) -> None:
+        lower, upper, mask = [], [], []
+        x_index = 0
 
-        def energy_capacity_bounds(
-                asset_list: List[Storage_InstanceType],
-                build_cap_constraint: str
-        ) -> List[float]:
-            return [getattr(asset, build_cap_constraint) if asset.duration == 0 else 0.0 for asset in asset_list]
+        for gen in self.fleet.generators.values():
+            if gen.max_build > 0:
+                mask.append(True)
+                gen.candidate_x_idx = x_index
+                lower.append(gen.min_build)
+                upper.append(gen.max_build)
+                x_index += 1
+            else:
+                mask.append(False)
+                gen.candidate_x_idx = -1
 
-        generators = list(self.fleet.generators.values())
-        storages = list(self.fleet.storages.values())
-        lines = list(self.network.major_lines.values())
+        for sto in self.fleet.storages.values():
+            if sto.max_build_p > 0:
+                mask.append(True)
+                sto.candidate_p_x_idx = x_index
+                lower.append(sto.min_build_p)
+                upper.append(sto.max_build_p)
+                x_index += 1
+            else:
+                sto.candidate_p_x_idx = -1
+                mask.append(False)
 
-        lower_bounds = np.array(
-            list(
-                chain(
-                    power_capacity_bounds(generators, "min_build"),
-                    power_capacity_bounds(storages, "min_build_p"),
-                    energy_capacity_bounds(storages, "min_build_e"),
-                    power_capacity_bounds(lines, "min_build"),
-                )
-            )
-        )
+        for sto in self.fleet.storages.values():
+            if sto.max_build_e > 0 and sto.duration == 0:
+                mask.append(True)
+                sto.candidate_e_x_idx = x_index
+                lower.append(sto.min_build_e)
+                upper.append(sto.max_build_e)
+                x_index += 1
+            else:
+                sto.candidate_e_x_idx = -1
+                mask.append(False)
 
-        upper_bounds = np.array(
-            list(
-                chain(
-                    power_capacity_bounds(generators, "max_build"),
-                    power_capacity_bounds(storages, "max_build_p"),
-                    energy_capacity_bounds(storages, "max_build_e"),
-                    power_capacity_bounds(lines, "max_build"),
-                )
-            )
-        )
+        for line in self.network.major_lines.values():
+            if line.max_build > 0:
+                mask.append(True)
+                line.candidate_x_idx = x_index
+                lower.append(line.min_build)
+                upper.append(line.max_build)
+                x_index += 1
+            else:
+                line.candidate_x_idx = -1
+                mask.append(False)
 
-        return lower_bounds, upper_bounds
+        return np.array(lower, npfloat), np.array(upper, npfloat), np.array(mask, np.bool_)
 
     def load_datafiles(
         self,
@@ -267,22 +274,6 @@ class Scenario:
             heuristic_x[idx] = max_connecting_peak * 0.25
 
         return np.clip(heuristic_x, self.lower_bounds, self.upper_bounds)
-
-    def assign_x_indices(self) -> None:
-        x_index = 0
-        for generator in self.fleet.generators.values():
-            generator.candidate_x_idx = x_index
-            x_index += 1
-        for storage in self.fleet.storages.values():
-            storage.candidate_p_x_idx = x_index
-            x_index += 1
-        for storage in self.fleet.storages.values():
-            storage.candidate_e_x_idx = x_index
-            x_index += 1
-        for line in self.network.major_lines.values():
-            line.candidate_x_idx = x_index
-            x_index += 1
-        return None
 
     def assign_unit_type_idx(self) -> None:
         """
