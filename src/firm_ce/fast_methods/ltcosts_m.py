@@ -80,12 +80,12 @@ def calculate_annualised_build_power(
     elif asset_type == "line":
         ltcosts_instance.annualised_build_p = (
             _do_annualised_build_calc(
-                power_capacity * 1e3 * line_length,
+                power_capacity * 1e6 * line_length,
                 unit_costs.capex_p,
                 unit_costs.annuity_factor,
             )
             + _do_annualised_build_calc(
-                power_capacity * 1e3,
+                power_capacity * 1e6,
                 unit_costs.transformer_capex,
                 unit_costs.annuity_factor,
             )
@@ -131,16 +131,16 @@ def get_partial_cost_power(
         result += new_power_capacity * 1e6 * unit_costs.fom
     if asset_type == "line":
         result += _do_annualised_build_calc(
-            new_power_capacity * 1e3 * line_length,
+            new_power_capacity * 1e6 * line_length,
             unit_costs.capex_p,
             unit_costs.annuity_factor,
         )
         result += _do_annualised_build_calc(
-            new_power_capacity * 1e3,
+            new_power_capacity * 1e6,
             unit_costs.transformer_capex,
             unit_costs.annuity_factor,
         )
-        result += new_power_capacity * 1e3 * line_length * unit_costs.fom
+        result += new_power_capacity * 1e6 * line_length * unit_costs.fom
 
     # apportion vom
     # TODO: Should this just be .where (generation > existing capacity) ??
