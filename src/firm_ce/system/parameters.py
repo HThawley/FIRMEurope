@@ -87,9 +87,9 @@ class ModelConfig:
         self.restart_optimisation = parse_boolean(config_dict.get("restart_from_temp", False))
         if self.restart_optimisation and self.type != "mhmga":
             raise NotImplementedError("Restart from temp only implemented for mhmga")
-        self.save_operations = parse_boolean(config_dict.get("save_operations", False))
-        if self.save_operations and self.type != "mhmga":
-            raise NotImplementedError("Save operations only implemented for mhmga")
+        self.save_details = parse_boolean(config_dict.get("save_details", False))
+        if self.save_details and self.type != "mhmga":
+            raise NotImplementedError("Save details only implemented for mhmga")
         self.model_location = str(config_dict.get("model_location", "new"))
         self.balancing_type = str(config_dict["balancing_type"])
         self.fixed_costs_threshold = float(config_dict.get("fixed_costs_threshold", 500.0))

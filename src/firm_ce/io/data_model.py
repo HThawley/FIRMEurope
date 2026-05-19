@@ -87,7 +87,7 @@ def validate_model_config(config_dict, model_logger):
         "iterations": validate_positive_int,
         "population": validate_positive_int,
         "restart_optimisation": validate_bool,
-        "save_operations": validate_bool,
+        "save_details": validate_bool,
         "model_location": lambda v: isinstance(v,str),
         "recombination": lambda v: validate_range(v, 0, 1),
         "type": lambda v: validate_enum(

@@ -186,7 +186,7 @@ class Statistics:
 
             if SAVE_POPULATION:
                 for file in ("latest_population.csv", "population.csv", "population_energies.csv",
-                             "operations.csv", "latest_operations.csv"):
+                             "details.csv", "latest_details.csv"):
                     temp_path = os.path.join(temp_dir, file)
                     if os.path.exists(temp_path):
                         shutil.copy(

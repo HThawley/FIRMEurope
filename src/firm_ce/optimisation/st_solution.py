@@ -375,47 +375,48 @@ def objective(solution: Solution_InstanceType) -> tuple[float]:
     if not reliability_check:
         return solution.lcoe, solution.penalties  # End early if reliability constraint breached
     calculate_variable_costs(solution)
-    calculate_partial_costs(solution)
 
     solution.lcoe = solution.annual_cost / solution.static.mean_annual_demand_mwh  # $/MWh
-    solution.x_lcoe /= solution.static.mean_annual_demand_mwh  # $/MWh
     return None
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def extract_operations(
+def extract_details(
     solution: Solution_InstanceType,
-    op_data_slice: nbfloat[:]
+    details_slice: nbfloat[:]
 ) -> None:
     """
     Aggregates operational data directly into a pre-allocated 1D array slice
-    using hard-coded offset logic.
+    using hard-coded idx logic.
     """
-    op_data_slice[:] = 0.0
+    details_slice[:] = 0.0
+    details_slice[0] = solution.lcoe
+    details_slice[1] = solution.penalties
+
     for gen in solution.fleet.generators.values():
-        offset = gen.unit_type_idx
-        op_data_slice[offset] += gen.lt_generation
-        op_data_slice[offset + 1] += gen.unit_lt_hours
+        idx = gen.unit_type_idx
+        details_slice[idx] += gen.lt_generation
+        details_slice[idx + 1] += gen.unit_lt_hours
 
     for sto in solution.fleet.storages.values():
-        offset = sto.unit_type_idx
-        op_data_slice[offset] += sto.lt_generation
+        idx = sto.unit_type_idx
+        details_slice[idx] += sto.lt_generation
 
     for line in solution.network.major_lines.values():
-        offset = line.unit_type_idx
-        op_data_slice[offset] += line.lt_flows
+        idx = line.unit_type_idx
+        details_slice[idx] += line.lt_flows
 
     for line in solution.network.minor_lines.values():
-        offset = line.unit_type_idx
-        op_data_slice[offset] += line.lt_flows
+        idx = line.unit_type_idx
+        details_slice[idx] += line.lt_flows
 
     return None
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def evaluate_from_operations(
+def evaluate_from_details(
     solution: Solution_InstanceType,
-    op_data_slice: nbfloat[:],
+    details_slice: nbfloat[:],
 ) -> None:
     """
     Estimate cost from operational data by populating the lt_generation, unit_lt_hours, and lt_flows from previous evaluation.
@@ -428,64 +429,74 @@ def evaluate_from_operations(
 
     calculate_fixed_costs(solution, True)
 
-    # Track which offset indices have been evaluated to ensure we only calculate variable costs ONCE per unit type.
-    processed = np.zeros(op_data_slice.shape[0], dtype=np.bool_)
+    # Track which indices have been evaluated to ensure we only calculate variable costs ONCE per unit type.
+    processed = np.zeros(details_slice.shape[0], dtype=np.bool_)
 
     acc = 0.0
     # Generators
     for gen in solution.fleet.generators.values():
-        offset = gen.unit_type_idx
-        if processed[offset]:
+        idx = gen.unit_type_idx
+        if processed[idx]:
             continue
-        agg_gen = op_data_slice[offset]
-        agg_hrs = op_data_slice[offset + 1]
+        agg_gen = details_slice[idx]
+        agg_hrs = details_slice[idx + 1]
 
         acc += ltcosts_m.calculate_vom_generic(agg_gen, gen.cost.vom, solution.static.year_float)
         acc += ltcosts_m.calculate_fuel_generic(
             agg_gen, solution.static.year_float, agg_hrs, gen.cost.fuel_cost_mwh, gen.cost.fuel_cost_h
         )
-        processed[offset] = True
-        processed[offset + 1] = True
+        processed[idx] = True
+        processed[idx + 1] = True
 
     solution.annual_cost += acc
     acc = 0.0
 
     # Storages
     for sto in solution.fleet.storages.values():
-        offset = sto.unit_type_idx
-        if processed[offset]:
+        idx = sto.unit_type_idx
+        if processed[idx]:
             continue
-        acc += ltcosts_m.calculate_vom_generic(op_data_slice[offset], sto.cost.vom, solution.static.year_float)
-        processed[offset] = True
+        acc += ltcosts_m.calculate_vom_generic(details_slice[idx], sto.cost.vom, solution.static.year_float)
+        processed[idx] = True
 
     solution.annual_cost += acc
     acc = 0.0
 
     # Major Lines
     for line in solution.network.major_lines.values():
-        offset = line.unit_type_idx
-        if processed[offset]:
+        idx = line.unit_type_idx
+        if processed[idx]:
             continue
-        acc += ltcosts_m.calculate_vom_generic(op_data_slice[offset], line.cost.vom, solution.static.year_float)
-        processed[offset] = True
+        acc += ltcosts_m.calculate_vom_generic(details_slice[idx], line.cost.vom, solution.static.year_float)
+        processed[idx] = True
 
     solution.annual_cost += acc
     acc = 0.0
 
     # Minor Lines
     for line in solution.network.minor_lines.values():
-        offset = line.unit_type_idx
-        if processed[offset]:
+        idx = line.unit_type_idx
+        if processed[idx]:
             continue
-        acc += ltcosts_m.calculate_vom_generic(op_data_slice[offset], line.cost.vom, solution.static.year_float)
-        processed[offset] = True
+        acc += ltcosts_m.calculate_vom_generic(details_slice[idx], line.cost.vom, solution.static.year_float)
+        processed[idx] = True
 
     solution.annual_cost += acc
 
+    # note: solution.lcoe is stored in details_slice[0] but this function is to facilitate
+    #       uncertainty analysis under cost assumptions, hence recalculation
     solution.lcoe = solution.annual_cost / solution.static.mean_annual_demand_mwh
+    solution.penalties = details_slice[1]
     solution.evaluated = True
 
     return None
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
+def get_scaled_points(solution: Solution_InstanceType):
+    calculate_partial_costs(solution)
+    solution.x_lcoe /= solution.static.mean_annual_demand_mwh  # $/MWh
+    return solution.x_lcoe
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)

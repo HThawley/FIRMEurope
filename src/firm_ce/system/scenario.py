@@ -288,24 +288,24 @@ class Scenario:
         line_types = sorted(list(line_types_set))
 
         self.unit_type_idx = {}
-        current_offset = 0
+        current_idx = 2  # reserve first two for lcoe and penalties
 
         # Generators need 2 slots (lt_generation, unit_lt_hours)
         for t in gen_types:
-            self.unit_type_idx[t] = current_offset
-            current_offset += 2
+            self.unit_type_idx[t] = current_idx
+            current_idx += 2
 
         # Storages need 1 slot (lt_generation)
         for t in sto_types:
-            self.unit_type_idx[t] = current_offset
-            current_offset += 1
+            self.unit_type_idx[t] = current_idx
+            current_idx += 1
 
         # Lines need 1 slot (lt_flows)
         for t in line_types:
-            self.unit_type_idx[t] = current_offset
-            current_offset += 1
+            self.unit_type_idx[t] = current_idx
+            current_idx += 1
 
-        self.op_data_length = current_offset
+        self.details_length = current_idx
 
         # Assign to instances
         for g in self.fleet.generators.values():

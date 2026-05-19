@@ -2,7 +2,7 @@
 import time
 import numpy as np
 
-from firm_ce.common.constants import NUM_THREADS, PENALTY_MULTIPLIER
+from firm_ce.common.constants import NUM_THREADS, PENALTY_MULTIPLIER, FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import njit, prange
 from firm_ce.common.typing import nbfloat, npfloat, unicode_type
 from firm_ce.system.components import Fleet_InstanceType
@@ -11,7 +11,7 @@ from firm_ce.system.topology import Network_InstanceType
 from firm_ce.optimisation.st_solution import Solution, evaluate
 
 
-@njit(parallel=True)
+@njit(parallel=True, fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def parallel_wrapper(
     xs: nbfloat[:, :],
     static: ScenarioParameters_InstanceType,
