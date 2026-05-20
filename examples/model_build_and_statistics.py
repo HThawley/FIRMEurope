@@ -19,23 +19,25 @@ from firm_ce.analysis.display import Display
 
 
 def run_statistics(scenario, run_mode):
+    global display
     scenario.load_datafiles(model.datafile_filenames_dict, model.data_directory)
 
-    if run_mode == "new":
-        if scenario.x0.size == 0:
-            print(f"skipping {scenario.name} as no initial guess provided")
-            scenario.unload_datafiles()
-            return
-        x = scenario.x0
-        scenario.create_solution_directory()
+    # if run_mode == "new":
+    #     if scenario.x0.size == 0:
+    #         print(f"skipping {scenario.name} as no initial guess provided")
+    #         scenario.unload_datafiles()
+    #         return
+    #     x = scenario.x0
+    #     scenario.create_solution_directory()
 
-    else:
-        x_csv = os.path.join(scenario.solution_dir, "x.csv")
-        if os.path.exists(x_csv):
-            x = pd.read_csv(x_csv, header=None).to_numpy().flatten()
-        else:
-            scenario.unload_datafiles()
-            raise FileNotFoundError("Could not find x.csv. Has the solution been run?")
+    # else:
+    #     x_csv = os.path.join(scenario.solution_dir, "x.csv")
+    #     if os.path.exists(x_csv):
+    #         x = pd.read_csv(x_csv, header=None).to_numpy().flatten()
+    #     else:
+    #         scenario.unload_datafiles()
+    #         raise FileNotFoundError("Could not find x.csv. Has the solution been run?")
+    x = scenario.x0
 
     print(f"Instantiating statistics for scenario: '{scenario.name}'")
     scenario.statistics = Statistics(
@@ -62,10 +64,13 @@ def run_statistics(scenario, run_mode):
     print(f"Generating plots {scenario.name}")
     display = Display(scenario, model.config, solution=scenario.statistics.solution)
 
-    display.plot_energy_mix(atlas=True, chart_type="bar", indices=[0, 1, 2])
-    display.plot_energy_mix(atlas=True, delta=True, chart_type="bar", indices=[0, 1, 2])
-    display.plot_energy_mix(curtailment=False, alternative=2)
-    display.plot_energy_mix(curtailment=True)
+    # display.plot_energy_mix(atlas=True, chart_type="bar", indices=[0, 1, 2])
+    # display.plot_energy_mix(atlas=True, delta=True, chart_type="bar", indices=[0, 1, 2])
+    # display.plot_energy_mix(curtailment=False, alternative=2)
+    # display.plot_energy_mix(curtailment=True)
+
+    #TODO: Energy mix based on consumption / generation
+    display.plot_energy_mix()
     display.plot_power_capacity()
     display.plot_power_capacity(build="existing")
     display.plot_power_capacity(build="new_build")
@@ -78,7 +83,7 @@ def run_statistics(scenario, run_mode):
 
 if __name__ == "__main__":
 
-    RUN_MODE = "new"
+    RUN_MODE = "latest"
 
     start_time = time.time()
     model = Model(model_location=RUN_MODE)
@@ -87,4 +92,5 @@ if __name__ == "__main__":
 
     for name in ("base",):
         scenario = model.scenarios[name]
+        model.config.type="single_time"
         run_statistics(scenario, RUN_MODE)

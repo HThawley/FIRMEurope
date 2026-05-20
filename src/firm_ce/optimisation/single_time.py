@@ -94,4 +94,4 @@ def evaluate_vectorised_xs(
     end_time = time.time()
     print(f"Average objective time: {NUM_THREADS*(end_time-start_time)/xs.shape[1]:.4f} seconds.")
     print(f"Iteration time: {(end_time-start_time):.4f} seconds for {NUM_THREADS} workers.")
-    return result
+    return result[0]

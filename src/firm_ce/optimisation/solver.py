@@ -274,7 +274,7 @@ class Solver:
                 noptimal_rel=self.config.mga_noptimal_rel[step],
                 noptimal_abs=self.config.mga_noptimal_abs[step],
                 violation_factor=PENALTY_MULTIPLIER,
-                mutation_scaler='bounds',
+                mutation_scaler=np.ones_like(self.scenario.lower_bounds),
                 # mutation_scaler=np.abs(jacobian),
                 objective_scaler=1.0,
             )
