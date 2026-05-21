@@ -145,7 +145,7 @@ class Solver:
     def get_mhmga_args(self) -> dict:
         if self.config.save_details:
             self.niche_tracker = np.array([0], dtype=npintp)  # scalar array for mutability and njit compat
-            self.ops_data = np.empty(
+            self.details = np.empty(
                 (
                     self.config.mga_start_niches + sum(self.config.mga_new_niches),  # max niches
                     max(self.config.mga_pop_size),
@@ -158,7 +158,7 @@ class Solver:
                 self.scenario.network,
                 self.config.balancing_type,
                 self.config.fixed_costs_threshold,
-                self.ops_data,
+                self.details,
                 self.niche_tracker,
             )
         else:
@@ -191,7 +191,7 @@ class Solver:
             maximize=False,
             vectorized=True,
             constraints=True,
-            return_scaled=True,
+            return_scaled=False,
         )
 
         algorithm = MGAProblem(
@@ -203,6 +203,7 @@ class Solver:
             parallelize=False,  # we implement parallelisation independently
             callback=self.mga_callback,
             include_obj_in_fitness=True,
+            angular_fitness=True
         )
 
         if self.config.restart_optimisation:
@@ -275,7 +276,7 @@ class Solver:
                 noptimal_abs=self.config.mga_noptimal_abs[step],
                 violation_factor=PENALTY_MULTIPLIER,
                 mutation_scaler=np.ones_like(self.scenario.lower_bounds),
-                # mutation_scaler=np.abs(jacobian),
+                space_scaler=self.scenario.projection_matrix,
                 objective_scaler=1.0,
             )
 
@@ -513,7 +514,7 @@ class Solver:
                 writer_latest.writerows(combined_block)
 
             num_niches, pop_size, ndim = population.points.shape
-            details_flat = self.ops_data[:num_niches, :pop_size].reshape(num_niches * pop_size, -1)
+            details_flat = self.details[:num_niches, :pop_size].reshape(num_niches * pop_size, -1)
 
             if self.config.save_details:
                 with open(os.path.join(out_dir, "details.csv"), "a", newline="") as f_all, \
@@ -550,7 +551,7 @@ class Solver:
                 writer_latest.writerows(combined_block)
 
             num_niches, pop_size, ndim = population.points.shape
-            details_flat = self.ops_data[:num_niches, :pop_size].reshape(num_niches * pop_size, ndim)
+            details_flat = self.details[:num_niches, :pop_size].reshape(num_niches * pop_size, ndim)
 
             if self.config.save_details:
                 with open(os.path.join(out_dir, "details.csv"), "a", newline="") as f_all, \

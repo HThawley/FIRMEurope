@@ -7,7 +7,7 @@ from firm_ce.common.typing import nbintp, nbfloat, npfloat, unicode_type
 from firm_ce.system.components import Fleet_InstanceType
 from firm_ce.system.parameters import ScenarioParameters_InstanceType
 from firm_ce.system.topology import Network_InstanceType
-from firm_ce.optimisation.st_solution import Solution, evaluate, extract_details, get_scaled_points
+from firm_ce.optimisation.st_solution import Solution, evaluate, extract_details  # , get_scaled_points
 
 
 @njit(parallel=True, fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
@@ -27,7 +27,7 @@ def mga_wrapper_with_details(
     n_points = xs.shape[0]
     lcoe = np.zeros(n_points, dtype=npfloat)
     penalties = np.zeros(n_points, dtype=npfloat)
-    scaled_points = np.zeros(xs.shape, dtype=npfloat)
+    # scaled_points = np.zeros(xs.shape, dtype=npfloat)
 
     niche_idx = niche_tracker[0]
 
@@ -38,12 +38,12 @@ def mga_wrapper_with_details(
 
         lcoe[j] = solution.lcoe
         penalties[j] = solution.penalties
-        scaled_points[j] = get_scaled_points(solution)
+        # scaled_points[j] = get_scaled_points(solution)
         extract_details(solution, details[niche_idx, j])
 
     niche_tracker[0] += 1
 
-    return lcoe, penalties, scaled_points
+    return lcoe, penalties
 
 
 @njit(parallel=True, fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
@@ -61,7 +61,7 @@ def mga_wrapper(
     n_points = xs.shape[0]
     lcoe = np.zeros(n_points, dtype=npfloat)
     penalties = np.zeros(n_points, dtype=npfloat)
-    scaled_points = np.zeros(xs.shape, dtype=npfloat)
+    # scaled_points = np.zeros(xs.shape, dtype=npfloat)
 
     for j in prange(n_points):
         xj = xs[j]
@@ -70,6 +70,6 @@ def mga_wrapper(
 
         lcoe[j] = solution.lcoe
         penalties[j] = solution.penalties
-        scaled_points[j] = get_scaled_points(solution)
+        # scaled_points[j] = get_scaled_points(solution)
 
-    return lcoe, penalties, scaled_points
+    return lcoe, penalties

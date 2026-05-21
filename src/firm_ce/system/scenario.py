@@ -78,6 +78,7 @@ class Scenario:
 
         self.statistics = None
         self.assign_unit_type_idx()
+        self.get_unit_type_projection_matrix()
 
     def __repr__(self):
         return f"Scenario({self.id!r} {self.name!r})"
@@ -316,6 +317,40 @@ class Scenario:
             line.unit_type_idx = self.unit_type_idx[line.unit_type]
         for line in self.network.minor_lines.values():
             line.unit_type_idx = self.unit_type_idx[line.unit_type]
+
+    def get_unit_type_projection_matrix(self) -> np.ndarray:
+        """
+        Constructs an (N, K) projection matrix for space_scaler, mapping N decision
+        variables to K aggregate unit types.
+        """
+        from collections import defaultdict
+        # allows safe append in a single line without checking if the key exists first
+        groups = defaultdict(list)
+
+        for gen in self.fleet.generators.values():
+            if gen.candidate_x_idx != -1:
+                groups[gen.unit_type].append(gen.candidate_x_idx)
+
+        for sto in self.fleet.storages.values():
+            if sto.candidate_p_x_idx != -1:
+                groups[f"{sto.unit_type}_power"].append(sto.candidate_p_x_idx)
+            if sto.candidate_e_x_idx != -1:
+                groups[f"{sto.unit_type}_energy"].append(sto.candidate_e_x_idx)
+
+        for line in self.network.major_lines.values():
+            if line.candidate_x_idx != -1:
+                groups[line.unit_type].append(line.candidate_x_idx)
+
+        n_vars = len(self.lower_bounds)
+        k_dims = len(groups)
+
+        # Build the (N, K) matrix
+        projection_matrix = np.zeros((n_vars, k_dims), dtype=npfloat)
+
+        for k, (_, indices) in enumerate(groups.items()):
+            projection_matrix[indices, k] = 1.0
+
+        self.projection_matrix = projection_matrix
 
     def inspect_mhmga_recombination(
         self,
