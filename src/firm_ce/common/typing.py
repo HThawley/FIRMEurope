@@ -26,7 +26,7 @@ else:
                 return np_type(value)
 
             @classmethod
-            def __class_get_item__(cls, key):
+            def __class_getitem__(cls, key):
                 return NDArray[np_type]
 
         MockType.__name__ = f"_{np_type.__name__.capitalize()}"
@@ -37,7 +37,7 @@ else:
     float64 = _make_mock_type(np.float64)
     float32 = _make_mock_type(np.float32)
     boolean = _make_mock_type(np.bool_)
-    unicode_type = _make_mock_type(np.unicode_)
+    unicode_type = _make_mock_type(np.str_)
 
     def UniTuple(ty, n: int):
         _map = {
@@ -53,7 +53,7 @@ else:
             str: str,
         }
         base = _map[ty]
-        return Tuple[tuple([base] * n)]
+        return Tuple[base, ...]
 
     def DictType(key_ty, val_ty):
         try:

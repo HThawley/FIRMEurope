@@ -10,7 +10,7 @@ import warnings
 
 from firm_ce.common.typing import npfloat
 from firm_ce.system.scenario import Scenario
-from firm_ce.optimisation.single_time import Solution, evaluate
+from firm_ce.optimisation.st_solution import Solution, evaluate
 from firm_ce.system.parameters import ModelConfig
 from firm_ce.analysis.accessor import Accessor
 

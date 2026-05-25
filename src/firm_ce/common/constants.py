@@ -26,6 +26,6 @@ VALIDATION_TOL = 1e-2
 NUM_THREADS = int(os.getenv("NUM_THREADS", os.cpu_count()))
 FASTMATH = True
 LEAPDAYS = False
-# numba disables bounds checkingfor improved speed
+# numba disables bounds checking for improved speed
 # means that IndexErrors lead to ungraceful crashes - set to True for graceful handling
-BOUNDSCHECK = False
+BOUNDSCHECK = True

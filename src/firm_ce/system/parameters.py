@@ -94,6 +94,8 @@ class ModelConfig:
         self.balancing_type = str(config_dict["balancing_type"])
         self.fixed_costs_threshold = float(config_dict.get("fixed_costs_threshold", 500.0))
         self.limit_timesteps = config_dict.get("limit_timesteps")
+        self.demand_multiple = config_dict.get("demand_multiple", 1.0)
+        self.interval_aggregation = config_dict.get("interval_aggregation", 1)
 
         if self.type == "single_time":
             self.iterations = int(config_dict["iterations"])

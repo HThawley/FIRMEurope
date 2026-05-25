@@ -10,6 +10,7 @@ from firm_ce.fast_methods import generator_m, storage_m, node_m, fuel_m
 from firm_ce.io.file_manager import DataFile
 from firm_ce.system.components import Fleet_InstanceType
 from firm_ce.system.topology import Network_InstanceType
+from firm_ce.io.aggregation import aggregate_trace
 
 
 unit_multiples = {
@@ -30,6 +31,7 @@ def select_datafile(
     limit_timesteps: int = None,
     yeartuple: tuple[int] = None,
     error_on_fail: bool = True,
+    interval_aggregation: int = 1,
 ) -> NDArray[npfloat]:
     """
     Locates and returns the a data trace of a specified datafile_type associated with
@@ -62,6 +64,11 @@ def select_datafile(
                 trace = trim_with_years(trace, datafile.data["year"], yeartuple)
 
             trace *= unit_multiples[datafile.units[0]]
+
+            if interval_aggregation > 1 and datafile_type not in ("fuel_constraint", "flexible_annual_limit"):
+                method = "sum" if datafile_type == "inflow" else "mean"
+                trace = aggregate_trace(trace, interval_aggregation, method)
+
             return trace
 
     if error_on_fail:
@@ -120,6 +127,7 @@ def load_datafiles_to_fuels(
     fleet: Fleet_InstanceType,
     datafiles_imported_dict: Dict[str, DataFile],
     yeartuple: tuple[int] = None,
+    interval_aggregation: int = 1,
 ) -> None:
     for fuel in fleet.fuels.values():
         fuel_m.load_data(
@@ -130,6 +138,7 @@ def load_datafiles_to_fuels(
                 datafiles_imported_dict,
                 None,
                 yeartuple,
+                interval_aggregation=interval_aggregation,
             ),
         )
 
@@ -142,6 +151,7 @@ def load_datafiles_to_generators(
     resolution: float,
     limit_timesteps: int = None,
     yeartuple: tuple[int] = None,
+    interval_aggregation: int = 1,
 ) -> None:
     """
     Iterates through all generators in the fleet and loads their time-series data to each
@@ -180,6 +190,7 @@ def load_datafiles_to_generators(
                 limit_timesteps,
                 yeartuple,
                 not generator.is_flexible,
+                interval_aggregation=interval_aggregation,
             ),
             resolution,
         )
@@ -192,6 +203,7 @@ def load_datafiles_to_storages(
     datafiles_imported_dict: Dict[str, DataFile],
     limit_timesteps: int = None,
     yeartuple: tuple[int] = None,
+    interval_aggregation: int = 1,
 ) -> None:
     """
     Iterates through all storages in the fleet and loads their time-series data to each
@@ -218,7 +230,14 @@ def load_datafiles_to_storages(
         if storage.inflows:
             storage_m.load_data(
                 storage,
-                select_datafile("inflow", storage.name, datafiles_imported_dict, limit_timesteps, yeartuple),
+                select_datafile(
+                    "inflow",
+                    storage.name,
+                    datafiles_imported_dict,
+                    limit_timesteps,
+                    yeartuple,
+                    interval_aggregation=interval_aggregation,
+                ),
             )
     return None
 
@@ -229,6 +248,7 @@ def load_datafiles_to_network(
     limit_timesteps: int = None,
     yeartuple: tuple[int] = None,
     demand_multiple: float = 1.0,
+    interval_aggregation: int = 1,
 ) -> None:
     """
     Iterates through all nodes in the network and loads their time-series 'demand' data to each
@@ -260,6 +280,7 @@ def load_datafiles_to_network(
                 datafiles_imported_dict,
                 limit_timesteps,
                 yeartuple,
+                interval_aggregation=interval_aggregation,
             ),
             npfloat(demand_multiple),
         )

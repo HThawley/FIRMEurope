@@ -57,6 +57,7 @@ def construct_ScenarioParameters_object(
     scenario_data_dict: Dict[str, str],
     node_count: int,
     limit_timesteps: int = None,
+    interval_aggregation: int = 1,
 ) -> ScenarioParameters_InstanceType:
     """
     Takes data required to initialise the ScenarioParameters object, casts values into Numba-compatible
@@ -97,6 +98,11 @@ def construct_ScenarioParameters_object(
             year_count,
             resolution,
         )
+
+    if interval_aggregation > 1:
+        resolution = resolution * interval_aggregation
+        intervals_count = int(np.ceil(intervals_count / interval_aggregation))
+        year_first_t = year_first_t // interval_aggregation
 
     return ScenarioParameters(
         npfloat(resolution),

@@ -43,6 +43,7 @@ class Scenario:
 
         self.limit_timesteps = None
         self.demand_multiple = npfloat(1.0)
+        self.interval_aggregation = 1
         for item in self.model_data.config.values():
             if item["name"] == "limit_timesteps":
                 self.limit_timesteps = int(item["value"])
@@ -50,6 +51,8 @@ class Scenario:
                 balancing_type = str(item["value"])
             elif item["name"] == "demand_multiple":
                 self.demand_multiple = npfloat(item["value"])
+            elif item["name"] == "interval_aggregation":
+                self.interval_aggregation = int(item["value"])
 
         safe_name = sub(r"[^a-zA-Z0-9_\-]", "_", f"{self.name}_{balancing_type}")
         self.solution_dir = os.path.join(self.results_dir, safe_name)
@@ -59,7 +62,9 @@ class Scenario:
             self.get_scenario_dicts(model_data.lines),
             self.scenario_data["networksteps_max"],
         )
-        self.static = construct_ScenarioParameters_object(self.scenario_data, len(self.network.nodes), self.limit_timesteps)
+        self.static = construct_ScenarioParameters_object(
+            self.scenario_data, len(self.network.nodes), self.limit_timesteps, self.interval_aggregation
+        )
         self.fleet = construct_Fleet_object(
             self.get_scenario_dicts(model_data.generators),
             self.get_scenario_dicts(model_data.storages),
@@ -153,11 +158,11 @@ class Scenario:
             yeartuple = firstyear, finalyear
 
         load_datafiles_to_network(
-            self.network, datafiles, self.limit_timesteps, yeartuple, demand_multiple=self.demand_multiple
+            self.network, datafiles, self.limit_timesteps, yeartuple, demand_multiple=self.demand_multiple, interval_aggregation=self.interval_aggregation
         )
-        load_datafiles_to_generators(self.fleet, datafiles, self.static.resolution, self.limit_timesteps, yeartuple)
-        load_datafiles_to_fuels(self.fleet, datafiles, yeartuple)
-        load_datafiles_to_storages(self.fleet, datafiles, self.limit_timesteps, yeartuple)
+        load_datafiles_to_generators(self.fleet, datafiles, self.static.resolution, self.limit_timesteps, yeartuple, interval_aggregation=self.interval_aggregation)
+        load_datafiles_to_fuels(self.fleet, datafiles, yeartuple, interval_aggregation=self.interval_aggregation)
+        load_datafiles_to_storages(self.fleet, datafiles, self.limit_timesteps, yeartuple, interval_aggregation=self.interval_aggregation)
 
         static_m.set_year_energy_demand(self.static, self.network.nodes)
         self.data_status = True
