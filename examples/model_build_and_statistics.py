@@ -64,10 +64,11 @@ def run_statistics(scenario, run_mode):
     print(f"Generating plots {scenario.name}")
     display = Display(scenario, model.config, solution=scenario.statistics.solution)
 
-    # display.plot_energy_mix(atlas=True, chart_type="bar", indices=[0, 1, 2])
-    # display.plot_energy_mix(atlas=True, delta=True, chart_type="bar", indices=[0, 1, 2])
-    # display.plot_energy_mix(curtailment=False, alternative=2)
-    # display.plot_energy_mix(curtailment=True)
+    if model.config.type=="mhmga":
+        display.plot_energy_mix(atlas=True, chart_type="bar", indices=[0, 1, 2])
+        display.plot_energy_mix(atlas=True, delta=True, chart_type="bar", indices=[0, 1, 2])
+        display.plot_energy_mix(curtailment=False, alternative=2)
+        display.plot_energy_mix(curtailment=True)
 
     #TODO: Energy mix based on consumption / generation
     display.plot_energy_mix()
@@ -92,5 +93,5 @@ if __name__ == "__main__":
 
     for name in ("base",):
         scenario = model.scenarios[name]
-        model.config.type="single_time"
+        model.config.type == "single_time"
         run_statistics(scenario, RUN_MODE)

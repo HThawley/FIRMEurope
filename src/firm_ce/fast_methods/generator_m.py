@@ -55,7 +55,7 @@ def create_dynamic_copy(
 def build_capacity(
     generator_instance: Generator_InstanceType,
     new_build_power_capacity: nbfloat,
-    interval_resolutions: nbfloat[:],
+    resolution: nbfloat,
 ) -> None:
     if generator_instance.static_instance:
         raise_static_modification_error()
@@ -65,7 +65,7 @@ def build_capacity(
     generator_instance.line.capacity += new_build_power_capacity
     generator_instance.line.new_build += new_build_power_capacity
 
-    update_residual_load(generator_instance, new_build_power_capacity, interval_resolutions)
+    update_residual_load(generator_instance, new_build_power_capacity, resolution)
     return None
 
 
@@ -73,7 +73,7 @@ def build_capacity(
 def load_data(
     generator_instance: Generator_InstanceType,
     generation_trace: nbfloat[:],
-    interval_resolutions: nbfloat[:],
+    resolution: nbfloat,
 ) -> None:
     """
     Load the capacity factor trace and flexible annual constraint data to the Generator instance. This is done
@@ -84,9 +84,7 @@ def load_data(
     generator_instance (Generator_InstanceType): An instance of the Generator jitclass.
     generation_trace (nbfloat[:]): Array containing the time-series capacity factor trace for the Generator. Each element
         provides the capacity factor for a time interval.
-    interval_resolutions (nbfloat[:]): A 1-dimensional array containing the resolution for every time interval
-        in the unit committment formulation (hours per time interval). An array is used instead of a single
-        scalar value to allow for variable time step simplified balancing methods to be developed in future.
+    resolution (nbfloat): A scalar containing the resolution for every time interval
 
     Returns:
     -------
@@ -101,7 +99,7 @@ def load_data(
     generator_instance.data = generation_trace
     generator_instance.data_status = True
 
-    update_residual_load(generator_instance, generator_instance.initial_capacity, interval_resolutions)
+    update_residual_load(generator_instance, generator_instance.initial_capacity, resolution)
     return None
 
 
@@ -196,12 +194,12 @@ def allocate_memory(
 def update_residual_load(
     generator_instance: Generator_InstanceType,
     added_capacity: nbfloat,
-    interval_resolutions: nbfloat[:],
+    resolution: nbfloat,
 ) -> None:
     if get_data(generator_instance, "trace").shape[0] > 0 and added_capacity > 0.0:
         new_trace = get_data(generator_instance, "trace") * added_capacity
         node_m.get_data(generator_instance.node, "residual_load")[:] -= new_trace
-        update_lt_generation(generator_instance, new_trace, interval_resolutions)
+        update_lt_generation(generator_instance, new_trace, resolution)
     return None
 
 
@@ -209,9 +207,9 @@ def update_residual_load(
 def update_lt_generation(
     generator_instance: Generator_InstanceType,
     generation_trace: nbfloat[:],
-    interval_resolutions: nbfloat[:],
+    resolution: nbfloat,
 ) -> None:
-    generator_instance.lt_generation += sum(generation_trace * interval_resolutions)
+    generator_instance.lt_generation += sum(generation_trace * resolution)
     generator_instance.line.lt_flows += generator_instance.lt_generation
     return None
 
@@ -404,7 +402,7 @@ def dispatch(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_lt_generation(
     generator_instance: Generator_InstanceType,
-    interval_resolutions: nbfloat[:],
+    resolution: nbfloat,
 ) -> None:
     """
     Calculate the total generation over the long-term modelling horizon for a flexible Generator. Also
@@ -413,9 +411,7 @@ def calculate_lt_generation(
     Parameters:
     -------
     generator_instance (Generator_InstanceType): An instance of the Generator jitclass.
-    interval_resolutions (nbfloat[:]): A 1-dimensional array containing the resolution for every time interval
-        in the unit committment formulation (hours per time interval). An array is used instead of a single
-        scalar value to allow for variable time step simplified balancing methods to be developed in future.
+    esolution (nbfloat): A scalar containing the resolution for every time interval
 
     Returns:
     -------
@@ -426,10 +422,10 @@ def calculate_lt_generation(
     Attributes modified for the flexible Generator instance: lt_generation, line, unit_lt_hours.
     Attributes modified for the referenced Generator.line: lt_flows.
     """
-    update_lt_generation(generator_instance, generator_instance.dispatch_power, interval_resolutions)
+    update_lt_generation(generator_instance, generator_instance.dispatch_power, resolution)
     total_hours = 0.0
     for i in range(len(generator_instance.dispatch_power)):
-        total_hours += np.ceil(generator_instance.dispatch_power[i] / generator_instance.unit_size) * interval_resolutions[i]
+        total_hours += np.ceil(generator_instance.dispatch_power[i] / generator_instance.unit_size) * resolution
     generator_instance.unit_lt_hours = total_hours
     return None
 

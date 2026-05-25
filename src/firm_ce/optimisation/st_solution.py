@@ -126,7 +126,7 @@ class Solution:
             fleet, self.network.nodes, self.network.minor_lines
         )  # Includes static reference to data
 
-        fleet_m.build_capacities(self.fleet, x, self.static.interval_resolutions)
+        fleet_m.build_capacities(self.fleet, x, self.static.resolution)
         network_m.build_capacity(self.network, x)
 
         fleet_m.allocate_memory(self.fleet, self.static.intervals_count)
@@ -178,7 +178,7 @@ def balance_residual_load(solution: Solution_InstanceType) -> boolean:
         fleet_m.initialise_annual_limits(solution.fleet, year, first_t)
         balance_for_period(first_t, last_t, solution.balancing_type == "full", solution, year)
         annual_unserved_energy = network_m.calculate_period_unserved_energy(
-            solution.network, first_t, last_t, solution.static.interval_resolutions
+            solution.network, first_t, last_t, solution.static.resolution
         )
 
         # End early if reliability constraint breached for any year
@@ -264,11 +264,11 @@ def calculate_variable_costs(solution: Solution_InstanceType) -> None:
     """
     fleet_m.calculate_lt_generations(
         solution.fleet,
-        solution.static.interval_resolutions,
+        solution.static.resolution,
     )
     network_m.calculate_lt_flows(
         solution.network,
-        solution.static.interval_resolutions,
+        solution.static.resolution,
     )
 
     # use a smaller accumulator to help mitigate float32 precision loss when using float32

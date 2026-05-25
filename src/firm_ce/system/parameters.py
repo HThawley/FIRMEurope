@@ -13,7 +13,6 @@ from firm_ce.common.helpers import parse_comma_separated, parse_ditherable_hyper
 if JIT_ENABLED:
     scenario_parameters_spec = [
         ("resolution", nbfloat),
-        ("interval_resolutions", nbfloat[:]),
         ("allowance", nbfloat),
         ("first_year", nbintp),
         ("final_year", nbintp),
@@ -21,7 +20,6 @@ if JIT_ENABLED:
         ("leap_year_count", nbint),
         ("year_first_t", nbintp[:]),
         ("intervals_count", nbint),
-        ("block_lengths", nbint[:]),
         ("node_count", nbint),
         ("fom_scalar", nbfloat),
         ("year_float", nbfloat),
@@ -49,9 +47,6 @@ class ScenarioParameters:
     ):
 
         self.resolution = resolution  # length of time interval in hours
-        self.interval_resolutions = resolution * np.ones(
-            intervals_count, dtype=npfloat
-        )  # length of blocks in hours, for future 'simple' balancing_method
         self.allowance = allowance  # % annual demand allowed as unserved energy
         self.first_year = first_year  # YYYY
         self.final_year = final_year  # YYYY
@@ -59,7 +54,6 @@ class ScenarioParameters:
         self.leap_year_count = leap_year_count if LEAPDAYS else 0
         self.year_first_t = year_first_t
         self.intervals_count = intervals_count
-        self.block_lengths = np.ones(intervals_count, dtype=npint)
         self.node_count = node_count
         if LEAPDAYS:
             self.fom_scalar = (

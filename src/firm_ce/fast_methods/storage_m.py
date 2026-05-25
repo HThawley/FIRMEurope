@@ -96,9 +96,6 @@ def load_data(
     storage_instance (Storage_InstanceType): An instance of the Storage jitclass.
     inflow_trace (nbfloat[:]): Array containing the time-series inflow trace for the Storage. Each element
         provides the capacity factor for a time interval.
-    interval_resolutions (nbfloat[:]): A 1-dimensional array containing the resolution for every time interval
-        in the unit committment formulation (hours per time interval). An array is used instead of a single
-        scalar value to allow for variable time step simplified balancing methods to be developed in future.
 
     Returns:
     -------
@@ -363,7 +360,7 @@ def update_stored_energy(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_lt_generation(
     storage_instance: Storage_InstanceType,
-    interval_resolutions: nbfloat[:],
+    resolution: nbfloat,
 ) -> None:
     """
     Calculate the total energy discharged over the long-term modelling horizon for a Storage system.
@@ -371,9 +368,7 @@ def calculate_lt_generation(
     Parameters:
     -------
     storage_instance (Storage_InstanceType): An instance of the Storage jitclass.
-    interval_resolutions (nbfloat[:]): A 1-dimensional array containing the resolution for every time interval
-        in the unit committment formulation (hours per time interval). An array is used instead of a single
-        scalar value to allow for variable time step simplified balancing methods to be developed in future.
+    resolution (nbfloat[:]): A scalar containing the resolution for every time interval
 
     Returns:
     -------
@@ -388,10 +383,9 @@ def calculate_lt_generation(
     lt_flows = 0.0
     for i in range(len(storage_instance.dispatch_power)):
         power = storage_instance.dispatch_power[i]
-        res = interval_resolutions[i]
         if power > TOLERANCE:
-            lt_gen += power * res
-        lt_flows += abs(power) * res
+            lt_gen += power * resolution
+        lt_flows += abs(power) * resolution
 
     storage_instance.lt_generation = lt_gen
     storage_instance.line.lt_flows += lt_flows

@@ -197,12 +197,12 @@ def calculate_period_unserved_energy(
     network_instance: Network_InstanceType,
     first_t: nbintp,
     last_t: nbintp,
-    interval_resolutions: nbfloat[:],
+    resolution: nbfloat,
 ) -> nbfloat:
     unserved_energy = 0
     for node in network_instance.nodes.values():
-        for t in range(first_t, last_t + 1):
-            unserved_energy += node.deficits[t] * interval_resolutions[t]
+        for t in range(first_t, last_t):
+            unserved_energy += node.deficits[t] * resolution
     return unserved_energy
 
 
@@ -732,7 +732,7 @@ def assign_route_merit_orders(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_lt_flows(
     network_instance: Network_InstanceType,
-    interval_resolutions: nbfloat[:],
+    resolution: nbfloat,
 ) -> None:
     """
     After completing unit committment, calculates the total long-term major Line flows across the entire
@@ -742,9 +742,7 @@ def calculate_lt_flows(
     Parameters:
     -------
     network_instance (Network_InstanceType): An instance of the Network jitclass.
-    interval_resolutions (nbfloat[:]): A 1-dimensional array containing the resolution for every time interval
-        in the unit committment formulation (hours per time interval). An array is used instead of a single
-        scalar value to allow for variable time step simplified balancing methods to be developed in future.
+    resolution (nbfloat): A scalar containing the resolution for every time interval
 
     Returns:
     -------
@@ -755,7 +753,7 @@ def calculate_lt_flows(
     Attributes modified for each Line in Network.major_lines: lt_flows.
     """
     for line in network_instance.major_lines.values():
-        line_m.calculate_lt_flow(line, interval_resolutions)
+        line_m.calculate_lt_flow(line, resolution)
     return None
 
 

@@ -6,7 +6,7 @@ os.environ.setdefault("NUMBA_THREADING_LAYER", "workqueue")
 JIT_ENABLED = True
 SAVE_POPULATION = True
 DEBUG = False
-BITDEPTH = 64
+BITDEPTH = 32
 if BITDEPTH == 64:
     EPSILON_FLOAT = np.finfo(np.float64).eps
     NP_FLOAT_MAX = np.finfo(np.float64).max

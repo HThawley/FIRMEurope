@@ -127,8 +127,8 @@ def allocate_memory(line_instance: Line_InstanceType, intervals_count: nbint) ->
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def calculate_lt_flow(line_instance: Line_InstanceType, interval_resolutions: nbfloat[:]) -> None:
-    line_instance.lt_flows = sum(np.abs(line_instance.flows) * interval_resolutions)
+def calculate_lt_flow(line_instance: Line_InstanceType, resolution: nbfloat) -> None:
+    line_instance.lt_flows = np.abs(line_instance.flows).sum() * resolution
     return None
 
 

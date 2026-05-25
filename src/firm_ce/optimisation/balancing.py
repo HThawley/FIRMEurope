@@ -244,7 +244,7 @@ def energy_balance_for_interval(
         interval,
         solution.network,
         solution.fleet,
-        solution.static.interval_resolutions[interval],
+        solution.static.resolution,
         forward_time_flag,
     )
     # Check deficits
@@ -319,10 +319,10 @@ def balance_for_period(
     for t in range(start_t, end_t):
         energy_balance_for_interval(solution, t, True)
         network_m.calculate_spillage_and_deficit(solution.network, t)
-        fleet_m.update_stored_energies(solution.fleet, t, solution.static.interval_resolutions[t], True)
+        fleet_m.update_stored_energies(solution.fleet, t, solution.static.resolution, True)
         # This is now handled as a side-effect of generator_m.dispatch
         # fleet_m.update_remaining_flexible_energies(
-        #     solution.fleet, t, solution.static.interval_resolutions[t], True
+        #     solution.fleet, t, solution.static.resolution, True
         # )
 
         if not precharging_allowed:
@@ -392,16 +392,16 @@ def determine_precharge_energies_for_deficit_block(
 
         energy_balance_for_interval(solution, interval, False)
 
-        fleet_m.update_stored_energies(solution.fleet, interval, solution.static.interval_resolutions[interval], False)
+        fleet_m.update_stored_energies(solution.fleet, interval, solution.static.resolution, False)
         # This is now handled as a side-effect of generator_m.dispatch
         # fleet_m.update_remaining_flexible_energies(
-        #     solution.fleet, interval, solution.static.interval_resolutions[interval], False
+        #     solution.fleet, interval, solution.static.resolution, False
         # )
         fleet_m.update_deficit_block(solution.fleet)
 
         if network_m.check_precharging_end(solution.network, interval):
             fleet_m.assign_precharging_values(
-                solution.fleet, interval, solution.static.interval_resolutions[interval], year
+                solution.fleet, interval, solution.static.resolution, year
             )
             return interval
 
@@ -883,14 +883,14 @@ def perform_flexible_precharging(
         interval,
         solution.network,
         solution.fleet,
-        solution.static.interval_resolutions[interval],
+        solution.static.resolution,
     )
 
     perform_internode_flexible_transfers(
         interval,
         solution.network,
         solution.fleet,
-        solution.static.interval_resolutions[interval],
+        solution.static.resolution,
     )
 
     return None
@@ -966,7 +966,7 @@ def determine_power_adjustments_for_precharging_period(
             interval,
             solution.network,
             solution.fleet,
-            solution.static.interval_resolutions[interval],
+            solution.static.resolution,
         )
         network_m.set_storage_precharge_fills_and_surpluses(solution.network)
 
@@ -974,28 +974,28 @@ def determine_power_adjustments_for_precharging_period(
             interval,
             solution.network,
             solution.fleet,
-            solution.static.interval_resolutions[interval],
+            solution.static.resolution,
         )
 
         perform_transmitted_surplus_transfers(
             interval,
             solution.network,
             solution.fleet,
-            solution.static.interval_resolutions[interval],
+            solution.static.resolution,
         )
 
         perform_intranode_interstorage_transfers(
             interval,
             solution.network,
             solution.fleet,
-            solution.static.interval_resolutions[interval],
+            solution.static.resolution,
         )
 
         perform_internode_interstorage_transfers(
             interval,
             solution.network,
             solution.fleet,
-            solution.static.interval_resolutions[interval],
+            solution.static.resolution,
         )
 
         if fleet_m.check_precharge_remaining(solution.fleet):
@@ -1095,7 +1095,7 @@ def resolve_energy_discontinuities(
             interval,
             solution.network,
             solution.fleet,
-            solution.static.interval_resolutions[interval],
+            solution.static.resolution,
             True,
         )
 
@@ -1136,7 +1136,7 @@ def resolve_energy_discontinuities(
 
         network_m.calculate_spillage_and_deficit(solution.network, interval)
 
-        fleet_m.update_stored_energies(solution.fleet, interval, solution.static.interval_resolutions[interval], True)
+        fleet_m.update_stored_energies(solution.fleet, interval, solution.static.resolution, True)
     return None
 
 

@@ -51,10 +51,7 @@ class Statistics:
         self.copy_temp_files(copy_callback)
         self.result_files = None
 
-        self.full_intervals_count = self.solution.static.block_lengths.sum()
-        self.block_first_intervals, self.block_last_intervals = static_m.get_block_intervals(
-            self.solution.static.block_lengths
-        )
+        self.intervals_count = self.solution.static.intervals_count
 
         self.result_files = {}
         self.master_tables_built = False
