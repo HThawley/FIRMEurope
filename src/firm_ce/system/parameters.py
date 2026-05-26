@@ -6,7 +6,7 @@ import numpy as np
 from firm_ce.common.constants import JIT_ENABLED, LEAPDAYS
 from firm_ce.common.helpers import parse_boolean
 from firm_ce.common.jit_overload import jitclass
-from firm_ce.common.typing import nbfloat, npfloat, nbint, npint, nbintp
+from firm_ce.common.typing import nbfloat, npfloat, nbint, nbintp
 from firm_ce.common.helpers import parse_comma_separated, parse_ditherable_hyperparameter
 
 
@@ -294,5 +294,11 @@ expected_mga_hyperparameters = {
         "ditherable": False,
         "broadcastable": True,
         "types": ((int, 0, np.inf),),
+    },
+    "mga_fitness": {
+        "default": "angular",
+        "ditherable": False,
+        "broadcastable": True,
+        "types": ((str, ("angular", "L2", "L1")),),
     },
 }

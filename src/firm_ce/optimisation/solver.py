@@ -203,7 +203,6 @@ class Solver:
             parallelize=False,  # we implement parallelisation independently
             callback=self.mga_callback,
             include_obj_in_fitness=True,
-            angular_fitness=True
         )
 
         if self.config.restart_optimisation:
@@ -278,6 +277,7 @@ class Solver:
                 mutation_scaler=np.ones_like(self.scenario.lower_bounds),
                 space_scaler=self.scenario.projection_matrix,
                 objective_scaler=1.0,
+                fitness_method=self.config.mga_fitness[step]
             )
 
             algorithm.step()

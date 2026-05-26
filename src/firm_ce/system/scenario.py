@@ -158,11 +158,13 @@ class Scenario:
             yeartuple = firstyear, finalyear
 
         load_datafiles_to_network(
-            self.network, datafiles, self.limit_timesteps, yeartuple, demand_multiple=self.demand_multiple, interval_aggregation=self.interval_aggregation
+            self.network, datafiles, self.limit_timesteps, yeartuple, self.demand_multiple, self.interval_aggregation
         )
-        load_datafiles_to_generators(self.fleet, datafiles, self.static.resolution, self.limit_timesteps, yeartuple, interval_aggregation=self.interval_aggregation)
-        load_datafiles_to_fuels(self.fleet, datafiles, yeartuple, interval_aggregation=self.interval_aggregation)
-        load_datafiles_to_storages(self.fleet, datafiles, self.limit_timesteps, yeartuple, interval_aggregation=self.interval_aggregation)
+        load_datafiles_to_generators(
+            self.fleet, datafiles, self.static.resolution, self.limit_timesteps, yeartuple, self.interval_aggregation
+        )
+        load_datafiles_to_fuels(self.fleet, datafiles, yeartuple, self.interval_aggregation)
+        load_datafiles_to_storages(self.fleet, datafiles, self.limit_timesteps, yeartuple, self.interval_aggregation)
 
         static_m.set_year_energy_demand(self.static, self.network.nodes)
         self.data_status = True

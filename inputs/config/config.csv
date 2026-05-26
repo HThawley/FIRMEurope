@@ -27,3 +27,4 @@ id,name,value
 25,mga_pop_size,"16,24"
 26,mga_disp_rate,1
 27,mga_verbose_level,3
+28,mga_fitness,angular
