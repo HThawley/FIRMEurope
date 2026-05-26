@@ -144,7 +144,6 @@ class Solver:
 
     def get_mhmga_args(self) -> dict:
         if self.config.save_details:
-            self.niche_tracker = np.array([0], dtype=npintp)  # scalar array for mutability and njit compat
             self.details = np.empty(
                 (
                     self.config.mga_start_niches + sum(self.config.mga_new_niches),  # max niches
@@ -159,7 +158,6 @@ class Solver:
                 self.config.balancing_type,
                 self.config.fixed_costs_threshold,
                 self.details,
-                self.niche_tracker,
             )
         else:
             args = (
@@ -203,7 +201,7 @@ class Solver:
             parallelize=False,  # we implement parallelisation independently
             callback=self.mga_callback,
             include_obj_in_fitness=True,
-            angular_fitness=True
+            # angular_fitness=True
         )
 
         if self.config.restart_optimisation:
@@ -478,9 +476,6 @@ class Solver:
     def mga_callback(self, population: Population) -> None:
         out_dir = self.scenario.solution_dir
 
-        if self.config.save_details:
-            self.niche_tracker[:] = 0
-
         # Save best solution from last iteration
         with open(os.path.join(out_dir, "callback.csv"), "a", newline="") as f:
             writer = csv.writer(f)
@@ -527,9 +522,6 @@ class Solver:
 
     def mga_extrema_callback(self, population: Population) -> None:
         out_dir = self.scenario.solution_dir
-
-        if self.config.save_details:
-            self.niche_tracker[:] = 0
 
         if SAVE_POPULATION:
             # Vectorized flattening: reshape(-1) turns (num_niches, pop_size) into (total_pop,)

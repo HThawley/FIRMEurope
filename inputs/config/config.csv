@@ -18,12 +18,12 @@ id,name,value
 16,mga_elite_count,0.4
 17,mga_tourn_count,-1
 18,mga_tourn_size,2
-19,mga_steps,2
+19,mga_steps,1
 20,mga_noptimal_rel,0.002
 21,mga_noptimal_abs,0.001
 22,mga_log_freq,1
 23,mga_niche_elitism,selfish
-24,mga_iter,"1,150"
-25,mga_pop_size,"16,24"
+24,mga_iter,100
+25,mga_pop_size,"24"
 26,mga_disp_rate,1
 27,mga_verbose_level,3
