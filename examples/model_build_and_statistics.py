@@ -19,7 +19,6 @@ from firm_ce.analysis.display import Display
 
 
 def run_statistics(scenario, run_mode):
-    global display
     scenario.load_datafiles(model.datafile_filenames_dict, model.data_directory)
 
     # if run_mode == "new":
@@ -62,19 +61,19 @@ def run_statistics(scenario, run_mode):
     scenario.validation.dump_logs()
 
     print(f"Generating plots {scenario.name}")
-    display = Display(scenario, model.config, solution=scenario.statistics.solution)
+    scenario.display = Display(scenario, model.config, solution=scenario.statistics.solution)
 
     if model.config.type=="mhmga":
-        display.plot_energy_mix(atlas=True, chart_type="bar", indices=[0, 1, 2])
-        display.plot_energy_mix(atlas=True, delta=True, chart_type="bar", indices=[0, 1, 2])
-        display.plot_energy_mix(curtailment=False, alternative=2)
-        display.plot_energy_mix(curtailment=True)
+        scenario.display.plot_energy_mix(atlas=True, chart_type="bar", indices=[0, 1, 2, 3])
+        scenario.display.plot_energy_mix(atlas=True, delta=True, chart_type="bar", indices=[0, 1, 2, 3])
+        scenario.display.plot_energy_mix(curtailment=False, alternative=2)
+        scenario.display.plot_energy_mix(curtailment=True)
 
     #TODO: Energy mix based on consumption / generation
-    display.plot_energy_mix()
-    display.plot_power_capacity()
-    display.plot_power_capacity(build="existing")
-    display.plot_power_capacity(build="new_build")
+    scenario.display.plot_energy_mix()
+    scenario.display.plot_power_capacity()
+    scenario.display.plot_power_capacity(build="existing")
+    scenario.display.plot_power_capacity(build="new_build")
 
     # raise KeyboardInterrupt
 

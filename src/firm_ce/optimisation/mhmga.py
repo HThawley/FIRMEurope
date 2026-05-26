@@ -19,8 +19,7 @@ def mga_wrapper_with_details(
     balancing_type: unicode_type,
     fixed_costs_threshold: nbfloat,
     details: nbfloat[:, :, :],
-    niche_tracker: nbintp[:],
-) -> tuple[nbfloat[:], nbfloat[:], nbfloat[:, :]]:
+) -> tuple[nbfloat[:], nbfloat[:]]:
     """
     """
     xs = xs.astype(nbfloat)
@@ -29,7 +28,7 @@ def mga_wrapper_with_details(
     penalties = np.zeros(n_points, dtype=npfloat)
     # scaled_points = np.zeros(xs.shape, dtype=npfloat)
 
-    niche_idx = niche_tracker[0]
+    pop_size = details.shape[1]
 
     for j in prange(n_points):
         xj = xs[j]
@@ -39,9 +38,10 @@ def mga_wrapper_with_details(
         lcoe[j] = solution.lcoe
         penalties[j] = solution.penalties
         # scaled_points[j] = get_scaled_points(solution)
-        extract_details(solution, details[niche_idx, j])
 
-    niche_tracker[0] += 1
+        niche_idx = j // pop_size
+        indiv_idx = j % pop_size
+        extract_details(solution, details[niche_idx, indiv_idx])
 
     return lcoe, penalties
 
@@ -54,7 +54,7 @@ def mga_wrapper(
     network: Network_InstanceType,
     balancing_type: unicode_type,
     fixed_costs_threshold: nbfloat,
-) -> tuple[nbfloat[:], nbfloat[:], nbfloat[:, :]]:
+) -> tuple[nbfloat[:], nbfloat[:]]:
     """
     """
     xs = xs.astype(nbfloat)

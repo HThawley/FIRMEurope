@@ -28,4 +28,4 @@ FASTMATH = True
 LEAPDAYS = False
 # numba disables bounds checking for improved speed
 # means that IndexErrors lead to ungraceful crashes - set to True for graceful handling
-BOUNDSCHECK = True
+BOUNDSCHECK = False

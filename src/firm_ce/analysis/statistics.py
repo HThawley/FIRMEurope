@@ -75,7 +75,7 @@ class Statistics:
             ('Value', pa.float32())  # Downcast to float32
         ])
         writer = pq.ParquetWriter(self.temporal_file_path, schema)
-        time_steps = np.arange(self.full_intervals_count, dtype=np.int32)
+        time_steps = np.arange(self.intervals_count, dtype=np.int32)
         n_steps = len(time_steps)
 
         def write_trace(meta, variable_name, trace_array):
