@@ -3,8 +3,8 @@ import gc
 from typing import Dict
 from re import sub
 import os
-
 import numpy as np
+from collections import defaultdict
 from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult
 
@@ -330,7 +330,6 @@ class Scenario:
         Constructs an (N, K) projection matrix for space_scaler, mapping N decision
         variables to K aggregate unit types.
         """
-        from collections import defaultdict
         # allows safe append in a single line without checking if the key exists first
         groups = defaultdict(list)
 
@@ -357,6 +356,7 @@ class Scenario:
         for k, (_, indices) in enumerate(groups.items()):
             projection_matrix[indices, k] = 1.0
 
+        self.projection_groups = groups
         self.projection_matrix = projection_matrix
 
     def inspect_mhmga_recombination(

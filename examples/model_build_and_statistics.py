@@ -64,16 +64,24 @@ def run_statistics(scenario, run_mode):
     scenario.display = Display(scenario, model.config, solution=scenario.statistics.solution)
 
     if model.config.type=="mhmga":
-        scenario.display.plot_energy_mix(atlas=True, chart_type="bar", indices=[0, 1, 2, 3])
+        scenario.display.plot_energy_mix(atlas=True, chart_type="pie", indices=[0, 1, 2, 3])
         scenario.display.plot_energy_mix(atlas=True, delta=True, chart_type="bar", indices=[0, 1, 2, 3])
         scenario.display.plot_energy_mix(curtailment=False, alternative=2)
-        scenario.display.plot_energy_mix(curtailment=True)
+        data = []
+        for s in scenario.display.noptima:
+            col = dict(zip(scenario.projection_groups.keys(), s.x@scenario.projection_matrix))
+            data.append(col)
+        df = pd.DataFrame(data)
+        scenario.noptima_summary = df
+        print(df)
 
     #TODO: Energy mix based on consumption / generation
     scenario.display.plot_energy_mix()
     scenario.display.plot_power_capacity()
-    scenario.display.plot_power_capacity(build="existing")
-    scenario.display.plot_power_capacity(build="new_build")
+    # scenario.display.plot_power_capacity(build="existing")
+    # scenario.display.plot_power_capacity(build="new_build")
+
+    data = []
 
     # raise KeyboardInterrupt
 
@@ -92,5 +100,4 @@ if __name__ == "__main__":
 
     for name in ("base",):
         scenario = model.scenarios[name]
-        model.config.type == "single_time"
         run_statistics(scenario, RUN_MODE)
