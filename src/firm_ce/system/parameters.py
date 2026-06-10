@@ -132,7 +132,10 @@ class ModelConfig:
                         raise ValueError(f"{param_name} not broadcastable to mga_steps")
                     for i, item in enumerate(value):
                         valid_type = check_type(param_name, param_dict, item)
-                        value[i] = valid_type(item)
+                        if valid_type is bool:
+                            value[i] = True if item.lower() == 'true' else False
+                        else:
+                            value[i] = valid_type(item)
                     setattr(self, param_name, value)
 
                 else:
@@ -154,6 +157,9 @@ def check_type(param_name, param_dict, item):
             if not isinstance(item, typer[0]):
                 continue
             if item not in typer[1]:
+                continue
+        elif typer[0] == bool:
+            if not item.lower() in ('false', 'none', 'true'):
                 continue
         else:  # numeric
             item = coercive_type_cast(item, typer[0])
@@ -272,10 +278,10 @@ expected_mga_hyperparameters = {
         "types": ((int, 0, np.inf),),
     },
     "mga_niche_elitism": {
-        "default": "selfish",
+        "default": True,
         "ditherable": False,
         "broadcastable": True,
-        "types": ((str, ("none", "selfish", "unselfish")),),
+        "types": ((bool, ("none", "selfish", "unselfish")),),
     },
     "mga_log_freq": {
         "default": 1,
@@ -299,6 +305,6 @@ expected_mga_hyperparameters = {
         "default": "angular",
         "ditherable": False,
         "broadcastable": True,
-        "types": ((str, ("angular", "L2", "L1")),),
+        "types": ((str, ("angular", "l2", "l1")),),
     },
 }
