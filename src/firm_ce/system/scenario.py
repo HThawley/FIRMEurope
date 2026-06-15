@@ -39,7 +39,6 @@ class Scenario:
         self.scenario_data = self.model_data.scenarios[scenario_id]
         self.id = scenario_id
         self.name = self.scenario_data["scenario_name"].lower()
-        self.type = self.scenario_data["type"]
 
         self.limit_timesteps = None
         self.demand_multiple = npfloat(1.0)

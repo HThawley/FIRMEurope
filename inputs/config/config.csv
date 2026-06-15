@@ -1,6 +1,6 @@
 id,name,value
 0,type,mhmga
-1,model_name,FIRMeur_mga
+1,model_name,FIRMeur_7pc
 2,restart_optimisation,True
 3,save_details,True
 4,model_location,new
@@ -8,10 +8,10 @@ id,name,value
 6,fixed_costs_threshold,500
 7,demand_multiple,2.0
 8,interval_aggregation,24
-9,mga_mutation_prob,"(0.2,0.8)"
+9,mga_mutation_prob,"(0.1,0.5)"
 10,mga_mutation_sigma,"(0.005,0.2)"
 11,mga_mutation_alpha,0.0
-12,mga_start_niches,20
+12,mga_start_niches,25
 13,mga_new_niches,"0"
 14,mga_crossover_prob,"(0.1,0.4)"
 15,mga_champ_count,0.1
@@ -19,12 +19,12 @@ id,name,value
 17,mga_tourn_count,-1
 18,mga_tourn_size,2
 19,mga_steps,1
-20,mga_noptimal_rel,0.20
+20,mga_noptimal_rel,0.002
 21,mga_noptimal_abs,0.001
 22,mga_log_freq,1
 23,mga_niche_elitism,True
-24,mga_iter,"300"
+24,mga_iter,"100"
 25,mga_pop_size,"48"
 26,mga_disp_rate,1
 27,mga_verbose_level,3
-28,mga_fitness,L2
+28,mga_fitness,L1

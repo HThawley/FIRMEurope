@@ -65,11 +65,12 @@ def run_statistics(scenario, run_mode):
 
     if model.config.type=="mhmga":
         scenario.display.plot_energy_mix(atlas=True, chart_type="pie", indices=[0, 1, 2, 3])
+        scenario.display.plot_power_capacity(atlas=True, chart_type="pie", indices=[0, 1, 2, 3])
         scenario.display.plot_energy_mix(atlas=True, delta=True, chart_type="bar", indices=[0, 1, 2, 3])
-        scenario.display.plot_energy_mix(curtailment=False, alternative=2)
+        # scenario.display.plot_energy_mix(curtailment=False, alternative=2)
         data = []
         for s in scenario.display.noptima:
-            col = dict(zip(scenario.projection_groups.keys(), s.x@scenario.projection_matrix))
+            col = dict(zip(scenario.projection_groups.keys(), s.x @ scenario.projection_matrix))
             data.append(col)
         df = pd.DataFrame(data)
         scenario.noptima_summary = df
@@ -98,6 +99,6 @@ if __name__ == "__main__":
     model_build_time = time.time()
     print(f"Model build time: {model_build_time - start_time:.4f} seconds")
 
-    for name in ("base",):
+    for name in ("7percent",):
         scenario = model.scenarios[name]
         run_statistics(scenario, RUN_MODE)
