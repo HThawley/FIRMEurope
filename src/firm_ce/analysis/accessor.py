@@ -444,7 +444,7 @@ class Accessor:
         """
         Returns the import/export trace of a node
         """
-        return asset.imports_exports
+        return asset.imports_exports * self.factor
 
     def get_discharge_trace(self, asset: Any) -> NDArray[npfloat]:
         """
@@ -527,16 +527,18 @@ class Accessor:
         gets generation only. charging is not included, only discharging.
         Used for calculating curtailment at a node.
         """
-        node_generation = sum(
-            (self.get_power_trace(_asset) for _asset in self.solution.fleet.generators.values() if _asset.node.id == asset.node.id)
-        )
+        node_generation = np.zeros(self.solution.static.intervals_count, dtype=npfloat)
+
+        for _asset in self.solution.fleet.generators.values():
+            if _asset.node.id == asset.node.id:
+                node_generation += self.get_power_trace(_asset)
 
         # in principle, when spillage occurs this is zero - but calculated for robustness
-        node_generation += sum(
-            (self.get_discharge_trace(_asset) for _asset in self.solution.fleet.storages.values()
-             if _asset.node.id == asset.node.id)
-        )
-        return node_generation * self.factor
+        for _asset in self.solution.fleet.storages.values():
+            if _asset.node.id == asset.node.id:
+                node_generation += self.get_discharge_trace(_asset)
+
+        return node_generation
 
     def get_nominal_curtailment_trace(self, asset: Any) -> NDArray[npfloat]:
         """
@@ -544,7 +546,7 @@ class Accessor:
         nominal curtailment is all spillage apportioned according to the asset's share of generation at the node
         """
         nodal_generation = self.get_nodal_generation_trace(asset)
-        asset_generation = self.get_power_trace(asset)
+        asset_generation = np.maximum(0, self.get_power_trace(asset))
         spillage = self.get_spillage_trace(asset.node)
 
         curtailment = spillage * safe_divide_array(asset_generation, nodal_generation)
@@ -705,3 +707,54 @@ class Accessor:
         result = (tier_gen, tier_curtailment)
         self._curtailment_cache[cache_key] = result
         return result
+
+    ###
+
+    def get_net_flow_trace(self, asset: Any) -> NDArray[npfloat]:
+        """
+        Returns the net flow trace for a node (MW).
+        Positive values = Net Import. Negative values = Net Export.
+        """
+        if asset.object_class != "node":
+            raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Node and therefore has no net flow trace.")
+
+        return self.get_imports_exports_trace(asset)
+
+    def get_gross_export_trace(self, node: Any) -> NDArray[npfloat]:
+        return np.maximum(0, -self.get_net_flow_trace(node))
+
+    def get_gross_import_trace(self, node: Any) -> NDArray[npfloat]:
+        return np.maximum(0, self.get_net_flow_trace(node))
+
+    def get_retention_trace(self, node: Any) -> NDArray[npfloat]:
+        """
+        Calculates R(t), the fraction of local generation consumed locally.
+        R(t) = max(0, (G(t) - E(t)) / G(t))
+        """
+        actual_nodal_gen = np.zeros(self.solution.static.intervals_count)
+
+        # Array-safe accumulation
+        for a in self._get_assets_at_node_cached(node.id):
+            actual_nodal_gen += self.get_post_curtailment_power_trace(a)
+
+        exports = self.get_gross_export_trace(node)
+
+        # Calculate retention factor per interval, preventing divide
+        retention = np.maximum(0, safe_divide_array(actual_nodal_gen - exports, actual_nodal_gen))
+        return retention
+
+    def get_local_consumption_net(self, asset: Any) -> float:
+        """
+        Returns the total locally consumed energy (MWh) for an asset.
+        """
+        gen_trace = self.get_post_curtailment_power_trace(asset)
+        retention_trace = self.get_retention_trace(asset.node)
+
+        local_trace = gen_trace * retention_trace
+        return np.sum(local_trace) * self.resolution
+
+    def get_gross_import_net(self, node: Any) -> float:
+        """
+        Returns the total imported energy (MWh) for a node over the simulation.
+        """
+        return np.sum(self.get_gross_import_trace(node)) * self.resolution

@@ -162,7 +162,11 @@ class Display:
         global_max_delta = 1
         if delta:
             ref_data = (
-                self._aggregate_solution_energy_by_node(ref_sol, kwargs.get("curtailment", False))
+                self._aggregate_solution_energy_by_node(
+                    ref_sol,
+                    kwargs.get("curtailment", False),
+                    kwargs.get("energy_mode", "generation")
+                )
                 if data_type == "energy"
                 else self._aggregate_solution_capacity_by_node(ref_sol, kwargs.get("build", "all"))
             )
@@ -170,7 +174,11 @@ class Display:
             for idx in indices[1:]:
                 comp_sol = self.noptima[idx] if self.mhmga else self.solution
                 comp_data = (
-                    self._aggregate_solution_energy_by_node(comp_sol, kwargs.get("curtailment", False))
+                    self._aggregate_solution_energy_by_node(
+                        comp_sol,
+                        kwargs.get("curtailment", False),
+                        kwargs.get("energy_mode", "generation")
+                    )
                     if data_type == "energy"
                     else self._aggregate_solution_capacity_by_node(comp_sol, kwargs.get("build", "all"))
                 )
@@ -192,7 +200,11 @@ class Display:
 
             if is_delta_axis:
                 comp_data = (
-                    self._aggregate_solution_energy_by_node(target_sol, kwargs.get("curtailment", False))
+                    self._aggregate_solution_energy_by_node(
+                        target_sol,
+                        kwargs.get("curtailment", False),
+                        kwargs.get("energy_mode", "generation")
+                    )
                     if data_type == "energy"
                     else self._aggregate_solution_capacity_by_node(target_sol, kwargs.get("build", "all"))
                 )
@@ -231,125 +243,6 @@ class Display:
         if kwargs.get("legend", True):
             self._add_legend(ax, delta_dict)
 
-    # def _plot_single(
-    #     self,
-    #     data_type: str,
-    #     alternative: int = 0,
-    #     save_path: str = None,
-    #     **kwargs
-    # ):
-    #     """Plots one specific solution (either optimal or a specific MGA alternative)."""
-    #     sol = self.noptima[alternative] if self.mhmga else self.solution
-    #     fig, axes = self._setup_map_axis(nrows=1, ncols=1)
-    #     ax = axes[0]
-
-    #     self._draw_solution_on_axis(ax, sol, data_type, **kwargs)
-
-    #     title = f"{data_type.capitalize()} Mix - {'Alternative ' + str(alternative) if self.mhmga else 'Optimal'}"
-    #     if data_type == "capacity":
-    #         build_info = str(kwargs.get("build", "all")).replace("_", " ").title()
-    #         title += f" - Capacity: {build_info}"
-
-    #     ax.set_title(title)
-
-    #     if save_path:
-    #         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    #     return ax
-
-    # def _plot_atlas(
-    #     self,
-    #     data_type: str,
-    #     indices: List[int] = None,
-    #     grid: Tuple[int, int] = (2, 2),
-    #     save_path: str = None,
-    #     **kwargs
-    # ):
-    #     """Plots a grid of multiple MGA alternatives."""
-    #     if not self.mhmga:
-    #         print("Atlas mode requires MGA alternatives.")
-    #         return self._plot_single(data_type, **kwargs)
-
-    #     indices = indices or list(range(min(len(self.noptima), grid[0] * grid[1])))
-    #     fig, axes = self._setup_map_axis(nrows=grid[0], ncols=grid[1])
-
-    #     for i, idx in enumerate(indices):
-    #         if i >= len(axes):
-    #             break
-    #         ax = axes[i]
-    #         sol = self.noptima[idx]
-    #         self._draw_solution_on_axis(ax, sol, data_type, **kwargs)
-    #         ax.set_title(f"Alt {idx}", fontsize=10)
-
-    #     title = f"MGA Atlas: {data_type.capitalize()} Variations"
-    #     if data_type == "capacity":
-    #         build_info = str(kwargs.get("build", "all")).replace("_", " ").title()
-    #         title += f" - Capacity: {build_info}"
-
-    #     fig.suptitle(title, fontsize=16)
-
-    #     if save_path:
-    #         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    #     return axes
-
-    # def _plot_delta(self, data_type: str, alt_a: int = 0, alt_b: int = 1, save_path: str = None, **kwargs):
-    #     """
-    #     Modified Delta Plot: Uses mini-bar charts for Solution B - Solution A.
-    #     """
-    #     sol_a = self.noptima[alt_a] if self.mhmga else self.solution
-    #     sol_b = self.noptima[alt_b] if self.mhmga else self.solution
-
-    #     chart_scale = kwargs.get("chart_scale", 1.0)
-
-    #     fig, axes = self._setup_map_axis(nrows=1, ncols=1)
-    #     ax = axes[0]
-
-    #     # Aggregate data as before
-    #     if data_type == "energy":
-    #         data_a = self._aggregate_solution_energy_by_node(sol_a, kwargs.get("curtailment", False))
-    #         data_b = self._aggregate_solution_energy_by_node(sol_b, kwargs.get("curtailment", False))
-    #     else:
-    #         data_a = self._aggregate_solution_capacity_by_node(sol_a, kwargs.get("build", "all"))
-    #         data_b = self._aggregate_solution_capacity_by_node(sol_b, kwargs.get("build", "all"))
-
-    #     delta_data = self._calculate_delta_dict(data_a, data_b)
-
-    #     # Calculate global max for y-axis normalization across all mini-bars
-    #     global_max_delta = max(
-    #         (max([abs(v) for v in d.values()], default=0) for d in delta_data.values()),
-    #         default=1
-    #     )
-
-    #     for node_name, mix in delta_data.items():
-    #         if node_name not in self.centroids: continue
-
-    #         # Filter zero entries and sort
-    #         filtered_mix = {k: v for k, v in mix.items() if abs(v) > kwargs.get("threshold", 1e-3)}
-    #         if not filtered_mix: continue
-
-    #         x_coord, y_coord = self.centroids[node_name]
-    #         self._draw_bars(
-    #             ax,
-    #             filtered_mix,
-    #             x_coord,
-    #             y_coord,
-    #             global_max_delta,
-    #             is_delta=True,
-    #             chart_scale=chart_scale
-    #         )
-
-    #     if kwargs.get("legend", True):
-    #         self._add_legend(ax, delta_data)
-
-    #     title = f"Delta: Alt {alt_b} - Alt {alt_a} ({data_type})"
-    #     if data_type == "capacity":
-    #         build_info = str(kwargs.get("build", "all")).replace("_", " ").title()
-    #         title += f" - Capacity: {build_info}"
-    #     ax.set_title(title, fontsize=14)
-
-    #     if save_path:
-    #         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    #     return ax
-
     def _calculate_delta_dict(self, dict_a, dict_b):
         """Helper to subtract two node-tech dictionaries."""
         delta = {}
@@ -384,7 +277,11 @@ class Display:
 
         # Data aggregation
         if data_type == "energy":
-            node_data = self._aggregate_solution_energy_by_node(solution, kwargs.get("curtailment", False))
+            node_data = self._aggregate_solution_energy_by_node(
+                solution,
+                kwargs.get("curtailment", False),
+                kwargs.get("energy_mode", "generation")
+            )
             flow_type = "energy"
         else:
             node_data = self._aggregate_solution_capacity_by_node(solution, kwargs.get("build", "all"))
@@ -640,7 +537,7 @@ class Display:
                 alpha=alpha,
             )
 
-    def _aggregate_solution_energy_by_node(self, solution, curtailment=False):
+    def _aggregate_solution_energy_by_node(self, solution, curtailment=False, energy_mode="generation"):
         """
         Scans fleet generators, storages to sum energy by node and tech.
         """

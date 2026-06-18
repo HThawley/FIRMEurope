@@ -13,7 +13,6 @@ import pyarrow.parquet as pq
 
 from firm_ce.common.constants import SAVE_POPULATION
 from firm_ce.common.typing import npfloat
-from firm_ce.fast_methods import static_m
 from firm_ce.analysis.accessor import Accessor
 from firm_ce.io.file_manager import ResultFile
 from firm_ce.optimisation.st_solution import Solution, evaluate
@@ -203,10 +202,15 @@ class Statistics:
 
         file_functions = {
             "x": self.generate_x_file,
-            "summary": self._view_summary,
-            "capacities": self._view_capacities,
-            "component_costs": self._view_component_costs,
-            "levelised_costs": self._view_levelised_costs,
+            "nodal_capacity_matrix": self._view_nodal_capacity_matrix,
+            "summary_ASSETS": self._view_summary_assets,
+            "summary_NODES": self._view_summary_nodes,
+            "capacities_ASSETS": self._view_capacities_assets,
+            "capacities_NODES": self._view_capacities_nodes,
+            "components_ASSETS": self._view_component_costs_assets,
+            "components_NODES": self._view_component_costs_nodes,
+            "levelised_cost_ASSETS": self._view_levelised_cost_assets,
+            "levelised_cost_NODES": self._view_levelised_cost_nodes,
             "energy_balance_NETWORK": self._view_energy_balance_network,
             "energy_balance_NODES": self._view_energy_balance_nodes,
             "energy_balance_ASSETS": self._view_energy_balance_assets,
@@ -295,38 +299,165 @@ class Statistics:
 
         return lf if is_lazy else lf.collect()
 
-    def _view_capacities(self) -> ResultFile:
+    def _view_nodal_capacity_matrix(self) -> ResultFile:
+        """
+        View: Nodal Capacity Matrix. Nodes as rows, Unit Types as columns.
+        """
+        df_assets = pl.from_pandas(self.df_static.reset_index())
+
+        # 1. Extract and format Generators and Storage (drops "Node" assets)
+        df_gen_stor = (
+            df_assets.filter(
+                pl.col("Asset Type").is_in(["Generator", "Storage"]) & pl.col("Node").is_not_null()
+            )
+            .select(["Node", "Asset Type", "Unit Type", "Power Capacity", "Energy Capacity"])
+            .with_columns([
+                pl.col("Power Capacity").cast(pl.Float64),
+                pl.col("Energy Capacity").cast(pl.Float64),
+            ])
+            .fill_null(0.0)
+        )
+
+        # 2. Extract Lines via Accessor to double-count for connected nodes
+        accessor = Accessor(self.solution, "GW")
+        lines = accessor.get_assets("major_lines")
+        line_rows = []
+        for line in lines.values():
+            cap = accessor.get_power_capacity(line, errors="coerce")
+            if pd.isna(cap): cap = 0.0
+
+            u_type = getattr(line, "unit_type", "transmission")
+            start_node = line.node_start.name
+            end_node = line.node_end.name
+
+            # Add to both connected nodes
+            line_rows.append({
+                "Node": start_node,
+                "Asset Type": "Line",
+                "Unit Type": u_type,
+                "Power Capacity": cap,
+                "Energy Capacity": 0.0
+            })
+            line_rows.append({
+                "Node": end_node,
+                "Asset Type": "Line",
+                "Unit Type": u_type,
+                "Power Capacity": cap,
+                "Energy Capacity": 0.0
+            })
+
+        df_lines = pl.DataFrame(
+            line_rows,
+            schema={
+                "Node": pl.String,
+                "Asset Type": pl.String,
+                "Unit Type": pl.String,
+                "Power Capacity": pl.Float64,
+                "Energy Capacity": pl.Float64
+            }
+        )
+
+        # 3. Combine Gen/Storage with Lines
+        df_all = pl.concat([df_gen_stor, df_lines], how="vertical")
+
+        # 4. Calculate high-level aggregations
+        df_agg = df_all.group_by("Node").agg([
+            pl.when(pl.col("Asset Type") == "Generator"
+                    ).then(pl.col("Power Capacity")).otherwise(0.0).sum().alias("Generation (GW)"),
+            pl.when(pl.col("Asset Type") == "Storage"
+                    ).then(pl.col("Power Capacity")).otherwise(0.0).sum().alias("Storage Power (GW)"),
+            pl.when(pl.col("Asset Type") == "Storage"
+                    ).then(pl.col("Energy Capacity")).otherwise(0.0).sum().alias("Storage Energy (GWh)"),
+            pl.when(pl.col("Asset Type") == "Line"
+                    ).then(pl.col("Power Capacity")).otherwise(0.0).sum().alias("Transmission (GW)")
+        ])
+
+        # 5. Pivot detailed Unit Types (Power Capacity)
+        df_pivot = df_all.pivot(
+            values="Power Capacity",
+            index="Node",
+            on="Unit Type",
+            aggregate_function="sum"
+        ).fill_null(0.0)
+
+        # 6. Join Aggregations with Pivot and sort columns
+        df_matrix = df_agg.join(df_pivot, on="Node", how="left").fill_null(0.0)
+
+        agg_cols = ["Generation (GW)", "Storage Power (GW)", "Storage Energy (GWh)", "Transmission (GW)"]
+
+        # Extract unit types to enforce strict logical column ordering
+        gen_units = sorted([u for u in df_all.filter(pl.col("Asset Type") == "Generator"
+                                                     ).select("Unit Type").unique().to_series().to_list() if u])
+        stor_units = sorted([u for u in df_all.filter(pl.col("Asset Type") == "Storage"
+                                                      ).select("Unit Type").unique().to_series().to_list() if u])
+        line_units = sorted([u for u in df_all.filter(pl.col("Asset Type") == "Line"
+                                                      ).select("Unit Type").unique().to_series().to_list() if u])
+
+        ordered_cols = ["Node"] + agg_cols + gen_units + stor_units + line_units
+        df_matrix = df_matrix.select(ordered_cols).sort("Node")
+
+        return ResultFile("nodal_capacity_matrix", self.results_directory, df_matrix.lazy(), decimals=3)
+
+    def _view_capacities_assets(self):
+        return self._view_capacities(aggregation="assets")
+
+    def _view_capacities_nodes(self):
+        return self._view_capacities(aggregation="nodes")
+
+    def _view_capacities(self, aggregation="assets") -> ResultFile:
         """
         View: Static Capacity Data.
         Units: MW -> GW (Output)
         """
         # Select relevant columns from master static table
-        string_cols = ["Asset Name", "Asset Type", "Unit Type", "Node"]
-
         numeric_cols = [
             "Power Capacity", "Energy Capacity", "Existing Power", "Existing Energy", "New Build Power",
             "New Build Energy", "Min Build Power", "Min Build Energy", "Max Build Power", "Max Build Energy",
         ]
+        df = pl.from_pandas(self.df_static.reset_index())
 
-        df = pl.from_pandas(self.df_static.reset_index()).select(string_cols + numeric_cols)
-        df = self._apply_standard_sort(df, index_cols=string_cols)
+        if aggregation == "nodes":
+            df = (
+                df.with_columns(pl.col("Node").cast(pl.String).fill_null("Network"))
+                  .group_by("Node")
+                  .agg([pl.col(c).sum() for c in numeric_cols])
+                  .sort("Node")
+            )
+            col_names = "Node"
+        else:
+            string_cols = ["Asset Name", "Asset Type", "Unit Type", "Node"]
+            df = df.select(string_cols + numeric_cols)
+            df = self._apply_standard_sort(df, index_cols=string_cols)
+            df = df.with_columns(
+                pl.concat_str(
+                    [pl.col(c).cast(pl.String).fill_null("None") for c in string_cols]
+                    , separator="|"
+                ).alias("_asset_string")
+            ).drop(string_cols)
+            col_names = "_asset_string"
 
-        df = df.with_columns(
-            pl.concat_str([pl.col(c).cast(pl.String).fill_null("None") for c in string_cols], separator="|").alias("_asset_string")
-        ).drop(string_cols)
+        df = df.transpose(include_header=True, header_name="Metric", column_names=col_names)
 
-        df = df.transpose(include_header=True, header_name="Metric", column_names="_asset_string")
+        return ResultFile(
+            f"capacities_{aggregation.upper()}",
+            self.results_directory,
+            df.lazy(),
+            decimals=3,
+            write_kwargs={"multiindex_delimiter": "|"}
+        )
 
-        return ResultFile("capacities", self.results_directory, df.lazy(), decimals=3, write_kwargs={"multiindex_delimiter": "|"})
+    def _view_component_costs_assets(self):
+        return self._view_component_costs(aggregation="assets")
 
-    def _view_component_costs(self) -> ResultFile:
+    def _view_component_costs_nodes(self):
+        return self._view_component_costs(aggregation="nodes")
+
+    def _view_component_costs(self, aggregation) -> ResultFile:
         """
         View: Asset Costs.
         Units: $ (No conversion needed)
         """
-        string_cols = ["Asset Name", "Asset Type", "Unit Type", "Node"]
         cost_cols = ["Annualised Build", "Fixed O&M", "Variable O&M", "Fuel Cost"]
-
         df = pl.from_pandas(self.df_static.reset_index())
 
         # Ensure all cost cols exist
@@ -334,7 +465,13 @@ class Statistics:
             if c not in df.columns:
                 df = df.with_columns(pl.lit(0.0).alias(c))
 
-        df = df.select(string_cols + cost_cols + ["Power Capacity"])
+        if aggregation == "nodes":
+            df = df.group_by("Node").agg([pl.sum(c) for c in cost_cols] + [pl.col("Power Capacity").sum()])
+            index_cols = ["Node"]
+        else:
+            index_cols = ["Asset Name", "Asset Type", "Unit Type", "Node"]
+            df = df.select(index_cols + cost_cols + ["Power Capacity"])
+
         df = df.with_columns(pl.sum_horizontal(cost_cols).alias("Total Cost"))
 
         # Reorder and Convert to M$
@@ -353,15 +490,25 @@ class Statistics:
             .drop("Power Capacity")
         )
 
-        df = self._apply_standard_sort(df, index_cols=string_cols)
-        df = df.with_columns(
-            pl.concat_str([pl.col(c).cast(pl.String).fill_null("None") for c in string_cols], separator="|").alias("_asset_string")
-        ).drop(string_cols)
+        if aggregation == "assets":
+            df = self._apply_standard_sort(df, index_cols=index_cols)
+            df = df.with_columns(
+                pl.concat_str(
+                    [pl.col(c).cast(pl.String).fill_null("None") for c in index_cols]
+                    , separator="|"
+                ).alias("_asset_string")
+            ).drop(index_cols)
+            col_names = "_asset_string"
+        else:
+            df = df.with_columns(
+                pl.col("Node").cast(pl.String).fill_null("Network")
+            ).sort("Node")
+            col_names = "Node"
 
-        df = df.transpose(include_header=True, header_name="Metric", column_names="_asset_string")
+        df = df.transpose(include_header=True, header_name="Metric", column_names=col_names)
 
         return ResultFile(
-            "component_costs",
+            f"components_{aggregation.upper()}",
             self.results_directory,
             df.lazy(),
             decimals=3,
@@ -524,9 +671,15 @@ class Statistics:
             write_kwargs={"multiindex_delimiter": "|"}
         )
 
-    def _view_summary(self) -> ResultFile:
+    def _view_summary_assets(self):
+        return self._view_summary(aggregation="assets")
+
+    def _view_summary_nodes(self):
+        return self._view_summary(aggregation="nodes")
+
+    def _view_summary(self, aggregation="assets") -> ResultFile:
         resolution = self.solution.static.resolution
-        index_cols = ["Asset Name", "Asset Type", "Unit Type", "Node"]
+        index_cols = ["Asset Name", "Asset Type", "Unit Type", "Node"] if aggregation == "assets" else ["Node"]
 
         # 1. Aggregation
         summary_df = (
@@ -549,37 +702,48 @@ class Statistics:
             summary_df = summary_df.with_columns(pl.col("Inflows") / resolution)
         # summary_df = summary_df.drop(['Fuel_Remaining', 'Stored_Energy'], strict=False)
 
-        # 4. Sort Rows (Assets)
-        summary_df = self._apply_standard_sort(
-            summary_df,
-            index_cols=index_cols,
-            sort_variable_rows=False,
-            sort_variable_columns=True,
-        )
-
-        # 5. Condense Metadata for Transpose
-        summary_df = summary_df.with_columns(
-            pl.concat_str(
-                [pl.col(c).cast(pl.String).fill_null("None") for c in index_cols],
-                separator="|"
-            ).alias("_asset_string")
-        ).drop(index_cols)
+        if aggregation == "assets":
+            # 4. Sort Rows (Assets)
+            summary_df = self._apply_standard_sort(
+                summary_df,
+                index_cols=index_cols,
+                sort_variable_rows=False,
+                sort_variable_columns=True
+            )
+            summary_df = summary_df.with_columns(
+                pl.concat_str(
+                    [pl.col(c).cast(pl.String).fill_null("None") for c in index_cols],
+                    separator="|"
+                ).alias("_asset_string")
+            ).drop(index_cols)
+            col_names = "_asset_string"
+        else:
+            summary_df = summary_df.with_columns(
+                pl.col("Node").cast(pl.String).fill_null("Network")
+            ).sort("Node")
+            col_names = "Node"
 
         summary_df = summary_df.transpose(
             include_header=True,
             header_name="Variable",
-            column_names="_asset_string"
+            column_names=col_names
         )
 
         return ResultFile(
-            "summary",
+            f"summary_{aggregation.upper()}",
             self.results_directory,
             summary_df.lazy(),
             decimals=3,
             write_kwargs={"multiindex_delimiter": "|"}
         )
 
-    def _view_levelised_costs(self) -> ResultFile:
+    def _view_levelised_cost_nodes(self):
+        return self._view_levelised_cost(aggregation="nodes")
+
+    def _view_levelised_cost_assets(self):
+        return self._view_levelised_cost(aggregation="assets")
+
+    def _view_levelised_cost(self, aggregation: str = "assets") -> ResultFile:
         resolution = self.solution.static.resolution
         year_count = self.solution.static.year_count
 
@@ -713,11 +877,10 @@ class Statistics:
             "LCOG [$/MWh]", "LCOS [$/MWh]", "LCOT [$/MWh]", "LCOE [$/MWh]"
         ]
 
-        df_final = pl.concat([
-            df_system.select(keep_cols),
-            df_nodes.select(keep_cols),
-            df_assets.select(keep_cols)
-        ], how="vertical")
+        if aggregation == "nodes":
+            df_final = pl.concat([df_system.select(keep_cols), df_nodes.select(keep_cols)], how="vertical")
+        else:
+            df_final = df_assets.select(keep_cols)
 
         index_cols = ["Asset Name", "Asset Type", "Unit Type", "Node"]
         df_final = self._apply_standard_sort(df_final, index_cols=index_cols)
@@ -728,7 +891,7 @@ class Statistics:
         df_final = df_final.transpose(include_header=True, header_name="Metric", column_names="_asset_string")
 
         return ResultFile(
-            "levelised_costs",
+            f"levelised_cost_{aggregation}",
             self.results_directory,
             df_final.lazy(),
             decimals=3,

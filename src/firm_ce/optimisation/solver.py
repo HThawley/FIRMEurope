@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from firm_ce.system import Scenario
 
 from firm_ce.common.constants import SAVE_POPULATION, PENALTY_MULTIPLIER
-from firm_ce.common.typing import npfloat, npintp
+from firm_ce.common.typing import npfloat
 from firm_ce.optimisation.broad_optimum import (
     append_to_midpoint_csv,
     broad_optimum_objective,
