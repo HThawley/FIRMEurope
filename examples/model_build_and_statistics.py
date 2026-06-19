@@ -9,7 +9,7 @@ only generated for scenarios with an initial guess provided in `initial_guess.cs
 Alternative filepaths for the config and data folders can be provided as arguments to the Model instantiation.
 """
 import time
-import os
+# import os
 import pandas as pd
 
 from firm_ce.model import Model
@@ -40,18 +40,18 @@ def run_statistics(scenario, run_mode):
 
     print(f"Instantiating statistics for scenario: '{scenario.name}'")
     scenario.statistics = Statistics(
+        scenario.results_dir,
+        scenario.name,
         x,
         scenario.static,
         scenario.fleet,
         scenario.network,
-        scenario.results_dir,
-        scenario.name,
         model.config.balancing_type,
         model.config.fixed_costs_threshold,
         False,
     )
     print(f"Generating statistics for scenario {scenario.name}")
-    # scenario.statistics.generate_result_files(write=True, delete=True)
+    scenario.statistics.generate_result_files(write=True, delete=True)
     print(f"Writing statistics results for scenario {scenario.name}")
     # scenario.statistics.write_results()
 
@@ -63,7 +63,7 @@ def run_statistics(scenario, run_mode):
     print(f"Generating plots {scenario.name}")
     scenario.display = Display(scenario, model.config, solution=scenario.statistics.solution)
 
-    if model.config.type=="mhmga":
+    if model.config.type == "mhmga":
         scenario.display.plot_energy_mix(atlas=True, chart_type="pie", indices=[0, 1, 2, 3])
         scenario.display.plot_power_capacity(atlas=True, chart_type="pie", indices=[0, 1, 2, 3])
         scenario.display.plot_energy_mix(atlas=True, delta=True, chart_type="bar", indices=[0, 1, 2, 3])
@@ -76,7 +76,7 @@ def run_statistics(scenario, run_mode):
         scenario.noptima_summary = df
         print(df)
 
-    #TODO: Energy mix based on consumption / generation
+    # TODO: Energy mix based on consumption / generation
     scenario.display.plot_energy_mix()
     scenario.display.plot_power_capacity()
     # scenario.display.plot_power_capacity(build="existing")
@@ -99,6 +99,6 @@ if __name__ == "__main__":
     model_build_time = time.time()
     print(f"Model build time: {model_build_time - start_time:.4f} seconds")
 
-    for name in ("7percent",):
+    for name in ("test",):
         scenario = model.scenarios[name]
         run_statistics(scenario, RUN_MODE)
