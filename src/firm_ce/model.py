@@ -108,12 +108,12 @@ class Model:
         )
 
         scenario.statistics = Statistics(
+            scenario.results_dir,
+            scenario.name,
             de_result.x,
             scenario.static,
             scenario.fleet,
             scenario.network,
-            scenario.results_dir,
-            scenario.name,
             self.config.balancing_type,
             self.config.fixed_costs_threshold,
             True,
@@ -163,12 +163,12 @@ class Model:
         )
 
         scenario.statistics = Statistics(
+            scenario.results_dir,
+            scenario.name,
             result,
             scenario.static,
             scenario.fleet,
             scenario.network,
-            scenario.results_dir,
-            scenario.name,
             self.config.balancing_type,
             self.config.fixed_costs_threshold,
             True,
