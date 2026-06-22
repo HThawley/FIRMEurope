@@ -11,7 +11,7 @@ from time import perf_counter
 @click.option(
     "-s",
     "--scenario",
-    default=21,
+    default=1,
     type=click.IntRange(0),
     required=False,
     show_default=True,
@@ -34,7 +34,7 @@ def statistics(scenario: int):
 @click.option(
     "-s",
     "--scenario",
-    default=21,
+    default=1,
     type=click.IntRange(0),
     required=False,
     show_default=True,
@@ -48,6 +48,15 @@ def statistics(scenario: int):
     required=False,
     show_default=True,
     help="no. of years to model",
+)
+@click.option(
+    "-m",
+    "--networksteps",
+    default=-1,
+    type=click.IntRange(-1),
+    required=False,
+    show_default=True,
+    help="Maximum number of transmission steps for balancing",
 )
 @click.option(
     "-n",
@@ -70,23 +79,24 @@ def statistics(scenario: int):
 def benchmark(
     scenario: int,
     years: int,
+    networksteps: int,
     number: int,
     evals: int,
 ):
 
     print("Running Benchmarking...", end="")
     from firm.Benchmark import Benchmark
-    from firm.Input import Solution_data
-    from firm.Costs import Raw_Costs
+    from firm.Input import StaticData
+    from firm.Costs import RawCosts
 
-    parameters = Parameters(scenario, years, False)
-    sd = Solution_data(*parameters)
-    cost_model = Raw_Costs(sd).CostFactors()
+    parameters = Parameters(scenario, years, 0, networksteps)
+    static = StaticData(*parameters)
+    cost_model = RawCosts(static).CostFactors()
     # compile
-    Benchmark(2, sd, cost_model)
+    Benchmark(2, static, cost_model)
     start = perf_counter()
     for i in range(number):
-        Benchmark(evals, sd, cost_model)
+        Benchmark(evals, static, cost_model)
     time = perf_counter() - start
     print(f"\rBenchmarking took {time/number} per parallel batch of {evals} ({time/number/evals} per eval).")
 
@@ -95,7 +105,7 @@ def benchmark(
 @click.option(
     "-s",
     "--scenario",
-    default=21,
+    default=1,
     type=click.IntRange(0),
     required=False,
     show_default=True,
@@ -110,31 +120,53 @@ def benchmark(
     show_default=True,
     help="no. of years to model",
 )
+@click.option(
+    "-p",
+    "--profile-level",
+    default=-1,
+    type=click.IntRange(-1, 3),
+    required=False,
+    show_default=True,
+    help="Profiling level",
+)
+@click.option(
+    "-m",
+    "--networksteps",
+    default=-1,
+    type=click.IntRange(-1),
+    required=False,
+    show_default=True,
+    help="Maximum number of transmission steps for balancing",
+)
 def profile(
     scenario: int,
     years: int,
+    profile_level: int,
+    networksteps: int,
 ):
     # %%
     print("Running Profiling...", end="")
     from firm.Benchmark import profile
-    from firm.Input import Solution_data
-    from firm.Costs import Raw_Costs
+    from firm.Input import StaticData
+    from firm.Costs import RawCosts
     from firm.Utils import zero_safe_division
 
-    parameters = Parameters(scenario, years, True)
-    sd = Solution_data(*parameters)
-    cost_model = Raw_Costs(sd).CostFactors()
+    parameters = Parameters(scenario, years, profile_level, networksteps)
+    static = StaticData(*parameters)
+    cost_model = RawCosts(static).CostFactors()
 
-    solution, time, ctwt = profile(sd.x0, sd, cost_model, False)  # compile
-    solution, time, ctwt = profile(sd.x0, sd, cost_model, False)
+    # ctwt - cpu time to wall time
+    solution, time, ctwt, overhead = profile(static.x0, static, cost_model)  # compile
+    solution, time, ctwt, overhead = profile(static.x0, static, cost_model)
     ctwt = ctwt * 1000  # seconds to microseconds
     print("\r", " " * 25, "\r")
     print(
-        """Warning: 
-profile measures cpu-time. 
+        """Warning:
+profile measures cpu-time.
 Table times are wall-time apportioned over cpu-cycles
-Not all of the profiling overhead is accounted for. 
-    empirically, unprofiled time is ~30% faster 
+Not all of the profiling overhead is accounted for.
+    empirically, unprofiled time is as much as ~30%
+    faster (also depends on level).
 Profiling overhead is not evenly split between components
     higher level functions (e.g. Transmission) which call lower level funcs
     have higher proportions of overhead attached
@@ -149,149 +181,54 @@ Profiling overhead is not evenly split between components
     table.add_column("Apportioned Time (ms)")
     table.add_column("Time per call")
 
-    calls_profile = sum((getattr(solution, item) for item in dir(solution) if item.startswith("calls_")))
-    time_profile = calls_profile * solution.profile_overhead
+    calls_profile = solution.profile.calls.get_total()
+    time_profile = calls_profile * overhead
 
     table.add_row(
         "Profiler overhead",
         str(calls_profile),
         str(time_profile),
-        str(solution.profile_overhead),
+        str(overhead),
         str(ctwt * time_profile),
-        str(ctwt * solution.profile_overhead),
+        str(ctwt * overhead),
     )
-    table.add_row(
-        "Transmission",
-        str(solution.calls_transmission),
-        str(solution.time_transmission),
-        str(zero_safe_division(solution.time_transmission, solution.calls_transmission)),
-        str(ctwt * solution.time_transmission),
-        str(ctwt * zero_safe_division(solution.time_transmission, solution.calls_transmission)),
-    )
-    table.add_row(
-        "Flexible",
-        str(solution.calls_backfill),
-        str(solution.time_backfill),
-        str(zero_safe_division(solution.time_backfill, solution.calls_backfill)),
-        str(ctwt * solution.time_backfill),
-        str(ctwt * zero_safe_division(solution.time_backfill, solution.calls_backfill)),
-    )
-    # table.add_row(
-    #     "Basic Sim",
-    #     str(solution.calls_basic),
-    #     str(solution.time_basic),
-    #     str(zero_safe_division(
-    #         solution.time_basic,
-    #         solution.calls_basic)),
-    #     str(ctwt*solution.time_basic),
-    #     str(ctwt*zero_safe_division(
-    #         solution.time_basic,
-    #         solution.calls_basic)),
-    #     )
-    table.add_row(
-        "Interconnection0",
-        str(solution.calls_interconnection0),
-        str(solution.time_interconnection0),
-        str(zero_safe_division(solution.time_interconnection0, solution.calls_interconnection0)),
-        str(ctwt * solution.time_interconnection0),
-        str(ctwt * zero_safe_division(solution.time_interconnection0, solution.calls_interconnection0)),
-    )
-    table.add_row(
-        "Interconnection1",
-        str(solution.calls_interconnection1),
-        str(solution.time_interconnection1),
-        str(zero_safe_division(solution.time_interconnection1, solution.calls_interconnection1)),
-        str(ctwt * solution.time_interconnection1),
-        str(ctwt * zero_safe_division(solution.time_interconnection1, solution.calls_interconnection1)),
-    )
-    table.add_row(
-        "Interconnection2",
-        str(solution.calls_interconnection2),
-        str(solution.time_interconnection2),
-        str(zero_safe_division(solution.time_interconnection2, solution.calls_interconnection2)),
-        str(ctwt * solution.time_interconnection2),
-        str(ctwt * zero_safe_division(solution.time_interconnection2, solution.calls_interconnection2)),
-    )
-    table.add_row(
-        "Interconnection3",
-        str(solution.calls_interconnection3),
-        str(solution.time_interconnection3),
-        str(zero_safe_division(solution.time_interconnection3, solution.calls_interconnection3)),
-        str(ctwt * solution.time_interconnection3),
-        str(ctwt * zero_safe_division(solution.time_interconnection3, solution.calls_interconnection3)),
-    )
-    table.add_row(
-        "storage behav",
-        str(solution.calls_storage_behavior),
-        str(solution.time_storage_behavior),
-        str(zero_safe_division(solution.time_storage_behavior, solution.calls_storage_behavior)),
-        str(ctwt * solution.time_storage_behavior),
-        str(ctwt * zero_safe_division(solution.time_storage_behavior, solution.calls_storage_behavior)),
-    )
-    table.add_row(
-        "storage behav t",
-        str(solution.calls_storage_behaviort),
-        str(solution.time_storage_behaviort),
-        str(zero_safe_division(solution.time_storage_behaviort, solution.calls_storage_behaviort)),
-        str(ctwt * solution.time_storage_behaviort),
-        str(ctwt * zero_safe_division(solution.time_storage_behaviort, solution.calls_storage_behaviort)),
-    )
-    table.add_row(
-        "spill/def",
-        str(solution.calls_spilldef),
-        str(solution.time_spilldef),
-        str(zero_safe_division(solution.time_spilldef, solution.calls_spilldef)),
-        str(ctwt * solution.time_spilldef),
-        str(ctwt * zero_safe_division(solution.time_spilldef, solution.calls_spilldef)),
-    )
-    table.add_row(
-        "spill/def t",
-        str(solution.calls_spilldeft),
-        str(solution.time_spilldeft),
-        str(zero_safe_division(solution.time_spilldeft, solution.calls_spilldeft)),
-        str(ctwt * solution.time_spilldeft),
-        str(ctwt * zero_safe_division(solution.time_spilldeft, solution.calls_spilldeft)),
-    )
-    table.add_row(
-        "soc",
-        str(solution.calls_update_soc),
-        str(solution.time_update_soc),
-        str(zero_safe_division(solution.time_update_soc, solution.calls_update_soc)),
-        str(ctwt * solution.time_update_soc),
-        str(ctwt * zero_safe_division(solution.time_update_soc, solution.calls_update_soc)),
-    )
-    table.add_row(
-        "soc t",
-        str(solution.calls_update_soct),
-        str(solution.time_update_soct),
-        str(zero_safe_division(solution.time_update_soct, solution.calls_update_soct)),
-        str(ctwt * solution.time_update_soct),
-        str(ctwt * zero_safe_division(solution.time_update_soct, solution.calls_update_soct)),
-    )
-    table.add_row(
-        "unbalanced",
-        str(solution.calls_unbalanced),
-        str(solution.time_unbalanced),
-        str(zero_safe_division(solution.time_unbalanced, solution.calls_unbalanced)),
-        str(ctwt * solution.time_unbalanced),
-        str(ctwt * zero_safe_division(solution.time_unbalanced, solution.calls_unbalanced)),
-    )
-    table.add_row(
-        "unbalanced t",
-        str(solution.calls_unbalancedt),
-        str(solution.time_unbalancedt),
-        str(zero_safe_division(solution.time_unbalancedt, solution.calls_unbalancedt)),
-        str(ctwt * solution.time_unbalancedt),
-        str(ctwt * zero_safe_division(solution.time_unbalancedt, solution.calls_unbalancedt)),
-    )
+    for name, attr in [
+        ("Simulation", "simulation"),
+        ("Basic Sim", "basic"),
+        ("interc0", "interc0"),
+        ("interc1", "interc1"),
+        ("interc2", "interc2"),
+        ("interc3", "interc3"),
+        ("storage behav", "storage_behavior"),
+        ("storage behav t", "storage_behaviort"),
+        ("spill/def", "spilldef"),
+        ("spill/def t", "spilldeft"),
+        ("soc", "update_soc"),
+        ("soc t", "update_soct"),
+        ("unbalanced", "unbalanced"),
+        ("unbalanced t", "unbalancedt"),
+        ("clip fill", "clip_fill"),
+        ("get surplus", "get_surplus"),
+    ]:
+        _calls = getattr(solution.profile.calls, attr)
+        _times = getattr(solution.profile.times, attr)
+        _cycles_per_call = zero_safe_division(_times, _calls)
+        table.add_row(
+            name,
+            str(_calls),
+            str(_times),
+            str(_cycles_per_call),
+            str(ctwt * _times),
+            str(ctwt * _cycles_per_call),
+        )
 
     print("\r", " " * 30, sep="", end="")
     results = Table(title="Solution Result")
     results.add_column("")
     results.add_column("Value")
     results.add_row(
-        "LCOE",
-        str(solution.LCOE),
+        "Lcoe",
+        str(solution.Lcoe),
     )
     results.add_row(
         "Penalties",
@@ -314,7 +251,7 @@ Profiling overhead is not evenly split between components
 @click.option(
     "-s",
     "--scenario",
-    default=21,
+    default=1,
     type=click.IntRange(0),
     required=False,
     show_default=True,
@@ -328,6 +265,15 @@ Profiling overhead is not evenly split between components
     required=False,
     show_default=True,
     help="No. of years to simulate. -1 indicates max",
+)
+@click.option(
+    "-m",
+    "--networksteps",
+    default=-1,
+    type=click.IntRange(-1),
+    required=False,
+    show_default=True,
+    help="Maximum number of transmission steps for balancing",
 )
 @click.option(
     "-i",
@@ -404,6 +350,7 @@ Profiling overhead is not evenly split between components
 def optimise(
     scenario: int,
     years: int,
+    networksteps: int,
     iterations: int,
     popsize: int,
     mutation: float,
@@ -417,7 +364,8 @@ def optimise(
     param = Parameters(
         s=scenario,
         y=years,
-        p=False,
+        p=0,
+        n=networksteps,
     )
     hyperparam = DE_Hyperparameters(
         i=iterations,
@@ -433,12 +381,11 @@ def optimise(
         f=fileprint,
     )
 
-    from firm.Input import Solution_data
+    from firm.Input import StaticData
     from firm.Optimisation import Optimise
 
-    solution_data = Solution_data(*param)
-
-    result, time = Optimise(solution_data, hyperparam)
+    static = StaticData(*param)
+    result, time = Optimise(static, hyperparam)
     # print(result.x)
 
 
@@ -446,7 +393,7 @@ def optimise(
 @click.option(
     "-s",
     "--scenario",
-    default=21,
+    default=1,
     type=click.IntRange(0),
     required=False,
     show_default=True,
@@ -460,6 +407,15 @@ def optimise(
     required=False,
     show_default=True,
     help="No. of years to simulate. -1 indicates max",
+)
+@click.option(
+    "-m",
+    "--networksteps",
+    default=-1,
+    type=click.IntRange(-1),
+    required=False,
+    show_default=True,
+    help="Maximum number of transmission steps for balancing",
 )
 @click.option(
     "-i",
@@ -536,6 +492,7 @@ def optimise(
 def polish(
     scenario: int,
     years: int,
+    networksteps: int,
     iterations: int,
     popsize: int,
     mutation: float,
@@ -555,7 +512,8 @@ def polish(
     param = Parameters(
         s=scenario,
         y=years,
-        p=False,
+        p=0,
+        n=networksteps
     )
     hyperparam = DE_Hyperparameters(
         i=iterations,
@@ -571,12 +529,12 @@ def polish(
         f=fileprint,
     )
 
-    from firm.Input import Solution_data
+    from firm.Input import StaticData
     from firm.Optimisation import Polish
 
-    solution_data = Solution_data(*param)
+    static = StaticData(*param)
 
-    result, time = Polish(x0, solution_data, hyperparam)
+    result, time = Polish(x0, static, hyperparam)
     print(result.x)
 
 
@@ -585,8 +543,8 @@ def info():
     console = Console()
     text = Text(
         r"""
- _____ ___ ____  __  __ ____  _           
-|  ___|_ _|  _ \|  \/  |  _ \| |_   _ ___ 
+ _____ ___ ____  __  __ ____  _
+|  ___|_ _|  _ \|  \/  |  _ \| |_   _ ___
 | |_   | || |_) | |\/| | |_) | | | | / __|
 |  _|  | ||  _ <| |  | |  __/| | |_| \__ \
 |_|   |___|_| \_\_|  |_|_|   |_|\__,_|___/

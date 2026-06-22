@@ -246,7 +246,8 @@ def annualization_fossils(capex, fom, vom, fuel, carbon, life, dr):
     [
         ("carbon_price", float64),
         ("dr", float64),
-        ("pv", float64[:]),
+        ("pfix", float64[:]),
+        ("psat", float64[:]),
         ("onsw", float64[:]),
         ("offw", float64[:]),
         ("gas", float64[:]),
@@ -266,7 +267,8 @@ class RawCosts:
         self.scenario = solution_data.scenario
         self.network_mask = solution_data.network_mask
 
-        self.pv = np.array(csiro_pv, np.float64)
+        self.pfix = 0.9 * np.array(csiro_pv, np.float64)
+        self.psat = np.array(csiro_pv, np.float64)
         self.onsw = np.array(csiro_onsw, np.float64)
         self.offw = np.array(csiro_offw, np.float64)
         self.gas = np.array(csiro_gas, np.float64)
@@ -291,7 +293,8 @@ class RawCosts:
 
 @jitclass(
     [
-        ("pv", float64[:]),
+        ("pfix", float64[:]),
+        ("psat", float64[:]),
         ("onsw", float64[:]),
         ("offw", float64[:]),
         ("gas", float64[:]),
@@ -305,7 +308,12 @@ class RawCosts:
 )
 class CostFactors:
     def __init__(self, raw_costs):
-        self.pv = annualization(raw_costs.pv[0], raw_costs.pv[1], raw_costs.pv[2], raw_costs.pv[3], raw_costs.dr)
+        self.pfix = annualization(
+            raw_costs.pfix[0], raw_costs.pfix[1], raw_costs.pfix[2], raw_costs.pfix[3], raw_costs.dr
+        )
+        self.psat = annualization(
+            raw_costs.psat[0], raw_costs.psat[1], raw_costs.psat[2], raw_costs.psat[3], raw_costs.dr
+        )
         self.onsw = annualization(
             raw_costs.onsw[0], raw_costs.onsw[1], raw_costs.onsw[2], raw_costs.onsw[3], raw_costs.dr
         )

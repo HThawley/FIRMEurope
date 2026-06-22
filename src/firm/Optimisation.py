@@ -11,8 +11,8 @@ from firm.Parameters import Parameters, DE_Hyperparameters
 from firm.Fileprinter import Fileprinter
 
 
-def ObjectiveWrapper(xs, static_data, cost_model, fileprinter):
-    result = ObjectiveParallel(xs.T, static_data, cost_model)
+def ObjectiveWrapper(xs, static, cost_model, fileprinter):
+    result = ObjectiveParallel(xs.T, static, cost_model)
     if np.isnan(result).any():
         fileprinter(np.vstack((np.atleast_2d(result), xs)).T)
         fileprinter.Terminate()
@@ -25,17 +25,17 @@ def ObjectiveWrapper(xs, static_data, cost_model, fileprinter):
 
 
 @njit(parallel=True)
-def ObjectiveParallel(xs, static_data, cost_model):
+def ObjectiveParallel(xs, static, cost_model):
     result = np.empty((len(xs), 2), dtype=np.float64)
     for i in prange(len(xs)):
-        result[i] = Objective(xs[i], static_data, cost_model)
+        result[i] = Objective(xs[i], static, cost_model)
     return result
 
 
 @njit
-def Objective(x, static_data, cost_model):
+def Objective(x, static, cost_model):
     """This is the objective function"""
-    S = Solution(x, static_data)
+    S = Solution(x, static)
     Evaluate(S, cost_model)
     return np.array([S.Lcoe, S.Penalties])
 
@@ -76,37 +76,42 @@ class CallbackClass:
         return False
 
 
-def Optimise(static_data, hyperparameters):
-    fileprinter = Fileprinter(
-        f"Results/History{static_data.scenario}.csv",
-        hyperparameters.f,
+def create_fileprinter(name, static, freq):
+    return Fileprinter(
+        f"{name}.csv",
+        freq,
         header=["Cost", "Penalties"]
         + [f"pv{n}" for n in Nodel]
         + [f"rpv{n}" for n in Nodel]
         + [f"onsw{n}" for n in Nodel]
         + [f"offw{n}" for n in Nodel]
+        + [f"ror{n}" for n in Nodel]
         + [f"nuke{n}" for n in Nodel]
-        + [f"ccgt{n}" for n in Nodel]
+        + [f"gas{n}" for n in Nodel]
         + [f"php{n}" for n in Nodel]
         + [f"phe{n}" for n in Nodel]
         + [f"bessp{n}" for n in Nodel]
         + [f"besse{n}" for n in Nodel]
-        + [f"HVI{n}" for n in range(static_data.nhvi)],
+        + [f"HVI{n}" for n in range(static.nhvi)],
         resume=False,
     )
 
-    cost_model = RawCosts(static_data).CostFactors()
+
+def Optimise(static, hyperparameters):
+    fileprinter = create_fileprinter(f"Results/History{static.scenario}", static, hyperparameters.f, False)
+
+    cost_model = RawCosts(static).CostFactors()
 
     starttime = dt.now()
     print("Optimisation starts at", starttime)
     result = differential_evolution(
         func=ObjectiveWrapper,
         args=(
-            static_data,
+            static,
             cost_model,
             fileprinter,
         ),
-        bounds=list(zip(static_data.lb, static_data.ub)),
+        bounds=list(zip(static.lb, static.ub)),
         tol=0,
         maxiter=hyperparameters.i,
         popsize=hyperparameters.p,
@@ -119,7 +124,7 @@ def Optimise(static_data, hyperparameters):
         ),
         polish=False,
         updating="deferred",
-        x0=static_data.x0,
+        x0=static.x0,
         vectorized=True,
     )
     fileprinter.Terminate()
@@ -127,7 +132,7 @@ def Optimise(static_data, hyperparameters):
     timetaken = endtime - starttime
     print("Optimisation took", timetaken)
 
-    with open(f"Results/Optimisation_resultx{static_data.scenario}.csv", "w", newline="") as csvfile:
+    with open(f"Results/Optimisation_resultx{static.scenario}.csv", "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(result.x)
 
@@ -135,11 +140,11 @@ def Optimise(static_data, hyperparameters):
 
 
 @njit(parallel=True)
-def _round_x(x0, static_data, cost_model):
+def _round_x(x0, static, cost_model):
     # step through 0.001, 0.01, 0.1, 1.0
     for i in range(3, 0, -1):
         # re-evaluate elite
-        elite = Objective(x0, static_data, cost_model)
+        elite = Objective(x0, static, cost_model)
         # copy to prevent issues with parallelisation
         _x0 = x0.copy()
         for j in prange(len(x0)):
@@ -150,7 +155,7 @@ def _round_x(x0, static_data, cost_model):
                 # set to 0
                 _x[j] = 0
                 # evaluate
-                re = Objective(_x, static_data, cost_model)
+                re = Objective(_x, static, cost_model)
                 if re <= elite:
                     # if no penalties, update x0
                     x0[j] = 0
@@ -159,27 +164,16 @@ def _round_x(x0, static_data, cost_model):
 
 def Polish(
     x0,
-    static_data,
+    static,
     hyperparameters,
 ):
+    fileprinter = create_fileprinter(f"Results/Polish{static.scenario}", static, hyperparameters.f)
 
-    fileprinter = Fileprinter(
-        f"Results/History{static_data.scenario}.csv",
-        hyperparameters.f,
-        header=["Obj"]
-        + [f"PV{n}" for n in range(static_data.pzones)]
-        + [f"Wind{n}" for n in range(static_data.wzones)]
-        + [f"PHP{n}" for n in range(static_data.nodes)]
-        + [f"PHE{n}" for n in range(static_data.nodes)]
-        + [f"HVI{n}" for n in range(static_data.nhvi)],
-        resume=True,
-    )
+    cost_model = RawCosts(static).CostFactors()
 
-    cost_model = RawCosts(static_data).CostFactors()
+    x0 = _round_x(x0, static, cost_model)
 
-    x0 = _round_x(x0, static_data, cost_model)
-
-    lb_p, ub_p = static_data.lb.copy(), static_data.ub.copy()
+    lb_p, ub_p = static.lb.copy(), static.ub.copy()
     lb_p[np.where(x0 == 0)[0]] = 0
     ub_p[np.where(x0 == 0)[0]] = 0
 
@@ -188,7 +182,7 @@ def Polish(
     result = differential_evolution(
         func=ObjectiveWrapper,
         args=(
-            static_data,
+            static,
             cost_model,
             fileprinter,
         ),
@@ -213,7 +207,7 @@ def Polish(
     timetaken = endtime - starttime
     print("Optimisation took", timetaken)
 
-    with open(f"Results/Optimisation_resultx{static_data.scenario}.csv", "a", newline="") as csvfile:
+    with open(f"Results/Optimisation_resultx{static.scenario}.csv", "a", newline="") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(result.x)
 
@@ -241,10 +235,10 @@ if __name__ == "__main__":
         f=1,
     )
 
-    static_data = StaticData(*parameters)
-    cost_model = RawCosts(static_data).CostFactors()
+    static = StaticData(*parameters)
+    cost_model = RawCosts(static).CostFactors()
 
-    print(Objective(static_data.x0, static_data, cost_model))
+    print(Objective(static.x0, static, cost_model))
 
-    # result, time = Optimise(static_data, hyperparameters)
-    # result, time = Polish(result.x, static_data, polish_hparameters)
+    # result, time = Optimise(static, hyperparameters)
+    # result, time = Polish(result.x, static, polish_hparameters)
