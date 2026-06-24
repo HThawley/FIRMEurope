@@ -41,7 +41,7 @@ def read_and_trim(name):
 
     assert df.shape == Mload.shape, f"time series shapes do not match. {name=}"
     # sort columns and store as numpy
-    df = df.loc[4:, Nodel].to_numpy()
+    df = df.loc[:, Nodel].to_numpy()
 
     return df
 
@@ -58,7 +58,7 @@ TSbio = pd.read_csv("data/flexible_annual_biogas.csv")
 
 Mload = Mload.iloc[:, 4:].to_numpy()
 
-existing = pd.read_csv("data/existing_capacity.csv", index_col="locs")
+existing = pd.read_csv("data/existing_capacity.csv", index_col="locs").fillna(0)
 
 Eror = existing.loc[Nodel, "hydro_run_of_river"].to_numpy()
 EpondP = existing.loc[Nodel, "pondage_power"].to_numpy()
@@ -74,6 +74,9 @@ lines = pd.read_csv("data/lines.csv")
 Elines = lines.loc[:, "existing_capacity"].to_numpy()
 Rlines = lines.loc[:, "max_build"].to_numpy()
 basic_network = lines.loc[:, ["start", "end"]].map(lambda x: Node_dict[x]).to_numpy()
+line_length = lines.loc[:, "length"].to_numpy()
+line_lf = lines.loc[:, "loss_factor"].to_numpy()  # % per 1000 km
+line_efficiencies = 1 - (line_length * line_lf / 1000)
 
 resource = pd.read_csv("data/resource_potential.csv", index_col="locs")
 pv_base = resource.loc[Nodel, "pv"].to_numpy()
@@ -100,13 +103,11 @@ Rphh_min = 4  # 4 hour storage minimum considered for PHES
 data_spec = [
     ("scenario", int64),
     ("profiling", int64),
-    ("Nodel_int", int64[:]),
     ("resolution", float64),
     ("storage_charge_eff", float64[:]),
     ("storage_discha_eff", float64[:]),
     ("years", int64),
     ("intervals", int64),
-    ("Mload", float64[:, :]),
     ("TSpfix", float64[:, :]),
     ("TSpsat", float64[:, :]),
     ("TSonsw", float64[:, :]),
@@ -125,24 +126,26 @@ data_spec = [
     ("Enuke", float64[:]),
     ("Ebio", float64[:]),
     ("Elines", float64[:]),
-    ("flexible_resource", float64[:, :]),
-    ("basic_network", int64[:, :]),
-    ("network", int64[:, :, :, :]),
-    ("network_mask", boolean[:]),
-    ("directconns", int64[:, :]),
-    ("trans_mask", boolean[:, :]),
-    ("triangulars", int64[:]),
-    ("Rnuke_mask", boolean[:]),
-    ("Rnlte_mask", boolean[:]),
-    ("nhvi", int64),
-    ("nodes", int64),
+    ("Mload", float64[:, :]),
+    ("Mror", float64[:, :]),
+    ("Mnetload_mror", float64[:, :]),
     ("energy", float64),
     # Topology
+    ("Nodel_int", int64[:]),
+    ("Rnuke_mask", boolean[:]),
+    ("Rnlte_mask", boolean[:]),
+    ("Rnuke_Rnlte_mask", boolean[:]),
+    ("nhvi", int64),
+    ("nodes", int64),
+    ("nnuke", int64),
+    ("nnlte", int64),
+    ("scenario_mask", boolean[:]),
     ("network_mask", boolean[:]),
     ("network", int64[:, :]),
-    ("networksteps", int64),
     ("cache_0_donors", types.DictType(int64, int64[:, :])),
-    ("cache_n_donors", types.DictType(types.UniTuple(int64, 2), int64[:, :, :])),
+    ("trans_mask", boolean[:, :]),
+    ("line_efficiencies", float64[:]),
+    # Bounds and initial solution
     ("lb", float64[:]),
     ("ub", float64[:]),
     ("x0", float64[:]),
@@ -156,11 +159,9 @@ class StaticData:
         scenario: int,
         years: int,
         profiling: int,
-        networksteps: int,
     ):
         self.scenario = scenario
         self.profiling = profiling
-        self.networksteps = networksteps
         self.resolution = resolution
 
         self.storage_charge_eff = np.array(
@@ -180,28 +181,31 @@ class StaticData:
 
         # PLACE HOLDER
         # scenario mask
-        scenario_mask = np.ones(len(Nodel_int), np.bool_)
-        self.Nodel_int = Nodel_int[scenario_mask]
+        self.scenario_mask = np.ones(len(Nodel_int), np.bool_)
+        self.Nodel_int = Nodel_int[self.scenario_mask]
 
-        self.Mload = np.atleast_2d(Mload[: self.intervals, scenario_mask])
-        self.TSpfix = np.atleast_2d(TSpfix[: self.intervals, scenario_mask])
-        self.TSpsat = np.atleast_2d(TSpsat[: self.intervals, scenario_mask])
-        self.TSonsw = np.atleast_2d(TSonsw[: self.intervals, scenario_mask])
-        self.TSoffw = np.atleast_2d(TSoffw[: self.intervals, scenario_mask])
-        self.TSror = np.atleast_2d(TSror[: self.intervals, scenario_mask])
-        self.TSpond_inflow = np.atleast_2d(TSpond_inflow[: self.intervals, scenario_mask])
-        self.TSphes_inflow = np.atleast_2d(TSphes_inflow[: self.intervals, scenario_mask])
-        self.TShyd_inflow = np.atleast_2d(TShyd_inflow[: self.intervals, scenario_mask])
+        self.Mload = np.atleast_2d(Mload[: self.intervals, self.scenario_mask])
+        self.TSpfix = np.atleast_2d(TSpfix[: self.intervals, self.scenario_mask])
+        self.TSpsat = np.atleast_2d(TSpsat[: self.intervals, self.scenario_mask])
+        self.TSonsw = np.atleast_2d(TSonsw[: self.intervals, self.scenario_mask])
+        self.TSoffw = np.atleast_2d(TSoffw[: self.intervals, self.scenario_mask])
+        self.TSror = np.atleast_2d(TSror[: self.intervals, self.scenario_mask])
+        self.TSpond_inflow = np.atleast_2d(TSpond_inflow[: self.intervals, self.scenario_mask])
+        self.TSphes_inflow = np.atleast_2d(TSphes_inflow[: self.intervals, self.scenario_mask])
+        self.TShyd_inflow = np.atleast_2d(TShyd_inflow[: self.intervals, self.scenario_mask])
 
-        self.EhydP = EhydP[scenario_mask]
-        self.EhydE = EhydE[scenario_mask]
-        self.Eror = Eror[scenario_mask]
-        self.EphP = EphP[scenario_mask]
-        self.EphE = EphE[scenario_mask]
-        self.Enuke = Enuke[scenario_mask]
-        self.Ebio = np.zeros(scenario_mask.sum(), dtype=np.float64)
-        self.EpondP = EpondP[scenario_mask]
-        self.EpondE = EpondE[scenario_mask]
+        self.EhydP = EhydP[self.scenario_mask]
+        self.EhydE = EhydE[self.scenario_mask]
+        self.Eror = Eror[self.scenario_mask]
+        self.EphP = EphP[self.scenario_mask]
+        self.EphE = EphE[self.scenario_mask]
+        self.Enuke = Enuke[self.scenario_mask]
+        self.Ebio = np.zeros(self.scenario_mask.sum(), dtype=np.float64)
+        self.EpondP = EpondP[self.scenario_mask]
+        self.EpondE = EpondE[self.scenario_mask]
+
+        self.Mror = self.Eror * self.TSror
+        self.Mnetload_mror = self.Mload - self.Mror
 
         with objmode():
             (
@@ -209,46 +213,49 @@ class StaticData:
                 self.network_mask,
                 self.trans_mask,
                 self.cache_0_donors,
-                self.cache_n_donors,
-            ) = generate_network(basic_network, self.Nodel_int, self.networksteps)
+            ) = generate_network(basic_network, self.Nodel_int)
 
         self.Elines = Elines[self.network_mask]
-        self.Rnuke_mask = Rnuke_mask[scenario_mask]
-        self.Rnlte_mask = Rnlte_mask[scenario_mask]
+        self.line_efficiencies = line_efficiencies[self.network_mask]
+        self.Rnuke_mask = Rnuke_mask[self.scenario_mask]
+        self.Rnlte_mask = Rnlte_mask[self.scenario_mask]
+        self.Rnuke_Rnlte_mask = self.Rnlte_mask[Rnuke_mask]
 
+        self.nnuke = self.Rnuke_mask.sum()
+        self.nnlte = self.Rnlte_mask.sum()
         self.nhvi = self.network_mask.sum()
         self.nodes = len(self.Nodel_int)
 
         self.energy = self.Mload.sum() * 1000 * self.resolution / self.years  # MWh p.a.
 
         self.lb = np.concat((
-            np.zeros(self.nodes)[scenario_mask],  # pfix
-            np.zeros(self.nodes)[scenario_mask],  # psat
-            np.zeros(self.nodes)[scenario_mask],  # onsw
-            np.zeros(self.nodes)[scenario_mask],  # offw
-            np.zeros(self.Rnuke_mask.sum()),  # nuke
-            np.zeros(self.Rnlte_mask.sum()),  # nuke LTE
-            np.zeros(self.nodes)[scenario_mask],  # gas
-            np.zeros(self.nodes)[scenario_mask],  # php
-            np.zeros(self.nodes)[scenario_mask],  # phe
-            np.zeros(self.nodes)[scenario_mask],  # b1p
-            np.zeros(self.nodes)[scenario_mask],  # b2p
-            np.zeros(self.nodes)[scenario_mask],  # b4p
+            np.zeros(self.nodes)[self.scenario_mask],  # pfix
+            np.zeros(self.nodes)[self.scenario_mask],  # psat
+            np.zeros(self.nodes)[self.scenario_mask],  # onsw
+            np.zeros(self.nodes)[self.scenario_mask],  # offw
+            np.zeros(self.nnuke),  # nuke
+            np.zeros(self.nnlte),  # nuke LTE
+            np.zeros(self.nodes)[self.scenario_mask],  # gas
+            np.zeros(self.nodes)[self.scenario_mask],  # php
+            np.zeros(self.nodes)[self.scenario_mask],  # phe
+            np.zeros(self.nodes)[self.scenario_mask],  # b1p
+            np.zeros(self.nodes)[self.scenario_mask],  # b2p
+            np.zeros(self.nodes)[self.scenario_mask],  # b4p
             np.zeros(self.nhvi),  # lines
         ))
         self.ub = np.concat((
-            Rpfix_st[scenario_mask],  # pfix
-            Rpsat_st[scenario_mask],  # psat
-            Ronsw_st[scenario_mask],  # onsw
-            Roffw_st[scenario_mask],  # offw
-            np.full(self.Rnuke_mask.sum(), Rnuke_const),  # nuke
-            Rnlte[scenario_mask][self.Rnlte_mask],  # nuke LTE
-            np.full(self.nodes, Rgas_const)[scenario_mask],  # gas
-            Rphe[scenario_mask] / Rphh_min,  # php
-            Rphe[scenario_mask],  # phe
-            np.zeros(self.nodes)[scenario_mask],  # b1p
-            np.zeros(self.nodes)[scenario_mask],  # b2p
-            np.zeros(self.nodes)[scenario_mask],  # b4p
+            Rpfix_st[self.scenario_mask],  # pfix
+            Rpsat_st[self.scenario_mask],  # psat
+            Ronsw_st[self.scenario_mask],  # onsw
+            Roffw_st[self.scenario_mask],  # offw
+            np.full(self.nnuke, Rnuke_const),  # nuke
+            Rnlte[self.scenario_mask][self.Rnlte_mask],  # nuke LTE
+            np.full(self.nodes, Rgas_const)[self.scenario_mask],  # gas
+            Rphe[self.scenario_mask] / Rphh_min,  # php
+            Rphe[self.scenario_mask],  # phe
+            np.zeros(self.nodes)[self.scenario_mask],  # b1p
+            np.zeros(self.nodes)[self.scenario_mask],  # b2p
+            np.zeros(self.nodes)[self.scenario_mask],  # b4p
             Rlines[self.network_mask],  # lines
         ))
 
@@ -263,15 +270,15 @@ class StaticData:
                 ave_demand * 0.1 / np.array([col.mean() if col.mean() > 0 else 0 for col in self.TSpsat.T]),  # psat
                 ave_demand * 0.5 / np.array([col.mean() if col.mean() > 0 else 0 for col in self.TSonsw.T]),  # onsw
                 ave_demand * 0.25 / np.array([col.mean() if col.mean() > 0 else 0 for col in self.TSoffw.T]),  # offw
-                np.zeros(self.Rnuke_mask.sum()),  # nuke
-                Rnlte[scenario_mask][self.Rnlte_mask],  # nuke LTE
+                np.zeros(self.nnuke),  # nuke
+                Rnlte[self.scenario_mask][self.Rnlte_mask],  # nuke LTE
                 ave_demand * 0.05,  # gas
-                mloadmax * 0.5,
-                mloadmax * 24,
-                mloadmax * 0.1,
-                mloadmax * 0.2,
-                mloadmax * 0.2,
-                np.repeat(array_max(mloadmax) * 0.8, self.nhvi),
+                mloadmax * 0.5,  # php
+                mloadmax * 24,  # phes
+                mloadmax * 0.1,  # b1p
+                mloadmax * 0.2,  # b2p
+                mloadmax * 0.2,  # b4p
+                np.repeat(array_max(mloadmax) * 0.8, self.nhvi),  # lines
             )
         )
         self.x0 = np.minimum(self.ub, self.x0)
@@ -326,8 +333,9 @@ class AssetData:
         self.Cpsat, idx_start = get_next_slice(x, static.nodes, idx_start)
         self.Consw, idx_start = get_next_slice(x, static.nodes, idx_start)
         self.Coffw, idx_start = get_next_slice(x, static.nodes, idx_start)
-        self.Cror, idx_start = get_next_slice(x, static.nodes, idx_start)
-        self.Cnuke, idx_start = get_next_slice(x, static.nodes, idx_start)
+        self.Cnuke, idx_start = get_next_slice(x, static.nnuke, idx_start)
+        Cnlte, idx_start = get_next_slice(x, static.nnlte, idx_start)
+        self.Cnuke[static.Rnuke_Rnlte_mask] += Cnlte
         self.Cgas, idx_start = get_next_slice(x, static.nodes, idx_start)
         self.CphP, idx_start = get_next_slice(x, static.nodes, idx_start)
         self.CphE, idx_start = get_next_slice(x, static.nodes, idx_start)
@@ -336,20 +344,19 @@ class AssetData:
         self.Cb4P, idx_start = get_next_slice(x, static.nodes, idx_start)
         self.Clines, idx_start = get_next_slice(x, static.nhvi, idx_start)
 
-        self.Cb1E = self.Cb1P * 1.0
-        self.Cb2E = self.Cb2P * 2.0
-        self.Cb4E = self.Cb4P * 4.0
+        self.Cb1E = self.Cb1P * 1.0  # 1 hour storage
+        self.Cb2E = self.Cb2P * 2.0  # 2 hour storage
+        self.Cb4E = self.Cb4P * 4.0  # 4 hour storage
 
         self.Cbio = static.Ebio
-        self.Cror += static.Eror
-        self.Cror += static.Eror
-        self.CphP += static.EphP
-        self.CphE += static.EphE
-        self.Cnuke += static.Enuke
-        self.ChydP = static.EhydP
-        self.ChydE = static.EhydE
+        self.Cror = static.Eror
         self.CpondP = static.EpondP
         self.CpondE = static.EpondE
+        self.CphP += static.EphP
+        self.CphE += static.EphE
+        self.ChydP = static.EhydP
+        self.ChydE = static.EhydE
+        self.Cnuke += static.Enuke
 
         self.Cpeak = self.ChydP + self.CpondP + self.CphP + self.Cb1P + self.Cb2P + self.Cb4P
         self.CstorageP = np.stack((self.CphP, self.Cb1P, self.Cb2P, self.Cb4P))
@@ -361,32 +368,50 @@ AssetDataType = AssetData.class_type.instance_type
 
 operational_spec = [
     # Nodally disaggregated operations in GW/GWh
-    ("Mgas", float64[:, :]),
     ("Mdischarge", float64[:, :, :]),
     ("Mcharge", float64[:, :, :]),
     ("Mstorage", float64[:, :, :]),
+    ("Mstorage_init", float64[:, :]),
     ("Mdeficit", float64[:, :]),
-    ("Mspillage", float64[:, :]),
+    ("Mcurtail", float64[:, :]),
     ("Mnetload", float64[:, :]),
-    ("Mimport", float64[:, :]),
     ("Mpfix", float64[:, :]),
     ("Mpsat", float64[:, :]),
     ("Monsw", float64[:, :]),
     ("Moffw", float64[:, :]),
-    ("Mload", float64[:, :]),
     ("Mreservoir", float64[:, :, :]),
+    ("Mreservoir_init", float64[:, :]),
     ("Mhydro", float64[:, :, :]),
-    ("Mbio", float64[:, :]),
     ("Mgas", float64[:, :]),
     ("Munbalanced", float64[:, :]),
     ("Timport", float64[:, :, :]),
     ("Texport", float64[:, :, :]),
+    ("Tnetflow", float64[:, :]),
 
+    # temporary memory buffers
     ("precharge_flag", boolean[:, :]),
     ("trickling_flag", boolean[:, :]),
     ("charge_max_t", float64[:, :, :]),
     ("discharge_max_t", float64[:, :, :]),
     ("hydro_min_future", float64[:, :]),
+    ("storage_min_future", float64[:, :]),
+    ("storage_max_future", float64[:, :]),
+    ("cap_fwd", float64[:]),
+    ("cap_rev", float64[:]),
+    ("eff_fwd", float64[:]),
+    ("eff_rev", float64[:]),
+    ("eff", float64[:]),
+    ("visited", boolean[:]),
+    ("parent_node", int64[:]),
+    ("parent_line", int64[:]),
+    ("path_nodes", int64[:]),
+    ("path_lines", int64[:]),
+    ("rolling_deficits", float64[:]),
+    ("surplus_buffer", float64[:]),
+    ("surplus_orig", float64[:]),
+    ("fill_buffer", float64[:]),
+    ("fill_orig", float64[:]),
+    ("hydro_headroom", float64[:, :]),
 ]
 
 
@@ -397,44 +422,71 @@ class OperationalData:
         static: StaticDataType,  # type: ignore
         assets: AssetDataType,  # type: ignore
     ):
+        self.Mpfix = assets.Cpfix * static.TSpfix
+        self.Mpsat = assets.Cpsat * static.TSpsat
+        self.Monsw = assets.Consw * static.TSonsw
+        self.Moffw = assets.Coffw * static.TSoffw
+
         self.Mnetload = (
-            static.Mload
-            - assets.Cpfix * static.TSpfix
-            - assets.Cpsat * static.TSpsat
-            - assets.Consw * static.TSonsw
-            - assets.Coffw * static.TSoffw
-            - assets.Cror * static.TSror
+            static.Mnetload_mror
+            - self.Mpfix
+            - self.Mpsat
+            - self.Monsw
+            - self.Moffw
         )
         self.Munbalanced = self.Mnetload.copy()
         self.Mdeficit = np.maximum(0, self.Mnetload)
-        self.Mspillage = -np.minimum(0, self.Mnetload)
+        self.Mcurtail = -np.minimum(0, self.Mnetload)
 
-        self.Mgas = np.zeros((static.intervals, static.nodes), dtype=np.float64)
         self.Mgas = np.zeros((static.intervals, static.nodes), dtype=np.float64)
 
         self.Mdischarge = np.zeros((4, static.intervals, static.nodes), dtype=np.float64)
         self.Mcharge = np.zeros((4, static.intervals, static.nodes), dtype=np.float64)
         self.Mstorage = np.zeros((4, static.intervals, static.nodes), dtype=np.float64)
 
-        self.Mstorage[0, -1, :] = 0.5 * assets.CphE
-        self.Mstorage[1, -1, :] = 0.5 * assets.Cb4E
-        self.Mstorage[2, -1, :] = 0.5 * assets.Cb2E
-        self.Mstorage[3, -1, :] = 0.5 * assets.Cb1E
+        self.Mstorage_init = np.stack((
+            0.5 * assets.CphE,
+            0.5 * assets.Cb1E,
+            0.5 * assets.Cb2E,
+            0.5 * assets.Cb4E
+        ))
 
         self.Mhydro = np.zeros((2, static.intervals, static.nodes), dtype=np.float64)
         self.Mreservoir = np.zeros((2, static.intervals, static.nodes), dtype=np.float64)
 
-        self.Mreservoir[0, -1, :] = 0.5 * assets.CpondE
-        self.Mreservoir[1, -1, :] = 0.5 * assets.ChydE
+        self.Mreservoir_init = np.stack((
+            0.5 * assets.CpondE,
+            0.5 * assets.ChydE
+        ))
 
         self.Timport = np.zeros((static.intervals, static.nodes, static.nhvi), dtype=np.float64)
         self.Texport = np.zeros((static.intervals, static.nodes, static.nhvi), dtype=np.float64)
+        self.Tnetflow = np.zeros((static.intervals, static.nhvi), dtype=np.float64)
 
         self.precharge_flag = np.zeros((4, static.nodes), dtype=np.bool_)
         self.trickling_flag = np.zeros((4, static.nodes), dtype=np.bool_)
         self.charge_max_t = np.zeros((4, static.intervals, static.nodes), dtype=np.float64)
         self.discharge_max_t = np.zeros((4, static.intervals, static.nodes), dtype=np.float64)
         self.hydro_min_future = np.zeros((2, static.nodes), dtype=np.float64)
+        self.storage_min_future = np.zeros((4, static.nodes), dtype=np.float64)
+        self.storage_max_future = np.zeros((4, static.nodes), dtype=np.float64)
+
+        self.cap_fwd = np.empty(static.nhvi, dtype=np.float64)
+        self.cap_rev = np.empty(static.nhvi, dtype=np.float64)
+        self.eff_fwd = np.empty(static.nhvi, dtype=np.float64)
+        self.eff_rev = np.empty(static.nhvi, dtype=np.float64)
+        self.eff = np.empty(static.nodes, dtype=np.float64)
+        self.visited = np.empty(static.nodes, dtype=np.bool_)
+        self.parent_node = np.empty(static.nodes, dtype=np.int64)
+        self.parent_line = np.empty(static.nodes, dtype=np.int64)
+        self.path_nodes = np.empty(static.nodes, dtype=np.int64)
+        self.path_lines = np.empty(static.nodes, dtype=np.int64)
+        self.rolling_deficits = np.empty(static.nodes, dtype=np.float64)
+        self.surplus_buffer = np.empty(static.nodes, dtype=np.float64)
+        self.surplus_orig = np.empty(static.nodes, dtype=np.float64)
+        self.fill_buffer = np.empty(static.nodes, dtype=np.float64)
+        self.fill_orig = np.empty(static.nodes, dtype=np.float64)
+        self.hydro_headroom = np.empty((2, static.nodes), dtype=np.float64)
 
 
 OperationalDataType = OperationalData.class_type.instance_type
@@ -567,7 +619,6 @@ def Evaluate(S: SolutionType, costs: CostsType):  # type: ignore
             + S.operations.Monsw.sum()
             + S.operations.Moffw.sum()
             + S.operations.Mgas.sum()
-            + S.operations.Mgas.sum()
         )
     )
     # Storage
@@ -591,13 +642,57 @@ if __name__ == "__main__":
     from firm.Parameters import Parameters
     from firm.Costs import RawCosts
 
-    parameters = Parameters(s=1, y=1, p=0, n=3)
+    parameters = Parameters(s=1, y=1, p=0)
     static = StaticData(*parameters)
     costs = RawCosts(static).CostFactors()
     x0 = static.x0
     S = Solution(x0, static)
-    Evaluate(S, costs)
+    Simulate(S)
+    # Evaluate(S, costs)
 
     print("Lcoe:", S.Lcoe)
     print("Feasible:", S.Feasible)
     print("Penalties:", S.Penalties)
+
+    def run_post_simulation_diagnostics(S):
+
+        # 1. Transmission Limits
+        # Broadcasting Clines (nhvi,) to match (intervals, nodes, nhvi)
+        assert (np.abs(S.operations.Tnetflow) <= S.assets.Clines + 1e-6).all(), "Net flow exceeds Clines"
+
+        # 2. Generator Limits
+        assert (S.operations.Mgas <= S.assets.Cgas + 1e-6).all(), "Gas dispatch exceeds capacity"
+        assert (S.operations.Mhydro[0] <= S.assets.CpondP + 1e-6).all(), "Pondage hydro exceeds power capacity"
+        assert (S.operations.Mhydro[1] <= S.assets.ChydP + 1e-6).all(), "Reservoir hydro exceeds power capacity"
+
+        # 3. Storage Power Limits
+        # CstorageP is (4, nodes), Mcharge/Mdischarge are (4, intervals, nodes)
+        # Expand CstorageP to (4, 1, nodes) for broadcasting
+        CstorageP_expanded = S.assets.CstorageP[:, np.newaxis, :]
+        assert (S.operations.Mcharge <= CstorageP_expanded + 1e-6).all(), "Storage charge exceeds power capacity"
+        assert (S.operations.Mdischarge <= CstorageP_expanded + 1e-6).all(), "Storage discharge exceeds power capacity"
+
+        # 4. Storage Energy Limits
+        CstorageE_expanded = S.assets.CstorageE[:, np.newaxis, :]
+        assert (S.operations.Mstorage <= CstorageE_expanded + 1e-6).all(), "Storage SOC exceeds energy capacity"
+        assert (S.operations.Mstorage >= -1e-6).all(), "Storage SOC dropped below zero"
+
+        # 5. SOC Tracking Integrity
+        # Rebuild SOC from t0 to ensure UpdateSOCt didn't leak energy
+        res = S.static.resolution
+        for s in range(4):
+            # Mstorage at index -1 holds initial SOC
+            soc_tracker = S.operations.Mstorage_init[s]
+
+            for t in range(S.static.intervals):
+                soc_tracker = soc_tracker + res * (
+                    S.operations.Mcharge[s, t, :] * S.static.storage_charge_eff[s] -
+                    S.operations.Mdischarge[s, t, :] / S.static.storage_discha_eff[s]
+                )
+
+                # Check maximum deviation
+                max_error = np.abs(S.operations.Mstorage[s, t, :] - soc_tracker).max()
+                assert max_error < 1e-5, f"SOC tracking mismatch at t={t}, storage type {s}. Max error: {max_error}"
+
+        print("All post-simulation diagnostic tests passed.")
+    run_post_simulation_diagnostics(S)

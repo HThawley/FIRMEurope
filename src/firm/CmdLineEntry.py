@@ -50,15 +50,6 @@ def statistics(scenario: int):
     help="no. of years to model",
 )
 @click.option(
-    "-m",
-    "--networksteps",
-    default=-1,
-    type=click.IntRange(-1),
-    required=False,
-    show_default=True,
-    help="Maximum number of transmission steps for balancing",
-)
-@click.option(
     "-n",
     "--number",
     default=3,
@@ -79,7 +70,6 @@ def statistics(scenario: int):
 def benchmark(
     scenario: int,
     years: int,
-    networksteps: int,
     number: int,
     evals: int,
 ):
@@ -89,7 +79,7 @@ def benchmark(
     from firm.Input import StaticData
     from firm.Costs import RawCosts
 
-    parameters = Parameters(scenario, years, 0, networksteps)
+    parameters = Parameters(scenario, years, 0)
     static = StaticData(*parameters)
     cost_model = RawCosts(static).CostFactors()
     # compile
@@ -129,20 +119,10 @@ def benchmark(
     show_default=True,
     help="Profiling level",
 )
-@click.option(
-    "-m",
-    "--networksteps",
-    default=-1,
-    type=click.IntRange(-1),
-    required=False,
-    show_default=True,
-    help="Maximum number of transmission steps for balancing",
-)
 def profile(
     scenario: int,
     years: int,
     profile_level: int,
-    networksteps: int,
 ):
     # %%
     print("Running Profiling...", end="")
@@ -151,7 +131,7 @@ def profile(
     from firm.Costs import RawCosts
     from firm.Utils import zero_safe_division
 
-    parameters = Parameters(scenario, years, profile_level, networksteps)
+    parameters = Parameters(scenario, years, profile_level)
     static = StaticData(*parameters)
     cost_model = RawCosts(static).CostFactors()
 
@@ -267,15 +247,6 @@ Profiling overhead is not evenly split between components
     help="No. of years to simulate. -1 indicates max",
 )
 @click.option(
-    "-m",
-    "--networksteps",
-    default=-1,
-    type=click.IntRange(-1),
-    required=False,
-    show_default=True,
-    help="Maximum number of transmission steps for balancing",
-)
-@click.option(
     "-i",
     "--iterations",
     default=1000,
@@ -350,7 +321,6 @@ Profiling overhead is not evenly split between components
 def optimise(
     scenario: int,
     years: int,
-    networksteps: int,
     iterations: int,
     popsize: int,
     mutation: float,
@@ -365,7 +335,6 @@ def optimise(
         s=scenario,
         y=years,
         p=0,
-        n=networksteps,
     )
     hyperparam = DE_Hyperparameters(
         i=iterations,
@@ -407,15 +376,6 @@ def optimise(
     required=False,
     show_default=True,
     help="No. of years to simulate. -1 indicates max",
-)
-@click.option(
-    "-m",
-    "--networksteps",
-    default=-1,
-    type=click.IntRange(-1),
-    required=False,
-    show_default=True,
-    help="Maximum number of transmission steps for balancing",
 )
 @click.option(
     "-i",
@@ -492,7 +452,6 @@ def optimise(
 def polish(
     scenario: int,
     years: int,
-    networksteps: int,
     iterations: int,
     popsize: int,
     mutation: float,
@@ -513,7 +472,6 @@ def polish(
         s=scenario,
         y=years,
         p=0,
-        n=networksteps
     )
     hyperparam = DE_Hyperparameters(
         i=iterations,

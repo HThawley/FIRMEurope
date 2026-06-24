@@ -1,20 +1,17 @@
-import numpy as np
+# import numpy as np
 from numba import njit  # type: ignore
 
 from firm.Interconnection import Interconnection
-from firm.Utils import array_sum_2d_axis1  # type: ignore
+# from firm.Utils import array_sum_2d_axis1  # type: ignore
 
 
 @njit
-def Simulate(solution):  # noqa: C901
-    working_buffer = np.zeros(solution.static.nodes, np.float64)
-
+def Simulate(solution):
     # Base Forward Pass (Includes Local/Network Gas Dispatch)
-    ForwardPass(solution, working_buffer)
+    ForwardPass(solution)
 
     # Sweep A: Hydro & Storage Trickling
-    hydro_min_future = np.zeros((2, solution.static.nodes), np.float64)
-    SweepHydro(solution, hydro_min_future)
+    SweepHydro(solution)
 
     # Intermediate Forward Pass (Lock in Hydro/Storage actions)
     UpdateDynamics(solution)
@@ -23,23 +20,28 @@ def Simulate(solution):  # noqa: C901
     # Only run if deficits STILL exist after Sweep A exhausted free/stored energy
     if (solution.operations.Mdeficit > 1e-6).any():
         SweepGas(solution)
-        # 5. Final Forward Pass (Lock in Gas actions)
+        # Final Forward Pass (Lock in Gas actions)
         UpdateDynamics(solution)
 
 
 @njit()
-def ForwardPass(solution, working_buffer):  # noqa: C901
+def ForwardPass(solution):  # noqa: C901
+    working_buffer = solution.operations.surplus_buffer
+    working_buffer_orig = solution.operations.surplus_orig
+    working_buffer.fill(0.0)
+
     nodes = solution.static.nodes
     for t in range(solution.static.intervals):
         UpdateBalancingt(solution, t)
 
         # Fill deficits from network curtailment
         if (solution.operations.Mdeficit[t] > 1e-6).any():
-            if (solution.operations.Mspillage[t] > 1e-6).any():
+            if (solution.operations.Mcurtail[t] > 1e-6).any():
                 Interconnection(
                     solution,
                     solution.operations.Mdeficit[t],
-                    solution.operations.Mspillage[t],
+                    solution.operations.Mcurtail[t],
+                    solution.operations.Tnetflow[t],
                     solution.operations.Timport[t],
                     solution.operations.Texport[t]
                 )
@@ -53,6 +55,7 @@ def ForwardPass(solution, working_buffer):  # noqa: C901
                     solution,
                     solution.operations.Mdeficit[t],
                     working_buffer,
+                    solution.operations.Tnetflow[t],
                     solution.operations.Timport[t],
                     solution.operations.Texport[t]
                 )
@@ -72,25 +75,28 @@ def ForwardPass(solution, working_buffer):  # noqa: C901
                 working_buffer[n] = max(0.0, solution.assets.Cgas[n] - solution.operations.Mgas[t, n])
 
             if (working_buffer > 1e-6).any():
+                working_buffer_orig[:] = working_buffer
+
                 Interconnection(
                     solution,
                     solution.operations.Mdeficit[t],
                     working_buffer,
+                    solution.operations.Tnetflow[t],
                     solution.operations.Timport[t],
                     solution.operations.Texport[t]
                 )
+
                 for n in range(nodes):
-                    exports = array_sum_2d_axis1(solution.operations.Texport[t])[n]
-                    solution.operations.Mgas[t, n] += exports
+                    dispatched = working_buffer_orig[n] - working_buffer[n]
+                    solution.operations.Mgas[t, n] += dispatched
                 UpdateSpillDeft(solution, t)
 
         # Push remaining curtailment to storage headroom
-        if (solution.operations.Mspillage[t] > 1e-6).any():
+        if (solution.operations.Mcurtail[t] > 1e-6).any():
             for n in range(nodes):
                 headroom = 0.0
                 for s in range(4):
-                    current_net_power = solution.operations.Mcharge[s, t, n] - solution.operations.Mdischarge[s, t, n]
-                    headroom += GetStorageHeadroom(solution, s, n, t, current_net_power)
+                    headroom += GetForwardStorageHeadroom(solution, s, n, t)
 
                 working_buffer[n] = headroom
 
@@ -98,7 +104,8 @@ def ForwardPass(solution, working_buffer):  # noqa: C901
                 Interconnection(
                     solution,
                     working_buffer,
-                    solution.operations.Mspillage[t],
+                    solution.operations.Mcurtail[t],
+                    solution.operations.Tnetflow[t],
                     solution.operations.Timport[t],
                     solution.operations.Texport[t]
                 )
@@ -108,79 +115,140 @@ def ForwardPass(solution, working_buffer):  # noqa: C901
 
 
 @njit()
-def SweepHydro(solution, hydro_min_future):
+def SweepHydro(solution):
     nodes = solution.static.nodes
-    rolling_deficits = np.zeros(nodes, np.float64)
-    running_charge = np.zeros((4, nodes), np.float64)
-    running_discharge = np.zeros((4, nodes), np.float64)
+    rolling_deficits = solution.operations.rolling_deficits
+    node_precharge_fill = solution.operations.fill_buffer
 
-    for n in range(nodes):
-        hydro_min_future[0, n] = solution.operations.Mreservoir[0, solution.static.intervals - 1, n]
-        hydro_min_future[1, n] = solution.operations.Mreservoir[1, solution.static.intervals - 1, n]
+    rolling_deficits.fill(0.0)
+
+    t_1 = solution.static.intervals - 1
+    InitHydroMinFuture(solution, t_1)
+    InitStorageMinMaxFuture(solution, t_1)
+
+    active_deficits = False
 
     for t in range(solution.static.intervals - 1, -1, -1):
-        for n in range(nodes):
-            hydro_min_future[0, n] = min(hydro_min_future[0, n], solution.operations.Mreservoir[0, t, n])
-            hydro_min_future[1, n] = min(hydro_min_future[1, n], solution.operations.Mreservoir[1, t, n])
+        if not active_deficits:
+            if (solution.operations.Mdeficit[t] > 1e-6).any():
+                active_deficits = True
+                InitHydroMinFuture(solution, t)
+                InitStorageMinMaxFuture(solution, t)
+            else:
+                continue  # early exit while deficits don't exist
 
+        UpdateHydroMinFuture(solution, t)
+        UpdateStorageMinMaxFuture(solution, t)
+
+        for n in range(nodes):
             if solution.operations.Mdeficit[t, n] > 1e-6:
-                rolling_deficits[n] += solution.operations.Mdeficit[t, n] / solution.static.storage_charge_eff[0]
+                rolling_deficits[n] += solution.operations.Mdeficit[t, n]
 
         if (rolling_deficits > 1e-6).any():
-            node_precharge_fill = SetupPrechargePools(solution, t, rolling_deficits, running_charge)
-            SetupStorageDonors(solution, t, running_discharge)
+            SetupPrechargePools(solution, t)
+            SetupStorageDonors(solution, t)
 
             if (node_precharge_fill > 1e-6).any():
-                TrickleHydro(
-                    solution,
-                    t,
-                    node_precharge_fill,
-                    hydro_min_future,
-                    rolling_deficits,
-                    running_charge
-                )
+                TrickleHydro(solution, t)
             if (node_precharge_fill > 1e-6).any():
-                TrickleStorage(
-                    solution,
-                    t,
-                    node_precharge_fill,
-                    rolling_deficits,
-                    running_charge,
-                    running_discharge
-                )
+                TrickleStorage(solution, t)
+
+            if not (rolling_deficits > 1e-6).any():
+                active_deficits = False
 
 
 @njit()
 def SweepGas(solution):
     nodes = solution.static.nodes
-    rolling_deficits = np.zeros(nodes, np.float64)
-    running_charge = np.zeros((4, nodes), np.float64)
+    rolling_deficits = solution.operations.rolling_deficits
+    node_precharge_fill = solution.operations.fill_buffer
+
+    rolling_deficits.fill(0.0)
+
+    t_1 = solution.static.intervals - 1
+    InitStorageMinMaxFuture(solution, t_1)
+
+    active_deficits = False
 
     for t in range(solution.static.intervals - 1, -1, -1):
+        if not active_deficits:
+            if (solution.operations.Mdeficit[t] > 1e-6).any():
+                active_deficits = True
+                InitStorageMinMaxFuture(solution, t)
+            else:
+                continue
+
+        UpdateStorageMinMaxFuture(solution, t)
+
         for n in range(nodes):
             if solution.operations.Mdeficit[t, n] > 1e-6:
-                rolling_deficits[n] += solution.operations.Mdeficit[t, n] / solution.static.storage_charge_eff[0]
+                rolling_deficits[n] += solution.operations.Mdeficit[t, n]
 
         if (rolling_deficits > 1e-6).any():
-            node_precharge_fill = SetupPrechargePools(solution, t, rolling_deficits, running_charge)
+            SetupPrechargePools(solution, t, rolling_deficits)
 
             if (node_precharge_fill > 1e-6).any():
-                TrickleGas(solution, t, node_precharge_fill, rolling_deficits, running_charge)
+                TrickleGas(solution, t)
+
+            if not (rolling_deficits > 1e-6).any():
+                active_deficits = False
+
+
+@njit(inline="always")
+def InitHydroMinFuture(solution, t):
+    for n in range(solution.static.nodes):
+        solution.operations.hydro_min_future[0, n] = solution.operations.Mreservoir[0, t, n]
+        solution.operations.hydro_min_future[1, n] = solution.operations.Mreservoir[1, t, n]
+
+
+@njit(inline="always")
+def InitStorageMinMaxFuture(solution, t):
+    for n in range(solution.static.nodes):
+        for s in range(4):
+            solution.operations.storage_min_future[s, n] = solution.operations.Mstorage[s, t, n]
+            solution.operations.storage_max_future[s, n] = solution.operations.Mstorage[s, t, n]
+
+
+@njit(inline="always")
+def UpdateHydroMinFuture(solution, t):
+    for n in range(solution.static.nodes):
+        solution.operations.hydro_min_future[0, n] = min(
+            solution.operations.hydro_min_future[0, n], solution.operations.Mreservoir[0, t, n]
+        )
+        solution.operations.hydro_min_future[1, n] = min(
+            solution.operations.hydro_min_future[1, n], solution.operations.Mreservoir[1, t, n]
+        )
+
+
+@njit(inline="always")
+def UpdateStorageMinMaxFuture(solution, t):
+    for n in range(solution.static.nodes):
+        for s in range(4):
+            solution.operations.storage_min_future[s, n] = min(
+                solution.operations.storage_min_future[s, n], solution.operations.Mstorage[s, t, n]
+            )
+            solution.operations.storage_max_future[s, n] = max(
+                solution.operations.storage_max_future[s, n], solution.operations.Mstorage[s, t, n]
+            )
 
 
 @njit(inline="always")
 def UpdateDynamics(solution):
     for t in range(solution.static.intervals):
         UpdateUnbalancedt(solution, t)
-        UpdateStoraget(solution, t)
+        # UpdateStoraget(solution, t)
         UpdateSOCt(solution, t)
         UpdateSpillDeft(solution, t)
 
 
 @njit(inline="always")
-def SetupPrechargePools(solution, t, rolling_deficits, running_charge):
+def SetupPrechargePools(solution, t):
     nodes = solution.static.nodes
-    node_precharge_fill = np.zeros(nodes, dtype=np.float64)
+
+    rolling_deficits = solution.operations.rolling_deficits
+
+    node_precharge_fill = solution.operations.fill_buffer
+    node_precharge_fill.fill(0.0)
 
     for n in range(nodes):
         for s in range(4):
@@ -190,233 +258,285 @@ def SetupPrechargePools(solution, t, rolling_deficits, running_charge):
         if rolling_deficits[n] > 1e-6:
             remaining_fill = rolling_deficits[n]
             for s in (3, 2, 1, 0):  # Shortest duration first
-                headroom = GetStorageHeadroom(solution, s, n, t, running_charge[s, n])
+                headroom = GetSweepStorageHeadroom(solution, s, n, t)
 
                 if headroom > 1e-6:
                     solution.operations.precharge_flag[s, n] = True
-                    max_p = max(0.0, solution.assets.CstorageP[s, n] - solution.operations.Mcharge[s, t, n])
-                    solution.operations.charge_max_t[s, t, n] = min(max_p, headroom)
 
-                    allocated = min(remaining_fill, solution.operations.charge_max_t[s, t, n])
-                    node_precharge_fill[n] += allocated
-                    remaining_fill -= allocated
-    return node_precharge_fill
+                    # headroom in terms of demand not supply
+                    rt_eff = solution.static.storage_charge_eff[s] * solution.static.storage_discha_eff[s]
+                    headroom *= rt_eff
+
+                    allocated_deficit = min(remaining_fill, headroom)
+
+                    required_generation = allocated_deficit / rt_eff
+
+                    solution.operations.charge_max_t[s, t, n] = required_generation
+                    node_precharge_fill[n] += required_generation
+                    remaining_fill -= allocated_deficit
 
 
 @njit()
-def SetupStorageDonors(solution, t, running_discharge):
+def SetupStorageDonors(solution, t):
     for n in range(solution.static.nodes):
         for s in range(4):
             solution.operations.trickling_flag[s, n] = False
             solution.operations.discharge_max_t[s, t, n] = 0.0
 
-        if solution.operations.Mspillage[t, n] > 1e-6:
+        if solution.operations.Mcurtail[t, n] > 1e-6:
             for s in (0, 1, 2, 3):  # Longest duration first
-                available = (solution.operations.Mstorage[s, t - 1, n] / solution.static.resolution
-                             ) - running_discharge[s, n]
-                if available > 1e-6:
+                available_e_power = (
+                    solution.operations.storage_min_future[s, n]
+                    * solution.static.storage_discha_eff[s]
+                    / solution.static.resolution
+                )
+                available_p_power = solution.assets.CstorageP[s, n] - solution.operations.Mdischarge[s, t, n]
+
+                max_d = max(0.0, min(available_p_power, available_e_power))
+                if max_d > 1e-6:
                     solution.operations.trickling_flag[s, n] = True
-                    max_p = max(0.0, solution.assets.CstorageP[s, n] - solution.operations.Mdischarge[s, t, n])
-                    solution.operations.discharge_max_t[s, t, n] = min(max_p, available)
+                    solution.operations.discharge_max_t[s, t, n] = max_d
 
 
 @njit(inline="always")
-def FillPrechargers(solution, n, t, transfer_amount, rolling_deficits, running_charge):
-    rem_transfer = transfer_amount
+def FillPrechargers(solution, n, t, transfer_amount):
+    res = solution.static.resolution
+    rolling_deficits = solution.operations.rolling_deficits
+
     for s in (3, 2, 1, 0):
-        if solution.operations.precharge_flag[s, n] and rem_transfer > 1e-6:
-            allocated = min(rem_transfer, solution.operations.charge_max_t[s, t, n])
+        if solution.operations.precharge_flag[s, n] and transfer_amount > 1e-6:
+            allocated = min(transfer_amount, solution.operations.charge_max_t[s, t, n])
             solution.operations.Mcharge[s, t, n] += allocated
             solution.operations.charge_max_t[s, t, n] -= allocated
-            rem_transfer -= allocated
-            running_charge[s, n] += allocated
-            rolling_deficits[n] = max(0.0, rolling_deficits[n] - allocated)  # Resolve tracking in real-time
+            transfer_amount -= allocated
+
+            energy_added = allocated * solution.static.storage_charge_eff[s] * res
+            solution.operations.storage_max_future[s, n] += energy_added
+            solution.operations.storage_min_future[s, n] += energy_added
+
+            rolling_deficits[n] = max(0.0, rolling_deficits[n] - allocated)
 
 
 @njit(inline="always")
-def DrainHydroDonors(solution, n, t, transfer_amount, hydro_headroom):
-    rem_transfer = transfer_amount
+def DrainHydroDonors(solution, n, t, transfer_amount):
+    res = solution.static.resolution
+    hydro_headroom = solution.operations.hydro_headroom
+
     for h in (0, 1):
-        allocated = min(rem_transfer, hydro_headroom[h, n])
+        allocated = min(transfer_amount, hydro_headroom[h, n])
         solution.operations.Mhydro[h, t, n] += allocated
         hydro_headroom[h, n] -= allocated
-        rem_transfer -= allocated
+        transfer_amount -= allocated
+        solution.operations.hydro_min_future -= allocated * res
 
 
 @njit(inline="always")
-def DrainStorageDonors(solution, n, t, transfer_amount, running_discharge):
-    rem_transfer = transfer_amount
+def DrainStorageDonors(solution, n, t, transfer_amount):
+    res = solution.static.resolution
     for s in (0, 1, 2, 3):
-        if solution.operations.trickling_flag[s, n] and rem_transfer > 1e-6:
-            allocated = min(rem_transfer, solution.operations.discharge_max_t[s, t, n])
+        if solution.operations.trickling_flag[s, n] and transfer_amount > 1e-6:
+            allocated = min(transfer_amount, solution.operations.discharge_max_t[s, t, n])
             solution.operations.Mdischarge[s, t, n] += allocated
             solution.operations.discharge_max_t[s, t, n] -= allocated
-            rem_transfer -= allocated
-            running_discharge[s, n] += allocated
+            transfer_amount -= allocated
+
+            energy_removed = allocated / solution.static.storage_discha_eff[s] * res
+            solution.operations.storage_max_future[s, n] -= energy_removed
+            solution.operations.storage_min_future[s, n] -= energy_removed
 
 
 @njit(inline="always")
-def TrickleHydro(solution, t, node_precharge_fill, hydro_min_future, rolling_deficits, running_charge):
+def TrickleHydro(solution, t):
     nodes = solution.static.nodes
-    hydro_surplus = np.zeros(nodes, dtype=np.float64)
-    hydro_headroom = np.zeros((2, nodes), dtype=np.float64)
+
+    surplus = solution.operations.surplus_buffer
+    surplus_orig = solution.operations.surplus_orig
+    hydro_headroom = solution.operations.hydro_headroom
+    node_precharge_fill = solution.operations.fill_buffer
+    precharge_fill_orig = solution.operations.fill_orig
+
+    surplus.fill(0.0)
+    hydro_headroom.fill(0.0)
 
     for n in range(nodes):
         for h in (0, 1):
+            prev_res = (
+                solution.operations.Mreservoir_init[h, n] if t == 0
+                else solution.operations.Mreservoir[h, t - 1, n]
+            )
             available = min(solution.assets.CpondP[n] if h == 0 else solution.assets.ChydP[n],
-                            (solution.operations.Mreservoir[h, t - 1, n] - hydro_min_future[h, n]
-                             ) / solution.static.resolution)
+                            (prev_res - solution.operations.hydro_min_future[h, n]) / solution.static.resolution)
             available = max(0.0, available - solution.operations.Mhydro[h, t, n])
             hydro_headroom[h, n] = available
-            hydro_surplus[n] += available
+            surplus[n] += available
 
     for n in range(nodes):
-        transfer = min(hydro_surplus[n], node_precharge_fill[n])
+        transfer = min(surplus[n], node_precharge_fill[n])
         if transfer > 1e-6:
-            hydro_surplus[n] -= transfer
+            surplus[n] -= transfer
             node_precharge_fill[n] -= transfer
-            DrainHydroDonors(solution, n, t, transfer, hydro_headroom)
-            FillPrechargers(solution, n, t, transfer, rolling_deficits, running_charge)
+            DrainHydroDonors(solution, n, t, transfer)
+            FillPrechargers(solution, n, t, transfer)
 
-    if (hydro_surplus > 1e-6).any() and (node_precharge_fill > 1e-6).any():
-        solution.operations.Timport[t][:] = 0.0
-        solution.operations.Texport[t][:] = 0.0
+    if (surplus > 1e-6).any() and (node_precharge_fill > 1e-6).any():
+        # Track initial state to calculate precise deltas
+        precharge_fill_orig[:] = node_precharge_fill
+        surplus_orig[:] = surplus
+
         Interconnection(
             solution,
             node_precharge_fill,
-            hydro_surplus,
+            surplus,
+            solution.operations.Tnetflow[t],
             solution.operations.Timport[t],
             solution.operations.Texport[t]
         )
-        for n in range(nodes):
-            exports = array_sum_2d_axis1(solution.operations.Texport[t])[n]
-            if exports > 1e-6:
-                DrainHydroDonors(solution, n, t, exports, hydro_headroom)
 
-            imports = array_sum_2d_axis1(solution.operations.Timport[t])[n]
+        for n in range(nodes):
+            exports = surplus_orig[n] - surplus[n]
+            if exports > 1e-6:
+                DrainHydroDonors(solution, n, t, exports)
+
+            imports = precharge_fill_orig[n] - node_precharge_fill[n]
             if imports > 1e-6:
-                node_precharge_fill[n] -= imports
-                FillPrechargers(solution, n, t, imports, rolling_deficits, running_charge)
+                FillPrechargers(solution, n, t, imports)
 
 
 @njit(inline="always")
-def TrickleStorage(solution, t, node_precharge_fill, rolling_deficits, running_charge, running_discharge):
+def TrickleStorage(solution, t):
     nodes = solution.static.nodes
-    storage_surplus = np.zeros(nodes, dtype=np.float64)
+    surplus = solution.operations.surplus_buffer
+    surplus_orig = solution.operations.surplus_orig
+    node_precharge_fill = solution.operations.fill_buffer
+    precharge_fill_orig = solution.operations.fill_orig
+
+    surplus.fill(0.0)
+
     for n in range(nodes):
         for s in range(4):
             if solution.operations.trickling_flag[s, n]:
-                storage_surplus[n] += solution.operations.discharge_max_t[s, t, n]
+                surplus[n] += solution.operations.discharge_max_t[s, t, n]
 
     for n in range(nodes):
-        transfer = min(storage_surplus[n], node_precharge_fill[n])
+        transfer = min(surplus[n], node_precharge_fill[n])
         if transfer > 1e-6:
-            storage_surplus[n] -= transfer
+            surplus[n] -= transfer
             node_precharge_fill[n] -= transfer
-            DrainStorageDonors(solution, n, t, transfer, running_discharge)
-            FillPrechargers(solution, n, t, transfer, rolling_deficits, running_charge)
+            DrainStorageDonors(solution, n, t, transfer)
+            FillPrechargers(solution, n, t, transfer)
 
-    if (storage_surplus > 1e-6).any() and (node_precharge_fill > 1e-6).any():
-        solution.operations.Timport[t][:] = 0.0
-        solution.operations.Texport[t][:] = 0.0
+    if (surplus > 1e-6).any() and (node_precharge_fill > 1e-6).any():
+        # Track initial state to calculate precise deltas
+        precharge_fill_orig[:] = node_precharge_fill
+        surplus_orig[:] = surplus
+
         Interconnection(
             solution,
             node_precharge_fill,
-            storage_surplus,
+            surplus,
+            solution.operations.Tnetflow[t],
             solution.operations.Timport[t],
             solution.operations.Texport[t]
         )
-        for n in range(nodes):
-            exports = array_sum_2d_axis1(solution.operations.Texport[t])[n]
-            if exports > 1e-6:
-                DrainStorageDonors(solution, n, t, exports, running_discharge)
 
-            imports = array_sum_2d_axis1(solution.operations.Timport[t])[n]
+        for n in range(nodes):
+            exports = surplus_orig[n] - surplus[n]
+            if exports > 1e-6:
+                DrainStorageDonors(solution, n, t, exports)
+
+            imports = precharge_fill_orig[n] - node_precharge_fill[n]
             if imports > 1e-6:
-                node_precharge_fill[n] -= imports
-                FillPrechargers(solution, n, t, imports, rolling_deficits, running_charge)
+                FillPrechargers(solution, n, t, imports)
 
 
 @njit(inline="always")
-def TrickleGas(solution, t, node_precharge_fill, rolling_deficits, running_charge):
+def TrickleGas(solution, t):
     nodes = solution.static.nodes
-    gas_surplus = np.zeros(nodes, dtype=np.float64)
-    for n in range(nodes):
-        gas_surplus[n] = max(0.0, solution.assets.Cgas[n] - solution.operations.Mgas[t, n])
+    surplus = solution.operations.surplus_buffer
+    surplus_orig = solution.operations.surplus_orig
+    node_precharge_fill = solution.operations.fill_buffer
+    precharge_fill_orig = solution.operations.fill_orig
+
+    surplus.fill(0.0)
 
     for n in range(nodes):
-        transfer = min(gas_surplus[n], node_precharge_fill[n])
+        surplus[n] = max(0.0, solution.assets.Cgas[n] - solution.operations.Mgas[t, n])
+
+    for n in range(nodes):
+        transfer = min(surplus[n], node_precharge_fill[n])
         if transfer > 1e-6:
-            gas_surplus[n] -= transfer
+            surplus[n] -= transfer
             node_precharge_fill[n] -= transfer
             solution.operations.Mgas[t, n] += transfer
-            FillPrechargers(solution, n, t, transfer, rolling_deficits, running_charge)
+            FillPrechargers(solution, n, t, transfer)
 
-    if (gas_surplus > 1e-6).any() and (node_precharge_fill > 1e-6).any():
-        solution.operations.Timport[t][:] = 0.0
-        solution.operations.Texport[t][:] = 0.0
+    if (surplus > 1e-6).any() and (node_precharge_fill > 1e-6).any():
+        surplus_orig[:] = surplus
+        precharge_fill_orig[:] = node_precharge_fill
+
         Interconnection(
             solution,
             node_precharge_fill,
-            gas_surplus,
+            surplus,
+            solution.operations.Tnetflow[t],
             solution.operations.Timport[t],
             solution.operations.Texport[t]
         )
+
         for n in range(nodes):
-            exports = array_sum_2d_axis1(solution.operations.Texport[t])[n]
+            exports = surplus_orig[n] - surplus[n]
             if exports > 1e-6:
                 solution.operations.Mgas[t, n] += exports
 
-            imports = array_sum_2d_axis1(solution.operations.Timport[t])[n]
+            imports = precharge_fill_orig[n] - node_precharge_fill[n]
             if imports > 1e-6:
-                node_precharge_fill[n] -= imports
-                FillPrechargers(solution, n, t, imports, rolling_deficits, running_charge)
+                FillPrechargers(solution, n, t, imports)
 
 
 @njit(fastmath=True, inline="always")
-def GetStorageHeadroom(
-    solution,
-    s: int,
-    n: int,
-    t: int,
-    current_net_power: np.float64
-) -> np.float64:
-    """
-    Calculates the maximum additional power a storage system can absorb
-    in the current timestep without violating power or energy limits.
-    """
-    # parameters
-    power_cap = solution.assets.CstorageP[s, n]
-    energy_cap = solution.assets.CstorageE[s, n]
-    soc_prev = solution.operations.Mstorage[s, t - 1, n]
-    charge_eff = solution.static.storage_charge_eff[s]
+def GetForwardStorageHeadroom(solution, s, n, t):
+    """Calculates headroom during the Forward Pass based on current SOC"""
     res = solution.static.resolution
+    prev_soc = solution.operations.Mstorage_init[s, n] if t == 0 else solution.operations.Mstorage[s, t - 1, n]
 
-    # energy limit in power terms
-    max_e_power = (energy_cap - soc_prev) / charge_eff / res
-    # power limit
-    max_power = min(power_cap, max_e_power)
+    current_energy_change = res * (
+        solution.operations.Mcharge[s, t, n] * solution.static.storage_charge_eff[s]
+        - solution.operations.Mdischarge[s, t, n] / solution.static.storage_discha_eff[s]
+    )
 
-    return max(0.0, max_power - current_net_power)
+    max_e_power = (solution.assets.CstorageE[s, n] - (prev_soc + current_energy_change)
+                   ) / solution.static.storage_charge_eff[s] / res
+    available_power = solution.assets.CstorageP[s, n] - solution.operations.Mcharge[s, t, n]
+
+    return max(0.0, min(available_power, max_e_power))
+
+
+@njit(fastmath=True, inline="always")
+def GetSweepStorageHeadroom(solution, s, n, t):
+    """Calculates headroom during Backward Sweeps based on tracked future bounds"""
+    max_e_power = (solution.assets.CstorageE[s, n] - solution.operations.storage_max_future[s, n]
+                   ) / solution.static.storage_charge_eff[s] / solution.static.resolution
+
+    available_power = solution.assets.CstorageP[s, n] - solution.operations.Mcharge[s, t, n]
+    return max(0.0, min(available_power, max_e_power))
 
 
 @njit(inline="always")
 def GetSurplust(solution, t, Msurplust):
     res = solution.static.resolution
     for n in range(solution.static.nodes):
-        surplus = solution.operations.Mspillage[t, n]
+        surplus = solution.operations.Mcurtail[t, n]
         for s in range(4):
+            prev_soc = solution.operations.Mstorage_init[s, n] if t == 0 else solution.operations.Mstorage[s, t - 1, n]
             surplus += solution.operations.Mcharge[s, t, n]
-            surplus += min(
-                solution.assets.CstorageP[s, n],
-                (solution.operations.Mstorage[s, t - 1, n] * solution.static.storage_discha_eff[s]) / res
-                )
+            surplus += min(solution.assets.CstorageP[s, n], (prev_soc * solution.static.storage_discha_eff[s]) / res)
             surplus -= solution.operations.Mdischarge[s, t, n]
 
-        surplus += min(solution.assets.CpondP[n], solution.operations.Mreservoir[0, t - 1, n] / res
-                       ) - solution.operations.Mhydro[0, t, n]
-        surplus += min(solution.assets.ChydP[n], solution.operations.Mreservoir[1, t - 1, n] / res
-                       ) - solution.operations.Mhydro[1, t, n]
+        prev_pond = solution.operations.Mreservoir_init[0, n] if t == 0 else solution.operations.Mreservoir[0, t - 1, n]
+        surplus += min(solution.assets.CpondP[n], prev_pond / res) - solution.operations.Mhydro[0, t, n]
+
+        prev_hyd = solution.operations.Mreservoir_init[1, n] if t == 0 else solution.operations.Mreservoir[1, t - 1, n]
+        surplus += min(solution.assets.ChydP[n], prev_hyd / res) - solution.operations.Mhydro[1, t, n]
         Msurplust[n] = max(0.0, surplus)
 
 
@@ -436,21 +556,23 @@ def UpdateStoraget(solution, t):
     for n in range(solution.static.nodes):
         unbal = solution.operations.Munbalanced[t, n]
 
-        inflow_e = solution.static.TSpond_inflow[t, n] * res
-        discharge_cap = (solution.operations.Mreservoir[0, t - 1, n] + inflow_e) / res
+        prev_pond = solution.operations.Mreservoir_init[0, n] if t == 0 else solution.operations.Mreservoir[0, t - 1, n]
+        inflow_e_pond = solution.static.TSpond_inflow[t, n] * solution.assets.CpondP[n] * res
+        discharge_cap = (prev_pond + inflow_e_pond) / res
         solution.operations.Mhydro[0, t, n] = min(max(0, unbal), solution.assets.CpondP[n], discharge_cap)
         unbal -= solution.operations.Mhydro[0, t, n]
 
         for s in range(4):
-            charge_cap = (solution.assets.CstorageE[s, n] - solution.operations.Mstorage[s, t - 1, n]
-                          ) / solution.static.storage_charge_eff[s] / res
+            prev_soc = solution.operations.Mstorage_init[s, n] if t == 0 else solution.operations.Mstorage[s, t - 1, n]
+            charge_cap = (solution.assets.CstorageE[s, n] - prev_soc) / solution.static.storage_charge_eff[s] / res
             solution.operations.Mcharge[s, t, n] = min(-min(0, unbal), solution.assets.CstorageP[s, n], charge_cap)
-            discharge_cap = solution.operations.Mstorage[s, t - 1, n] * solution.static.storage_discha_eff[s] / res
+            discharge_cap = prev_soc * solution.static.storage_discha_eff[s] / res
             solution.operations.Mdischarge[s, t, n] = min(max(0, unbal), solution.assets.CstorageP[s, n], discharge_cap)
             unbal += solution.operations.Mcharge[s, t, n] - solution.operations.Mdischarge[s, t, n]
 
-        inflow_e = solution.static.TShyd_inflow[t, n] * res
-        discharge_cap = (solution.operations.Mreservoir[1, t - 1, n] + inflow_e) / res
+        prev_hyd = solution.operations.Mreservoir_init[1, n] if t == 0 else solution.operations.Mreservoir[1, t - 1, n]
+        inflow_e_hyd = solution.static.TShyd_inflow[t, n] * solution.assets.ChydP[n] * res
+        discharge_cap = (prev_hyd + inflow_e_hyd) / res
         solution.operations.Mhydro[1, t, n] = min(max(0, unbal), solution.assets.ChydP[n], discharge_cap)
 
 
@@ -458,21 +580,27 @@ def UpdateStoraget(solution, t):
 def UpdateSOCt(solution, t):
     res = solution.static.resolution
     for n in range(solution.static.nodes):
+        prev_soc = solution.operations.Mreservoir_init[0, n] if t == 0 else solution.operations.Mreservoir[0, t - 1, n]
+
         inflow_e_pond = solution.static.TSpond_inflow[t, n] * solution.assets.CpondP[n] * res
         solution.operations.Mreservoir[0, t, n] = min(
             solution.assets.CpondE[n],
-            solution.operations.Mreservoir[0, t - 1, n] + inflow_e_pond - solution.operations.Mhydro[0, t, n] * res
+            prev_soc + inflow_e_pond - solution.operations.Mhydro[0, t, n] * res
         )
+
+        prev_soc = solution.operations.Mreservoir_init[1, n] if t == 0 else solution.operations.Mreservoir[1, t - 1, n]
 
         inflow_e_hyd = solution.static.TShyd_inflow[t, n] * solution.assets.ChydP[n] * res
         solution.operations.Mreservoir[1, t, n] = min(
             solution.assets.ChydE[n],
-            solution.operations.Mreservoir[1, t - 1, n] + inflow_e_hyd - solution.operations.Mhydro[1, t, n] * res
+            prev_soc + inflow_e_hyd - solution.operations.Mhydro[1, t, n] * res
         )
 
         for s in range(4):
+            prev_soc = solution.operations.Mstorage_init[s, n] if t == 0 else solution.operations.Mstorage[s, t - 1, n]
+
             solution.operations.Mstorage[s, t, n] = (
-                solution.operations.Mstorage[s, t - 1, n] + res * (
+                prev_soc + res * (
                     solution.operations.Mcharge[s, t, n] * solution.static.storage_charge_eff[s]
                     - solution.operations.Mdischarge[s, t, n] / solution.static.storage_discha_eff[s]
                 )
@@ -493,7 +621,7 @@ def UpdateSpillDeft(solution, t):
 
         _inter = solution.operations.Munbalanced[t, n] + total_charge - total_discharge
         solution.operations.Mdeficit[t, n] = max(0.0, _inter)
-        solution.operations.Mspillage[t, n] = -min(0.0, _inter)
+        solution.operations.Mcurtail[t, n] = -min(0.0, _inter)
 
 
 @njit(inline="always")

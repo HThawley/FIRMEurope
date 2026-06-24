@@ -6,10 +6,9 @@ class Parameters:
     s: int  # scenario
     y: int  # years
     p: int  # profiling
-    n: int  # networksteps
 
     def __iter__(self):
-        return iter((self.s, self.y, self.p, self.n))
+        return iter((self.s, self.y, self.p))
 
 
 @dataclass

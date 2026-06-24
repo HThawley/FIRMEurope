@@ -1,168 +1,185 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Oct  9 07:51:51 2024
-
-@author: u6942852
-"""
-
-
 import numpy as np
-from numba import njit  # type: ignore
+from numba import njit
+# from firm.Utils import cclock
 
-from firm.Utils import cclock, array_min, array_max_2d_axis1, array_sum_2d_axis0, zero_safe_division  # type: ignore
 
+@njit(boundscheck=True)
+def Interconnection(solution, Fillt, Surplust, netflowt, Importt, Exportt):  # noqa: C901
+    nodes = solution.static.nodes
+    nhvi = solution.static.nhvi
 
-@njit
-def Interconnection(solution, Fillt, Surplust, Importt, Exportt):  # noqa: C901
-    # The primary connections are simpler (and faster) to model than the general
-    #   nthary connection
-    # Since many if not most calls of this function only require primary transmission
-    #   I have split it out from general nthary transmission to improve speed
-    if solution.static.profiling == 3 or solution.static.profiling == -1:
-        start = cclock()
-    _transmission = np.zeros(solution.static.nodes, np.float64)
-    leg = 0
-    # loop through nodes with deficits
-    for n in range(solution.static.nodes):
+    cap_fwd = solution.operations.cap_fwd
+    cap_rev = solution.operations.cap_rev
+    eff_fwd = solution.operations.eff_fwd
+    eff_rev = solution.operations.eff_rev
+    eff = solution.operations.eff
+    visited = solution.operations.visited
+    parent_node = solution.operations.parent_node
+    parent_line = solution.operations.parent_line
+    path_nodes = solution.operations.path_nodes
+    path_lines = solution.operations.path_lines
+
+    # Sort nodes descending by Fill
+    priority_order = np.argsort(Fillt)[::-1]
+    total_surplus = Surplust.sum()
+
+    for n in priority_order:
         if Fillt[n] < 1e-6:
-            continue
-        # appropriate slice of network array
-        # pdonors is equivalent to donors later on but has different ndim so needs to
-        #   be a different variable name for static typing
-        pdonors, pdonor_lines = solution.static.cache_0_donors[n]
-        _usage = 0.0  # badly named but avoids creating more variables
-        for d in pdonors:
-            _usage += Surplust[d]
+            break  # No more significant deficits
 
-        if _usage < 1e-6:
-            # continue if no surplus to be traded
-            continue
+        while Fillt[n] > 1e-6 and total_surplus > 1e-6:
 
-        for d, l in zip(pdonors, pdonor_lines):
-            _usage = 0.0
-            for m in range(solution.static.nodes):
-                _usage += Importt[m, l]
-            # maximum exportable
-            _transmission[d] = min(
-                Surplust[d],  # power resource constraint
-                solution.assets.Clines[l] - _usage,  # line capacity constraint
-            )
+            for line in range(nhvi):
+                line_eff = solution.static.line_efficiencies[line]
 
-        # scale down to fill requirement
-        _usage = 0.0
-        for m in range(solution.static.nodes):
-            _usage += _transmission[m]
-        if _usage > Fillt[n]:
-            _scale = Fillt[n] / _usage
-            _transmission *= _scale
-            _usage *= _scale
-        if _usage < 1e-6:
-            continue
+                # Forward direction (start -> end)
+                if netflowt[line] < -1e-6:  # Countering existing reverse flow
+                    cap_fwd[line] = -netflowt[line] * line_eff
+                    # Eff > 1.0 because injecting 1 MW here saves >1 MW at the original source
+                    eff_fwd[line] = 1.0 / line_eff
+                else:  # Pushing new forward flow
+                    cap_fwd[line] = solution.assets.Clines[line] - netflowt[line]
+                    eff_fwd[line] = line_eff
 
-        for i in range(len(pdonors)):
-            # record transmission
-            Importt[n, pdonor_lines[i]] += _transmission[pdonors[i]]
-            Exportt[pdonors[i], pdonor_lines[i]] -= _transmission[pdonors[i]]
-            # adjust deficit/surpluses
-            Surplust[pdonors[i]] -= _transmission[pdonors[i]]
-            _transmission[pdonors[i]] = 0
+                # Reverse direction (end -> start)
+                if netflowt[line] > 1e-6:  # Countering existing forward flow
+                    cap_rev[line] = netflowt[line] * line_eff
+                    eff_rev[line] = 1.0 / line_eff
+                else:  # Pushing new reverse flow
+                    cap_rev[line] = solution.assets.Clines[line] + netflowt[line]
+                    eff_rev[line] = line_eff
 
-        Fillt[n] -= _usage
+            # Dijkstra setup
+            eff.fill(0.0)
+            eff[n] = 1.0
+            visited.fill(False)
+            parent_node.fill(-1)
+            parent_line.fill(-1)
 
-    if solution.static.profiling == 3 or solution.static.profiling == -1:
-        solution.profile.calls.interc0 += 1
-        solution.profile.times.interc0 += cclock() - start
+            # Dijkstra execution
+            for _ in range(nodes):
+                curr = -1
+                max_e = -1.0
+                for i in range(nodes):
+                    if not visited[i] and eff[i] > max_e:
+                        max_e = eff[i]
+                        curr = i
 
-    # Continue with nthary transmission
-    # Note: This code block works for primary transmission too, but is slower
-    if (Fillt.sum() > 1e-6) and (Surplust.sum() > 1e-6):
-        _import = np.zeros(Importt.shape, np.float64)
-        _capacity = np.zeros(solution.static.nhvi, np.float64)
-        # loop through secondary, tertiary, ..., nthary connections
-        for leg in range(1, solution.static.networksteps):
-            if solution.static.profiling:
-                start = cclock()
+                if curr == -1 or max_e == 0.0:
+                    break  # Unreachable or fully explored
 
-            # loop through nodes with deficits
-            for n in range(solution.static.nodes):
-                if Fillt[n] < 1e-6:
-                    continue
-
-                donors, donor_lines = solution.static.cache_n_donors[(n, leg)]
-
-                if donors.shape[1] == 0:
-                    break  # break if no valid donors
-
-                _usage = 0.0  # badly named variable but avoids extra variables
-                for d in donors[-1]:
-                    _usage += Surplust[d]
-
-                if _usage < 1e-6:
-                    continue
-
-                _capacity[:] = solution.assets.Clines - array_sum_2d_axis0(Importt)
-                for d, dl in zip(donors[-1], donor_lines.T):  # print(d,dl)
-                    # power use of each line, clipped to maximum capacity of lowest leg
-                    _import[d, dl] = min(array_min(_capacity[dl]), Surplust[d])
-
-                for line in range(solution.static.nhvi):
-                    # total usage of the line across all import paths
-                    _usage = 0.0
-                    for m in range(solution.static.nodes):
-                        _usage += _import[m, line]
-                    # if usage exceeds capacity
-                    if _usage > _capacity[line]:
-                        # unclear why this raises zero division error from time to time
-                        _scale = zero_safe_division(_capacity[line], _usage)
-                        for m in range(solution.static.nodes):
-                            # clip all legs
-                            if _import[m, line] > 1e-6:
-                                for o in range(solution.static.nhvi):
-                                    _import[m, o] *= _scale
-
-                # intermediate calculation array
-                _transmission = array_max_2d_axis1(_import)
-
-                # scale down to fill requirement
-                _usage = 0.0
-                for m in range(solution.static.nodes):
-                    _usage += _transmission[m]
-                if _usage > Fillt[n]:
-                    _scale = Fillt[n] / _usage
-                    _transmission *= _scale
-                    _usage *= _scale
-                if _usage < 1e-6:
-                    continue
-
-                for nd, d, dl in zip(range(donors.shape[1]), donors[-1], donor_lines.T):  # print(nd, d, dl)
-                    Importt[n, dl[0]] += _transmission[d]
-                    Exportt[donors[0, nd], dl[0]] -= _transmission[d]
-                    for step in range(leg):
-                        Importt[donors[step, nd], dl[step + 1]] += _transmission[d]
-                        Exportt[donors[step + 1, nd], dl[step + 1]] -= _transmission[d]
-
-                # Adjust fill and surplus
-                Fillt[n] -= _usage
-                Surplust -= _transmission
-
-                _import[:] = 0.0
-                _capacity[:] = 0.0
-
-                if (Surplust.sum() < 1e-6) or (Fillt.sum() < 1e-6):
+                if Surplust[curr] > 1e-6:
+                    # early exit
+                    best_surplus_node = curr
                     break
 
-            if solution.static.profiling == 3 or solution.static.profiling == -1:
-                if leg == 1:
-                    solution.profile.calls.interc1 += 1
-                    solution.profile.times.interc1 += cclock() - start
-                elif leg == 2:
-                    solution.profile.calls.interc1 += 1
-                    solution.profile.times.interc1 += cclock() - start
-                elif leg == 3:
-                    solution.profile.calls.interc3 += 1
-                    solution.profile.times.interc3 += cclock() - start
+                visited[curr] = True
+                pdonors_arr = solution.static.cache_0_donors[curr]
 
-            if (Surplust.sum() < 1e-6) or (Fillt.sum() < 1e-6):
+                if pdonors_arr.shape[1] == 0:
+                    continue
+
+                neighbors = pdonors_arr[0]
+                lines = pdonors_arr[1]
+
+                for idx in range(len(neighbors)):
+                    nxt = neighbors[idx]
+                    line = lines[idx]
+
+                    if visited[nxt]:
+                        continue
+
+                    # Physical flow is nxt -> curr
+                    is_fwd = (nxt == solution.static.network[line, 0])
+                    avail_cap = cap_fwd[line] if is_fwd else cap_rev[line]
+                    edge_e = eff_fwd[line] if is_fwd else eff_rev[line]
+
+                    if avail_cap < 1e-6:
+                        continue  # Congested or hit zero-crossing limit
+
+                    new_e = eff[curr] * edge_e
+                    if new_e > eff[nxt]:
+                        eff[nxt] = new_e
+                        parent_node[nxt] = curr
+                        parent_line[nxt] = line
+
+            if best_surplus_node == -1:
+                break  # Node is stranded
+
+            # Trace path backwards
+            curr = best_surplus_node
+            path_len = 0
+
+            while curr != n and curr != -1:
+                path_nodes[path_len] = curr
+                nxt = parent_node[curr]
+                path_lines[path_len] = parent_line[curr]
+                path_len += 1
+                curr = nxt
+
+            # Calculate max initial send to respect capacities and zero-crossings
+            max_initial_send = Surplust[best_surplus_node]
+            cum_eff = 1.0
+
+            for i in range(path_len):
+                sender = path_nodes[i]
+                line = path_lines[i]
+                is_fwd = (sender == solution.static.network[line, 0])
+
+                avail_cap = cap_fwd[line] if is_fwd else cap_rev[line]
+                edge_e = eff_fwd[line] if is_fwd else eff_rev[line]
+
+                bottleneck_send = avail_cap / cum_eff
+                if bottleneck_send < max_initial_send:
+                    max_initial_send = bottleneck_send
+                cum_eff *= edge_e
+
+            if max_initial_send < 1e-6:
+                # Path exists but is functionally congested to zero
+                Surplust[best_surplus_node] -= 1e-6  # prevent infinite loop
+                total_surplus -= 1e-6
+                continue
+
+            # Scale if received power overfills the deficit
+            received = max_initial_send * cum_eff
+            if received > Fillt[n]:
+                received = Fillt[n]
+                max_initial_send = received / cum_eff
+
+            if max_initial_send < 1e-6:
                 break
+
+            # Apply physical transfers
+            current_flow = max_initial_send
+            Surplust[best_surplus_node] -= current_flow
+            total_surplus -= current_flow
+
+            for i in range(path_len):
+                sender = path_nodes[i]
+                line = path_lines[i]
+                receiver = parent_node[sender]
+
+                is_fwd = (sender == solution.static.network[line, 0])
+                edge_e = eff_fwd[line] if is_fwd else eff_rev[line]
+
+                # Update nodal boundary injections (Preserves UpdateUnbalancedt logic)
+                Exportt[sender, line] -= current_flow
+                Importt[receiver, line] += current_flow * edge_e
+
+                # Update line netflow state
+                if is_fwd:
+                    if netflowt[line] < -1e-6:  # Processing counter-flow
+                        netflowt[line] += current_flow * edge_e
+                    else:
+                        netflowt[line] += current_flow
+                else:
+                    if netflowt[line] > 1e-6:  # Processing counter-flow
+                        netflowt[line] -= current_flow * edge_e
+                    else:
+                        netflowt[line] -= current_flow
+
+                current_flow *= edge_e
+
+            Fillt[n] -= received
 
     return Importt, Exportt
