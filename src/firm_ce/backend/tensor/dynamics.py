@@ -1,6 +1,6 @@
 from numba import njit  # type: ignore
 
-from firm_ce.common.constants import FASTMATH, BOUNDSCHECK
+from firm_ce.common.constants import FASTMATH, BOUNDSCHECK, TOLERANCE
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
@@ -37,11 +37,11 @@ def GetNaiveCurtailDeficit(solution, t):
     has_curtail = False
     for n in range(solution.static.nodes):
         unbal = solution.operations.Munbalanced[t, n]
-        if unbal > 1e-6:
+        if unbal > TOLERANCE:
             solution.operations.Mdeficit[t, n] = unbal
             solution.operations.Mcurtail[t, n] = 0.0
             has_deficit = True
-        elif unbal < -1e-6:
+        elif unbal < -TOLERANCE:
             solution.operations.Mdeficit[t, n] = 0.0
             solution.operations.Mcurtail[t, n] = -unbal
             has_curtail = True
@@ -68,7 +68,7 @@ def UpdateLocalCharge(solution, t):
         solution.operations.Mdeficit[t, n] = 0.0
         solution.operations.Mcurtail[t, n] = 0.0
 
-        if unbal < -1e-6:
+        if unbal < -TOLERANCE:
             for s in range(4):
                 prev_soc = (
                     solution.operations.Mstorage_init[n, s] if t == 0
@@ -82,10 +82,10 @@ def UpdateLocalCharge(solution, t):
                 solution.operations.Mcharge[t, n, s] = charge_amt
                 unbal += charge_amt
 
-            if unbal < -1e-6:
+            if unbal < -TOLERANCE:
                 solution.operations.Mcurtail[t, n] = -unbal
                 has_curtail = True
-        elif unbal > 1e-6:
+        elif unbal > TOLERANCE:
             solution.operations.Mdeficit[t, n] = unbal
             has_deficit = True
 
@@ -112,7 +112,7 @@ def UpdateLocalDischarge(solution, t):
         for h in range(2):
             solution.operations.Mhydro[t, n, h] = 0.0
 
-        if unbal > 1e-6:
+        if unbal > TOLERANCE:
             # Pondage (h=0)
             h = 0
             prev_soc = (
@@ -151,10 +151,11 @@ def UpdateLocalDischarge(solution, t):
             solution.operations.Mhydro[t, n, h] = discharge_amt
             unbal -= discharge_amt
 
-            # Gas deduction
-            unbal -= solution.operations.Mgas[t, n]
+            # peak deduction
+            for k in range(3):
+                unbal -= solution.operations.Mpeak[t, n, k]
 
-            if unbal > 1e-6:
+            if unbal > TOLERANCE:
                 solution.operations.Mdeficit[t, n] = unbal
                 has_deficit = True
             else:
@@ -221,13 +222,14 @@ def CommitTrickle(solution, t):
             unbal += solution.operations.Mcharge[t, n, s] - solution.operations.Mdischarge[t, n, s]
         for h in range(2):
             unbal -= solution.operations.Mhydro[t, n, h]
-        unbal -= solution.operations.Mgas[t, n]
+        for k in range(3):
+            unbal -= solution.operations.Mpeak[t, n, k]
 
-        if unbal > 1e-6:
+        if unbal > TOLERANCE:
             solution.operations.Mdeficit[t, n] = unbal
             solution.operations.Mcurtail[t, n] = 0.0
             has_deficit = True
-        elif unbal < -1e-6:
+        elif unbal < -TOLERANCE:
             solution.operations.Mdeficit[t, n] = 0.0
             solution.operations.Mcurtail[t, n] = -unbal
             has_curtail = True
@@ -267,3 +269,61 @@ def UpdateSOCt(solution, t):
                 solution.operations.Mphes_spill[t, n] = max(0.0, theoretical_soc - solution.assets.CstorageE[n, 0])
 
             solution.operations.Mstorage[t, n, s] = min(solution.assets.CstorageE[n, s], theoretical_soc)
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
+def ResetAnnualBudgets(solution):
+    solution.operations.remaining_peak_budget[:, :] = solution.Bpeak
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
+def GetPeakHeadroom(solution, t, n, k):
+    """Available headroom for tech k at (t, n): power-capped always,
+    additionally budget-capped for biomass/biogas (gas has no annual limit)."""
+    power_headroom = solution.assets.Cpeak[n, k] - solution.operations.Mpeak[t, n, k]
+    if k == 2:
+        return max(0.0, power_headroom)
+
+    year = solution.static.year_of_interval[t]
+    budget_headroom = solution.operations.remaining_peak_budget[year, k]
+    return max(0.0, min(power_headroom, budget_headroom))
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
+def DispatchPeak(solution, t, n, k, amount):
+    """Commits a dispatch amount to tech k, depleting the shared annual
+    budget if applicable. amount must already respect GetPeakHeadroom."""
+    solution.operations.Mpeak[t, n, k] += amount
+    if k != 2:
+        year = solution.static.year_of_interval[t]
+        solution.operations.remaining_peak_budget[year, k] -= amount
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
+def GetTotalPeakHeadroomBound(solution):
+    """Sound upper bound on total deliverable peak energy across the whole
+    horizon, used as the cheap feasibility pre-check before ReversePassPeak.
+    Gas: power-only. Biomass/biogas: power-rate AND remaining annual budget
+    both bound it -- using the smaller of the two keeps the bound sound."""
+    intervals = solution.static.intervals
+
+    gas_headroom = (
+        solution.assets.Cpeak[:, 2].sum() * intervals
+        - solution.operations.Mpeak[:, :, 2].sum()
+    )
+
+    biomass_power = (
+        solution.assets.Cpeak[:, 0].sum() * intervals
+        - solution.operations.Mpeak[:, :, 0].sum()
+    )
+    biomass_budget = solution.operations.remaining_peak_budget[:, 0].sum()
+    biomass_headroom = min(biomass_power, biomass_budget)
+
+    biogas_power = (
+        solution.assets.Cpeak[:, 1].sum() * intervals
+        - solution.operations.Mpeak[:, :, 1].sum()
+    )
+    biogas_budget = solution.operations.remaining_peak_budget[:, 1].sum()
+    biogas_headroom = min(biogas_power, biogas_budget)
+
+    return max(0.0, gas_headroom) + max(0.0, biomass_headroom) + max(0.0, biogas_headroom)

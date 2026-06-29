@@ -1,46 +1,41 @@
 # type: ignore
 
-from firm_ce.common.constants import FASTMATH, BOUNDSCHECK
+from firm_ce.common.constants import FASTMATH, BOUNDSCHECK, TOLERANCE
 from firm_ce.common.jit_overload import njit
-from firm_ce.backend.tensor.forward_pass import ForwardPassRenewables, ForwardPassGas
-from firm_ce.backend.tensor.reverse_pass import ReversePassGas, ReversePassHydro, UpdateDynamics
+from firm_ce.backend.tensor.dynamics import ResetAnnualBudgets, GetTotalPeakHeadroomBound
+from firm_ce.backend.tensor.forward_pass import ForwardPassRenewables, ForwardPassPeak
+from firm_ce.backend.tensor.reverse_pass import ReversePassPeak, ReversePassHydro, UpdateDynamics
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def Simulate(solution):
-    # Base Forward Pass
-    ForwardPassRenewables(solution)
+    ResetAnnualBudgets(solution)
 
-    # Sweep A: Hydro & Storage Trickling
-    ReversePassHydro(solution)
+    ForwardPassRenewables(solution)  # Renewables and storage first
+    ReversePassHydro(solution)  # trickle charge batteries
+    UpdateDynamics(solution)  # update bookkeeping
 
-    # Commit Trickling: Re-run balancing so trickle charged batteries actually discharge
-    UpdateDynamics(solution)
+    if (solution.operations.Mdeficit > TOLERANCE).any():
+        ForwardPassPeak(solution)  # Dispatch Biomass, Biogas, Gas against the remaining deficits
 
-    if (solution.operations.Mdeficit > 1e-6).any():
-        # Dispatch Gas against the remaining deficits
-        ForwardPassGas(solution)
-
-    # Sweep B: Flexible Gas Trickling
-    # Only run if deficits STILL exist after Sweep A exhausted free/stored energy
     total_deficit = solution.operations.Mdeficit.sum()
-    if total_deficit > 1e-6:
-        total_gas_headroom = (solution.assets.Cgas.sum() * solution.static.intervals
-                              - solution.operations.Mgas.sum())  # avoid temp array
+    if total_deficit > TOLERANCE:
+        total_gas_headroom = GetTotalPeakHeadroomBound(solution)
 
-        if total_deficit > total_gas_headroom * 0.9:  # 0.9 is generous estimate of round trip efficiency
-            solution.Feasible = False
-            # 0.8 is approx round trip efficiency
-            solution.estimated_deficit = (total_deficit - total_gas_headroom * 0.8)
+        # 0.9 is generous estimate of round trip + network efficiency
+        if total_deficit > total_gas_headroom * 0.9:
+            solution.feasible = False
+            # 0.8 is approx (but still generous) round trip + network efficiency
+            solution.estimated_deficit = total_deficit - total_gas_headroom * 0.8
 
         else:
-            _feasible = ReversePassGas(solution)
-            # Final Forward Pass (Lock in Gas actions)
+            ReversePassPeak(solution)
             UpdateDynamics(solution)
-
-            solution.Feasible = _feasible
+            solution.estimated_deficit = solution.operations.deficit.sum()
+            solution.feasible = not solution.operations.deficit.sum() > TOLERANCE
 
     else:
-        solution.Feasible = True
+        solution.feasible = True
+        solution.estimated_deficit = 0.0
 
     solution.simulated = True

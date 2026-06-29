@@ -1,7 +1,7 @@
 import numpy as np
 from numba import njit
 
-from firm_ce.common.constants import FASTMATH, BOUNDSCHECK
+from firm_ce.common.constants import FASTMATH, BOUNDSCHECK, TOLERANCE
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
@@ -36,7 +36,7 @@ def Interconnection(
         line_eff = solution.static.line_efficiencies[line]
 
         # Forward direction (start -> end)
-        if netflowt[line] < -1e-6:  # Countering existing reverse flow
+        if netflowt[line] < -TOLERANCE:  # Countering existing reverse flow
             cap_fwd[line] = -netflowt[line] * line_eff
             # Eff > 1.0 because injecting 1 MW here saves >1 MW at the original source
             eff_fwd[line] = 1.0 / line_eff
@@ -45,7 +45,7 @@ def Interconnection(
             eff_fwd[line] = line_eff
 
         # Reverse direction (end -> start)
-        if netflowt[line] > 1e-6:  # Countering existing forward flow
+        if netflowt[line] > TOLERANCE:  # Countering existing forward flow
             cap_rev[line] = netflowt[line] * line_eff
             eff_rev[line] = 1.0 / line_eff
         else:  # Pushing new reverse flow
@@ -53,10 +53,10 @@ def Interconnection(
             eff_rev[line] = line_eff
 
     for n in priority_order:
-        if Fillt[n] < 1e-6:
+        if Fillt[n] < TOLERANCE:
             break  # No more significant deficits
 
-        while Fillt[n] > 1e-6 and total_surplus > 1e-6:
+        while Fillt[n] > TOLERANCE and total_surplus > TOLERANCE:
 
             # Dijkstra setup
             eff.fill(0.0)
@@ -78,7 +78,7 @@ def Interconnection(
                 if curr == -1 or max_e == 0.0:
                     break  # Unreachable or fully explored
 
-                if Surplust[curr] > 1e-6:
+                if Surplust[curr] > TOLERANCE:
                     # early exit
                     best_surplus_node = curr
                     break
@@ -104,7 +104,7 @@ def Interconnection(
                     avail_cap = cap_fwd[line] if is_fwd else cap_rev[line]
                     edge_e = eff_fwd[line] if is_fwd else eff_rev[line]
 
-                    if avail_cap < 1e-6:
+                    if avail_cap < TOLERANCE:
                         continue  # Congested or hit zero-crossing limit
 
                     new_e = eff[curr] * edge_e
@@ -169,25 +169,25 @@ def Interconnection(
 
                 # Update line netflow state
                 if is_fwd:
-                    if netflowt[line] < -1e-6:  # Processing counter-flow
+                    if netflowt[line] < -TOLERANCE:  # Processing counter-flow
                         netflowt[line] += current_flow * edge_e
                     else:
                         netflowt[line] += current_flow
                 else:
-                    if netflowt[line] > 1e-6:  # Processing counter-flow
+                    if netflowt[line] > TOLERANCE:  # Processing counter-flow
                         netflowt[line] -= current_flow * edge_e
                     else:
                         netflowt[line] -= current_flow
 
                 # Update line capacities
-                if netflowt[line] < -1e-6:
+                if netflowt[line] < -TOLERANCE:
                     cap_fwd[line] = -netflowt[line] * line_eff
                     eff_fwd[line] = 1.0 / line_eff
                 else:
                     cap_fwd[line] = solution.assets.Clines[line] - netflowt[line]
                     eff_fwd[line] = line_eff
 
-                if netflowt[line] > 1e-6:
+                if netflowt[line] > TOLERANCE:
                     cap_rev[line] = netflowt[line] * line_eff
                     eff_rev[line] = 1.0 / line_eff
                 else:

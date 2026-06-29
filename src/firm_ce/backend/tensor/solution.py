@@ -83,6 +83,7 @@ def CalculateCost(
     c = solution.costs
 
     Mdischarge_sum = o.Mdischarge.sum(axis=0)
+    Mpeak_sum = o.Mpeak.sum(axis=0)
     Mnuke_sum = o.Mnuke.sum(axis=0)
 
     # Apportionment not entirely accurate but this is a miniscule cost component
@@ -96,9 +97,9 @@ def CalculateCost(
         + a.Cpsat * c.Fpsat
         + a.Coffw * c.Foffw
         + a.Consw * c.Fonsw
-        + a.Cbiog * c.Fbiog
-        + a.Cbiom * c.Fbiom
-        + a.Cgas * c.Fgas
+        + a.Cpeak[:, 1] * c.Fbiog
+        + a.Cpeak[:, 0] * c.Fbiom
+        + a.Cpeak[:, 2] * c.Fgas
         + (a.Cnuke - a.Cnlte) * c.Fnuke
         + a.Cnlte * c.Fnlte
         + a.CnphP * c.FphP
@@ -111,10 +112,9 @@ def CalculateCost(
         + o.Mpsat.sum(axis=0) * c.Vpsat
         + o.Moffw.sum(axis=0) * c.Voffw
         + o.Monsw.sum(axis=0) * c.Vonsw
-        # TODO: biogas/mass
-        + o.Mbiog.sum(axis=0) * c.Vbiog
-        + o.Mbiom.sum(axis=0) * c.Vbiom
-        + o.Mgas.sum(axis=0) * c.Vgas
+        + Mpeak_sum[:, 1] * c.Vbiog
+        + Mpeak_sum[:, 0] * c.Vbiom
+        + Mpeak_sum[:, 2] * c.Vgas
         + (_Mnuke_ratio * (a.Cnuke - a.Cnlte)) * c.Vnuke
         + (_Mnuke_ratio * a.Cnlte) * c.Vnlte
         + nphes_discharge * c.Vph

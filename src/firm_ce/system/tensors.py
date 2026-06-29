@@ -80,6 +80,7 @@ if JIT_ENABLED:
         # -- Static Data --
         ("years", nbintp),
         ("years_float", nbfloat),
+        ("year_of_interval", nbintp[:])
         ("energy", nbfloat),
         ("legacy_costs", nbfloat),
 
@@ -101,6 +102,8 @@ if JIT_ENABLED:
         ("TSphes_inflow", nbfloat[:, :]),
         # (intervals, nodes, hydro_type)
         ("TShyd_inflow", nbfloat[:, :, :]),
+        # (years, npeak)
+        ("Bpeak", nbfloat[:, :]),  # annual fuel budget
 
         # -- Existing Capacity --
         # (nodes,)
@@ -127,6 +130,7 @@ if JIT_ENABLED:
         ("nnlte", nbintp),
         ("nstor", nbintp),
         ("nhyd", nbintp),
+        ("npeak", nbintp),
         # (nodes,)
         ("Nodel_int", nbintp[:]),
         ("scenario_mask", boolean[:]),
@@ -201,6 +205,7 @@ class StaticTensor:
         self.years = scenario_parameters.year_count
         self.years_float = scenario_parameters.year_float
         self.intervals = scenario_parameters.intervals_count
+        self.year_of_interval = scenario_parameters.year_of_interval
         self.nodes = scenario_parameters.node_count
         self.nhvi = network.major_line_count
         self.energy = scenario_parameters.demand_sum_mwh
@@ -301,6 +306,7 @@ class StaticTensor:
 
         self.nstor = 3  # TODO: dynamic
         self.nhyd = 2  # TODO: dynamic
+        self.npeak = 3  # TODO: dynamic
         self.storage_charge_eff = np.zeros(self.nstor, npfloat)
         self.storage_discha_eff = np.zeros(self.nstor, npfloat)
         storage_type_count = np.zeros(self.nstor, npint)
@@ -564,9 +570,10 @@ if JIT_ENABLED:
         ("Cpsat", nbfloat[:]),
         ("Coffw", nbfloat[:]),
         ("Consw", nbfloat[:]),
-        ("Cbiog", nbfloat[:]),
-        ("Cbiom", nbfloat[:]),
-        ("Cgas", nbfloat[:]),
+        # ("Cbiog", nbfloat[:]),
+        # ("Cbiom", nbfloat[:]),
+        # ("Cgas", nbfloat[:]),
+        ("Cpeak", nbfloat[:, :]),
         ("Cnuke", nbfloat[:]),
         ("Cnlte", nbfloat[:]),
         ("CnphP", nbfloat[:]),
@@ -594,9 +601,10 @@ class AssetTensor:
         self.Cpsat = np.zeros(static.nodes, dtype=npfloat)
         self.Coffw = np.zeros(static.nodes, dtype=npfloat)
         self.Consw = np.zeros(static.nodes, dtype=npfloat)
-        self.Cbiog = np.zeros(static.nodes, dtype=npfloat)
-        self.Cbiom = np.zeros(static.nodes, dtype=npfloat)
-        self.Cgas = np.zeros(static.nodes, dtype=npfloat)
+        # self.Cbiog = np.zeros(static.nodes, dtype=npfloat)
+        # self.Cbiom = np.zeros(static.nodes, dtype=npfloat)
+        # self.Cgas = np.zeros(static.nodes, dtype=npfloat)
+        self.Cpeak = np.zeros((static.nodes, static.npeak), dtype=npfloat)
         self.Cnuke = static.Enuke.copy()
         self.Cnlte = np.zeros(static.nodes, dtype=npfloat)
         self.ChydP = static.EhydP.copy()
@@ -620,13 +628,13 @@ class AssetTensor:
             self.Consw[static.onsw_nodes[i]] += x[static.onsw_offset + i]
 
         for i in range(static.biog_len):
-            self.Cbiog[static.biog_nodes[i]] += x[static.biog_offset + i]
+            self.Cpeak[static.biog_nodes[i], 1] += x[static.biog_offset + i]
 
         for i in range(static.biom_len):
-            self.Cbiom[static.biom_nodes[i]] += x[static.biom_offset + i]
+            self.Cpeak[static.biom_nodes[i], 0] += x[static.biom_offset + i]
 
         for i in range(static.ccgt_len):
-            self.Cgas[static.ccgt_nodes[i]] += x[static.ccgt_offset + i]
+            self.Cpeak[static.ccgt_nodes[i], 2] += x[static.ccgt_offset + i]
 
         for i in range(static.nuke_len):
             self.Cnuke[static.nuke_nodes[i]] += x[static.nuke_offset + i]
@@ -687,9 +695,9 @@ if JIT_ENABLED:
         ("Mpsat", nbfloat[:, :]),
         ("Moffw", nbfloat[:, :]),
         ("Monsw", nbfloat[:, :]),
-        ("Mbiog", nbfloat[:, :]),
-        ("Mbiom", nbfloat[:, :]),
-        ("Mgas", nbfloat[:, :]),
+        # ("Mbiog", nbfloat[:, :]),
+        # ("Mbiom", nbfloat[:, :]),
+        # ("Mgas", nbfloat[:, :]),
         ("Mnuke", nbfloat[:, :]),
         # (intervals, nhvi)
         ("Tnetflow", nbfloat[:, :]),
@@ -701,8 +709,10 @@ if JIT_ENABLED:
         ("Mreservoir", nbfloat[:, :, :]),
         ("Mhyd_spill", nbfloat[:, :, :]),
         ("Mhydro", nbfloat[:, :, :]),
+        # (intervals, nodes, npeak)
+        ("Mpeak", nbfloat[:, :, :]),
 
-        # temporary memory buffers
+        # -- Temporary memory buffers --
         # scalar
         ("has_deficit_t", boolean),
         ("has_curtail_t", boolean),
@@ -735,6 +745,8 @@ if JIT_ENABLED:
         ("discharge_max_t", nbfloat[:, :, :]),
         # (nodes, nhydro)
         ("hydro_headroom", nbfloat[:, :]),
+        # (years, npeak)
+        ("remaining_peak_budget", nbfloat[:, :]),
     ]
 
 else:
@@ -753,9 +765,10 @@ class OperationTensor:
         self.Monsw = assets.Consw * static.TSonsw
         self.Moffw = assets.Coffw * static.TSoffw
         self.Mnuke = assets.Cnuke * static.TSnuke
-        self.Mbiog = np.zeros((static.intervals, static.nodes), dtype=npfloat)
-        self.Mbiom = np.zeros((static.intervals, static.nodes), dtype=npfloat)
-        self.Mgas = np.zeros((static.intervals, static.nodes), dtype=npfloat)
+        # self.Mbiog = np.zeros((static.intervals, static.nodes), dtype=npfloat)
+        # self.Mbiom = np.zeros((static.intervals, static.nodes), dtype=npfloat)
+        # self.Mgas = np.zeros((static.intervals, static.nodes), dtype=npfloat)
+        self.Mpeak = np.zeros((static.intervals, static.nodes, static.npeak), dtype=npfloat)
 
         self.Mnetload = (
             static.Mnetload_mror

@@ -1,8 +1,8 @@
 from numba import njit  # type: ignore
 
 from firm_ce.backend.tensor.interconnection import Interconnection
-from firm_ce.backend.tensor.dynamics import UpdateUnbalancedt, CommitTrickle, UpdateSOCt
-from firm_ce.common.constants import FASTMATH, BOUNDSCHECK
+from firm_ce.backend.tensor.dynamics import UpdateUnbalancedt, CommitTrickle, UpdateSOCt, DispatchPeak, GetPeakHeadroom
+from firm_ce.common.constants import FASTMATH, BOUNDSCHECK, TOLERANCE
 
 STALL_WINDOW = 24  # daily
 STALL_MIN_DELTA = 0.1  # 100 MW
@@ -31,14 +31,14 @@ def ReversePassHydro(solution):
         UpdateStorageMinMaxFuture(solution, t)
 
         for n in range(nodes):
-            if solution.operations.Mdeficit[t, n] > 1e-6:
+            if solution.operations.Mdeficit[t, n] > TOLERANCE:
                 rolling_deficits[n] += solution.operations.Mdeficit[t, n]
 
-        if (rolling_deficits > 1e-6).any():
+        if (rolling_deficits > TOLERANCE).any():
             SetupPrechargePools(solution, t)
             SetupStorageDonors(solution, t)
 
-            if (node_precharge_fill > 1e-6).any():
+            if (node_precharge_fill > TOLERANCE).any():
                 TrickleStorageHydro(solution, t)
 
         intervals_since_stall_check += 1
@@ -48,7 +48,7 @@ def ReversePassHydro(solution):
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def ReversePassGas(solution):
+def ReversePassPeak(solution):
     nodes = solution.static.nodes
     rolling_deficits = solution.operations.rolling_deficits
     node_precharge_fill = solution.operations.fill_buffer
@@ -65,14 +65,14 @@ def ReversePassGas(solution):
         UpdateStorageMinMaxFuture(solution, t)
 
         for n in range(nodes):
-            if solution.operations.Mdeficit[t, n] > 1e-6:
+            if solution.operations.Mdeficit[t, n] > TOLERANCE:
                 rolling_deficits[n] += solution.operations.Mdeficit[t, n]
 
-        if (rolling_deficits > 1e-6).any():
+        if (rolling_deficits > TOLERANCE).any():
             SetupPrechargePools(solution, t)
 
-            if (node_precharge_fill > 1e-6).any():
-                TrickleGas(solution, t)
+            if (node_precharge_fill > TOLERANCE).any():
+                TricklePeak(solution, t)
 
         intervals_since_stall_check += 1
         if intervals_since_stall_check >= STALL_WINDOW:
@@ -80,9 +80,6 @@ def ReversePassGas(solution):
             if CheckNodeStalls(solution):
                 print("stalled")
                 # return False  # disabled for now
-
-    _feasible = (rolling_deficits > 1e-6).any()
-    return _feasible
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
@@ -137,12 +134,12 @@ def SetupPrechargePools(solution, t):
             solution.operations.precharge_flag[n, s] = False
             solution.operations.charge_max_t[t, n, s] = 0.0
 
-        if rolling_deficits[n] > 1e-6:
+        if rolling_deficits[n] > TOLERANCE:
             remaining_fill = rolling_deficits[n]
             for s in (3, 2, 1, 0):  # Shortest duration first
                 headroom = GetReverseStorageHeadroom(solution, t, n, s)
 
-                if headroom > 1e-6:
+                if headroom > TOLERANCE:
                     solution.operations.precharge_flag[n, s] = True
 
                     # headroom in terms of demand not supply
@@ -165,7 +162,7 @@ def SetupStorageDonors(solution, t):
             solution.operations.trickling_flag[n, s] = False
             solution.operations.discharge_max_t[t, n, s] = 0.0
 
-        if solution.operations.Mcurtail[t, n] > 1e-6:
+        if solution.operations.Mcurtail[t, n] > TOLERANCE:
             for s in (0, 1, 2, 3):  # Longest duration first
                 available_e_power = (
                     solution.operations.storage_min_future[n, s]
@@ -175,7 +172,7 @@ def SetupStorageDonors(solution, t):
                 available_p_power = solution.assets.CstorageP[n, s] - solution.operations.Mdischarge[t, n, s]
 
                 max_d = max(0.0, min(available_p_power, available_e_power))
-                if max_d > 1e-6:
+                if max_d > TOLERANCE:
                     solution.operations.trickling_flag[n, s] = True
                     solution.operations.discharge_max_t[t, n, s] = max_d
 
@@ -186,7 +183,7 @@ def FillPrechargers(solution, t, n, transfer_amount):
     rolling_deficits = solution.operations.rolling_deficits
 
     for s in (3, 2, 1, 0):
-        if solution.operations.precharge_flag[n, s] and transfer_amount > 1e-6:
+        if solution.operations.precharge_flag[n, s] and transfer_amount > TOLERANCE:
             allocated = min(transfer_amount, solution.operations.charge_max_t[t, n, s])
             solution.operations.Mcharge[t, n, s] += allocated
             solution.operations.charge_max_t[t, n, s] -= allocated
@@ -218,7 +215,7 @@ def DrainHydroDonors(solution, t, n, transfer_amount):
 def DrainStorageDonors(solution, t, n, transfer_amount):
     res = solution.static.resolution
     for s in (0, 1, 2, 3):
-        if solution.operations.trickling_flag[n, s] and transfer_amount > 1e-6:
+        if solution.operations.trickling_flag[n, s] and transfer_amount > TOLERANCE:
             allocated = min(transfer_amount, solution.operations.discharge_max_t[t, n, s])
             solution.operations.Mdischarge[t, n, s] += allocated
             solution.operations.discharge_max_t[t, n, s] -= allocated
@@ -262,7 +259,7 @@ def TrickleStorageHydro(solution, t):  # noqa: C901
     # Local Transfers
     for n in range(nodes):
         transfer = min(surplus[n], node_precharge_fill[n])
-        if transfer > 1e-6:
+        if transfer > TOLERANCE:
             surplus[n] -= transfer
             node_precharge_fill[n] -= transfer
 
@@ -273,7 +270,7 @@ def TrickleStorageHydro(solution, t):  # noqa: C901
             FillPrechargers(solution, t, n, transfer)
 
     # Network Transfers
-    if (surplus > 1e-6).any() and (node_precharge_fill > 1e-6).any():
+    if (surplus > TOLERANCE).any() and (node_precharge_fill > TOLERANCE).any():
         precharge_fill_orig[:] = node_precharge_fill
         surplus_orig[:] = surplus
 
@@ -288,57 +285,22 @@ def TrickleStorageHydro(solution, t):  # noqa: C901
 
         for n in range(nodes):
             exports = surplus_orig[n] - surplus[n]
-            if exports > 1e-6:
+            if exports > TOLERANCE:
                 rem_exports = DrainStorageDonors(solution, t, n, exports)
                 DrainHydroDonors(solution, t, n, rem_exports)
 
             imports = precharge_fill_orig[n] - node_precharge_fill[n]
-            if imports > 1e-6:
+            if imports > TOLERANCE:
                 FillPrechargers(solution, t, n, imports)
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
-def TrickleGas(solution, t):
-    nodes = solution.static.nodes
-    surplus = solution.operations.surplus_buffer
-    surplus_orig = solution.operations.surplus_orig
-    node_precharge_fill = solution.operations.fill_buffer
-    precharge_fill_orig = solution.operations.fill_orig
-
-    surplus.fill(0.0)
-
-    for n in range(nodes):
-        surplus[n] = max(0.0, solution.assets.Cgas[n] - solution.operations.Mgas[t, n])
-
-    for n in range(nodes):
-        transfer = min(surplus[n], node_precharge_fill[n])
-        if transfer > 1e-6:
-            surplus[n] -= transfer
-            node_precharge_fill[n] -= transfer
-            solution.operations.Mgas[t, n] += transfer
-            FillPrechargers(solution, t, n, transfer)
-
-    if (surplus > 1e-6).any() and (node_precharge_fill > 1e-6).any():
-        surplus_orig[:] = surplus
-        precharge_fill_orig[:] = node_precharge_fill
-
-        Interconnection(
-            solution,
-            node_precharge_fill,
-            surplus,
-            solution.operations.Tnetflow[t],
-            solution.operations.Mimport[t],
-            solution.operations.Mexport[t]
-        )
-
-        for n in range(nodes):
-            exports = surplus_orig[n] - surplus[n]
-            if exports > 1e-6:
-                solution.operations.Mgas[t, n] += exports
-
-            imports = precharge_fill_orig[n] - node_precharge_fill[n]
-            if imports > 1e-6:
-                FillPrechargers(solution, t, n, imports)
+def TricklePeak(solution, t):
+    for k in range(3):
+        if not (solution.operations.fill_buffer > 1e-6).any():
+            break  # remaining precharge demand already fully met by a preferred tier
+        LocalTrickleTier(solution, t, k)
+        NetworkTrickleTier(solution, t, k)
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
@@ -366,7 +328,7 @@ def WriteOffStalledHydroNodes(solution):
     precharge attempts are abandoned for the backlog it has currently
     accumulated. This does NOT touch solution.Feasible as feasibility is not yet
     determinable at this point in Simulate. The unresolved deficit falls through
-    unchanged to ForwardPassGas / ReversePassGas.
+    unchanged to ForwardPassPeak / ReversePassPeak.
 
     Resetting checkpoint/counter on write-off (rather than leaving the node
     permanently excluded) lets it re-enter consideration if fresh deficit
@@ -377,7 +339,7 @@ def WriteOffStalledHydroNodes(solution):
     counter = solution.operations.stall_counter
 
     for n in range(solution.static.nodes):
-        if rolling_deficits[n] <= 1e-6:
+        if rolling_deficits[n] <= TOLERANCE:
             counter[n] = 0
             checkpoint[n] = STALL_CHECKPOINT_SENTINEL
             continue
@@ -413,7 +375,7 @@ def CheckNodeStalls(solution):
     stalled_nodes = 0
 
     for n in range(solution.static.nodes):
-        if rolling_deficits[n] > 1e-6:
+        if rolling_deficits[n] > TOLERANCE:
             deficient_nodes += 1
 
             if rolling_deficits[n] <= checkpoint[n] - STALL_MIN_DELTA:
@@ -440,3 +402,55 @@ def UpdateDynamics(solution):
         UpdateUnbalancedt(solution, t)
         CommitTrickle(solution, t)
         UpdateSOCt(solution, t)
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
+def LocalTrickleTier(solution, t, k):
+    nodes = solution.static.nodes
+    surplus = solution.operations.surplus_buffer
+    node_precharge_fill = solution.operations.fill_buffer
+
+    surplus.fill(0.0)
+    for n in range(nodes):
+        surplus[n] = GetPeakHeadroom(solution, t, n, k)
+
+    for n in range(nodes):
+        transfer = min(surplus[n], node_precharge_fill[n])
+        if transfer > 1e-6:
+            surplus[n] -= transfer
+            node_precharge_fill[n] -= transfer
+            DispatchPeak(solution, t, n, k, transfer)
+            FillPrechargers(solution, t, n, transfer)
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
+def NetworkTrickleTier(solution, t, k):
+    nodes = solution.static.nodes
+    surplus = solution.operations.surplus_buffer
+    surplus_orig = solution.operations.surplus_orig
+    node_precharge_fill = solution.operations.fill_buffer
+    precharge_fill_orig = solution.operations.fill_orig
+
+    if not ((surplus > 1e-6).any() and (node_precharge_fill > 1e-6).any()):
+        return
+
+    surplus_orig[:] = surplus
+    precharge_fill_orig[:] = node_precharge_fill
+
+    Interconnection(
+        solution,
+        node_precharge_fill,
+        surplus,
+        solution.operations.Tnetflow[t],
+        solution.operations.Mimport[t],
+        solution.operations.Mexport[t]
+    )
+
+    for n in range(nodes):
+        exports = surplus_orig[n] - surplus[n]
+        if exports > 1e-6:
+            DispatchPeak(solution, t, n, k, exports)
+
+        imports = precharge_fill_orig[n] - node_precharge_fill[n]
+        if imports > 1e-6:
+            FillPrechargers(solution, t, n, imports)

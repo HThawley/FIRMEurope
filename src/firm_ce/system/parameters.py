@@ -18,6 +18,7 @@ if JIT_ENABLED:
         ("year_count", nbintp),
         ("leap_year_count", nbintp),
         ("year_first_t", nbintp[:]),
+        ("year_of_interval", nbintp[:]),
         ("intervals_count", nbintp),
         ("node_count", nbintp),
         ("fom_scalar", nbfloat),
@@ -41,6 +42,7 @@ class ScenarioParameters:
         year_count: nbintp,
         leap_year_count: nbintp,
         year_first_t: nbintp[:],
+        year_of_interval: nbintp[:],
         intervals_count: nbintp,
         node_count: nbintp,
     ):
@@ -52,6 +54,7 @@ class ScenarioParameters:
         self.year_count = year_count
         self.leap_year_count = leap_year_count if LEAPDAYS else 0
         self.year_first_t = year_first_t
+        self.year_of_interval = year_of_interval
         self.intervals_count = intervals_count
         self.node_count = node_count
         if LEAPDAYS:

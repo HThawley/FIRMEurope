@@ -53,6 +53,34 @@ def determine_interval_parameters(
     return leap_days, year_first_t, intervals_count
 
 
+def determine_year_of_interval(
+    year_first_t: NDArray,
+    intervals_count: int,
+) -> NDArray:
+    """
+    Maps each time interval to its zero-indexed simulation year, using the
+    year-boundary markers already computed in `determine_interval_parameters`.
+    Used to index annual resource budgets (e.g. biomass/biogas fuel
+    allowances) that reset once per year but are tracked at interval
+    resolution in `Solution.operations`.
+
+    Parameters:
+    -------
+    year_first_t (NDArray): First time interval of each year, as returned by
+        `determine_interval_parameters` (and stored on `ScenarioParameters`).
+    intervals_count (int): Total number of time intervals in the scenario.
+
+    Returns:
+    -------
+    NDArray: Shape (intervals_count,), dtype npintp. year_of_interval[t] gives
+        the zero-indexed year that interval t belongs to.
+    """
+    t_indices = np.arange(intervals_count)
+    year_of_interval = np.searchsorted(year_first_t, t_indices, side="right") - 1
+
+    return year_of_interval.astype(npintp)
+
+
 def construct_ScenarioParameters_object(
     scenario_data_dict: Dict[str, str],
     node_count: int,
@@ -104,6 +132,8 @@ def construct_ScenarioParameters_object(
         intervals_count = int(np.ceil(intervals_count / interval_aggregation))
         year_first_t = year_first_t // interval_aggregation
 
+    year_of_interval = determine_year_of_interval(year_first_t, intervals_count)
+
     return ScenarioParameters(
         npfloat(resolution),
         npfloat(allowance),
@@ -112,6 +142,7 @@ def construct_ScenarioParameters_object(
         npint(year_count),
         npint(leap_year_count),
         npintp(year_first_t),
+        npintp(year_of_interval),
         npint(intervals_count),
         npint(node_count),
     )
