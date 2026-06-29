@@ -11,7 +11,7 @@ from firm_ce.common.typing import (
     BroadOptimumVars_Type,
     EvaluationRecord_Type,
 )
-from firm_ce.optimisation.single_time import Solution, parallel_wrapper
+from firm_ce.backend.scalar.single_time import Solution, parallel_wrapper
 from firm_ce.system.components import Fleet_InstanceType
 from firm_ce.system.topology import Network_InstanceType
 

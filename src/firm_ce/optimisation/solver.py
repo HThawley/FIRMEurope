@@ -1,25 +1,22 @@
 # type: ignore
 import csv
 import os
-from typing import Dict, Tuple, Union, Callable, TYPE_CHECKING
+from typing import Dict, Tuple, Union, Optional
 from datetime import datetime
 import json
 import pandas as pd
-
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult, differential_evolution
+from abc import ABC, abstractmethod
 
 from mga.problem_definition import OptimizationProblem
 from mga.mhmga import MGAProblem
 from mga.population import Population
 import mga.utils.termination as mgat
 
-# Avoid circular import issues
-if TYPE_CHECKING:
-    from firm_ce.system import Scenario
-
 from firm_ce.common.constants import SAVE_POPULATION, PENALTY_MULTIPLIER
+from firm_ce.optimisation.objective_factory import build_objective
 from firm_ce.common.typing import npfloat
 from firm_ce.optimisation.broad_optimum import (
     append_to_midpoint_csv,
@@ -31,42 +28,33 @@ from firm_ce.optimisation.broad_optimum import (
     write_broad_optimum_bands,
     write_broad_optimum_records,
 )
-from firm_ce.optimisation.st_solution import Solution
-from firm_ce.optimisation.single_time import evaluate_vectorised_xs
-from firm_ce.system.components import Fleet_InstanceType
-from firm_ce.system.parameters import ModelConfig, ScenarioParameters_InstanceType
-from firm_ce.system.topology import Network_InstanceType
 
 
-class Solver:
+class BaseSolver(ABC):
+    """Abstract base class for all optimisation strategies"""
+
     def __init__(
         self,
-        scenario: "Scenario",
-        config: ModelConfig,
-        polish_flag: bool = False,
+        scenario,
+        config,
         initial_population: Union[NDArray[np.float64], None] = None,
-    ) -> None:
+    ):
         self.scenario = scenario
         self.config = config
         self.decision_x0 = self.scenario.x0 if len(self.scenario.x0) > 0 else None
-
-        self.broad_optimum_var_info = build_broad_optimum_var_info(self.scenario.fleet, self.scenario.network)
-
-        self.result = None
-        self.optimal_lcoe = None
         self.initial_population = initial_population
+        self.result = None
 
-        if not self.config.type.startswith("mhmga"):
-            if polish_flag:
-                self.iterations = int(self.config.iterations // 2)
-            else:
-                self.iterations = self.config.iterations
-        elif self.config.type == "mhmga":
-            self.mga_log_dir = os.path.join(self.scenario.solution_dir, "mga_logs")
-            os.makedirs(self.mga_log_dir, exist_ok=True)
-        elif self.config.type == "mhmga_extrema":
-            self.mga_log_dir = os.path.join(self.scenario.solution_dir, "mhmga_extrema_logs")
-            os.makedirs(self.mga_log_dir, exist_ok=True)
+        self.objective_function, self.fargs = build_objective(self.scenario, self.config)
+
+    @abstractmethod
+    def evaluate(self) -> None:
+        """Executes the specific optimization strategy. Must be implemented by subclasses."""
+        pass
+
+
+class DeSolverBase(BaseSolver):
+    """ Handles standard Differential Evolution Optimisations """
 
     def initialise_callback(self) -> None:
         out_dir = self.scenario.solution_dir
@@ -83,45 +71,7 @@ class Solver:
                 with open(os.path.join(out_dir, f"{file}.csv"), "w", newline="") as csvfile:
                     csv.writer(csvfile)
 
-    def get_differential_evolution_args(
-        self,
-    ) -> Tuple[ScenarioParameters_InstanceType, Fleet_InstanceType, Network_InstanceType, str, float]:
-        args = (
-            self.scenario.static,
-            self.scenario.fleet,
-            self.scenario.network,
-            self.config.balancing_type,
-            self.config.fixed_costs_threshold,
-        )
-        return args
-
-    def run_differential_evolution(self, objective_function: Callable, args: Tuple) -> OptimizeResult:
-        result = differential_evolution(
-            x0=self.decision_x0,
-            func=objective_function,
-            bounds=list(zip(self.scenario.lower_bounds, self.scenario.upper_bounds)),
-            args=args,
-            tol=0,
-            maxiter=self.iterations,
-            popsize=self.config.population,
-            mutation=(0.2, self.config.mutation),
-            recombination=self.config.recombination,
-            disp=True,
-            polish=False,
-            updating="deferred",
-            callback=self.st_callback,
-            workers=1,
-            vectorized=True,
-        )
-        return result
-
-    def single_time(self) -> None:
-        self.initialise_callback()
-        self.result = self.run_differential_evolution(
-            evaluate_vectorised_xs, self.get_differential_evolution_args()
-        )[0, :]  # just cost + penalties * penalty_multiplier
-
-    def st_callback(self, intermediate_result: OptimizeResult) -> None:
+    def callback(self, intermediate_result: OptimizeResult) -> None:
         out_dir = self.scenario.solution_dir
 
         # Save best solution from last iteration
@@ -142,425 +92,59 @@ class Solver:
                 writer_all.writerows(combined_block)
                 writer_latest.writerows(combined_block)
 
-    def get_mhmga_args(self) -> dict:
-        if self.config.save_details:
-            self.details = np.empty(
-                (
-                    self.config.mga_start_niches + sum(self.config.mga_new_niches),  # max niches
-                    max(self.config.mga_pop_size),
-                    self.scenario.details_length,
-                ), dtype=npfloat)
-
-            args = (
-                self.scenario.static,
-                self.scenario.fleet,
-                self.scenario.network,
-                self.config.balancing_type,
-                self.config.fixed_costs_threshold,
-                self.details,
-            )
-        else:
-            args = (
-                self.scenario.static,
-                self.scenario.fleet,
-                self.scenario.network,
-                self.config.balancing_type,
-                self.config.fixed_costs_threshold,
-            )
-        return args
-
-    def get_mhmga_extrema_args(self, weighting: np.ndarray, lcoe_constr: float) -> tuple:
-        fargs = self.get_mhmga_args()
-        fargs = (weighting, lcoe_constr, *fargs)
-        return fargs
-
-    def instantiate_mhmga_algorithm(self, log_path: str, init_callback: bool) -> MGAProblem:
-        fargs = self.get_mhmga_args()
-
-        if self.config.save_details:
-            from firm_ce.optimisation.mhmga import mga_wrapper_with_details as mga_parallel_wrapper
-        else:
-            from firm_ce.optimisation.mhmga import mga_wrapper as mga_parallel_wrapper
-
-        problem = OptimizationProblem(
-            objective=mga_parallel_wrapper,
-            fargs=fargs,
-            bounds=(self.scenario.lower_bounds, self.scenario.upper_bounds),
-            maximize=False,
-            vectorized=True,
-            constraints=True,
-            return_scaled=False,
-        )
-
-        algorithm = MGAProblem(
-            problem=problem,
+    def run_differential_evolution(self, objective_function, fargs) -> OptimizeResult:
+        result = differential_evolution(
             x0=self.decision_x0,
-            log_dir=log_path,
-            log_freq=self.config.mga_log_freq,
-            random_seed=None,
-            parallelize=False,  # we implement parallelisation independently
-            callback=self.mga_callback,
-            include_obj_in_fitness=True,
-        )
-
-        if self.config.restart_optimisation:
-            if self.config.model_location == "new":
-                pop_dir = "results/temp"
-            else:
-                pop_dir = self.scenario.solution_dir
-
-            import pandas as pd
-            ndim = len(self.scenario.lower_bounds)
-            if not os.path.exists(os.path.join(pop_dir, "latest_population.csv")):
-                raise FileNotFoundError(
-                    f"No population file found for restarting. Expected at {os.path.join(pop_dir, 'latest_population.csv')}"
-                )
-
-            previous = pd.read_csv(
-                os.path.join(pop_dir, "latest_population.csv"),
-                header=None,
-                dtype=float,
-                usecols=range(3, ndim+3)
-            ).to_numpy()
-            num_niches = self.config.mga_start_niches + self.config.mga_new_niches[0]
-            previous = previous.reshape(num_niches, self.config.mga_pop_size[0], ndim)
-            algorithm.starting_points = previous
-
-        if init_callback:
-            # callback inited after "results/temp/latest_population.csv" is loaded (if restarting from temp)
-            self.initialise_callback()
-
-        return algorithm
-
-    def generate_alternatives(self) -> None:
-        self.scenario.logger.info("[MHMGA] Initialising MGA algorithm.")
-
-        # jacobian = self.get_approximate_jacobian()
-        path_name = os.path.join(self.mga_log_dir, "mga")
-
-        self._write_mhmga_config_summary()
-
-        algorithm = self.instantiate_mhmga_algorithm(path_name, True)
-
-        algorithm.add_niches(num_niches=self.config.mga_start_niches)
-        self.scenario.logger.info(f"[MHMGA] MGA algorithm initialised with {self.config.mga_start_niches} niches.")
-
-        for step in range(self.config.mga_steps):
-            algorithm.set_verbosity(
-                self.config.mga_disp_rate[step],
-                self.config.mga_verbose_level[step],
-            )
-
-            start_time_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            self.scenario.logger.info(f"[MHMGA] Starting step {step+1}/{self.config.mga_steps} at {start_time_str}")
-
-            if self.config.mga_new_niches[step] > 0:
-                self.scenario.logger.info(f"[MHMGA] Adding {self.config.mga_new_niches[step]} niches.")
-                algorithm.add_niches(num_niches=self.config.mga_new_niches[step])
-
-            algorithm.update_hyperparameters(
-                max_iter=self.config.mga_iter[step],
-                pop_size=self.config.mga_pop_size[step],
-                champ_count=self.config.mga_champ_count[step],
-                elite_count=self.config.mga_elite_count[step],
-                tourn_count=self.config.mga_tourn_count[step],
-                tourn_size=self.config.mga_tourn_size[step],
-                mutation_prob=self.config.mga_mutation_prob[step],
-                mutation_sigma=self.config.mga_mutation_sigma[step],
-                crossover_prob=self.config.mga_crossover_prob[step],
-                niche_elitism=self.config.mga_niche_elitism[step],
-                noptimal_rel=self.config.mga_noptimal_rel[step],
-                noptimal_abs=self.config.mga_noptimal_abs[step],
-                violation_factor=PENALTY_MULTIPLIER,
-                mutation_scaler=np.ones_like(self.scenario.lower_bounds),
-                space_scaler=self.scenario.projection_matrix,
-                objective_scaler=1.0,
-                fitness_method=self.config.mga_fitness[step]
-            )
-
-            algorithm.step()
-
-            # 4. Terminate and get results
-            results = algorithm.get_results()
-            self.save_mga_results(results)
-
-            self.scenario.logger.info("[MHMGA] MGA complete. Results saved.")
-
-        self.result = algorithm.population.optima_points[0]
-
-    def instantiate_extrema_algorithm(self, log_path, maximize, weighting, lcoe_constr, starting_points):
-        fargs = self.get_mhmga_extrema_args(weighting, lcoe_constr)
-
-        if self.config.save_details:
-            from firm_ce.optimisation.mhmga_extrema import mga_wrapper_with_details as mga_parallel_wrapper
-        else:
-            from firm_ce.optimisation.mhmga_extrema import mga_wrapper as mga_parallel_wrapper
-
-        problem = OptimizationProblem(
-            objective=mga_parallel_wrapper,
-            fargs=fargs,
-            bounds=(self.scenario.lower_bounds, self.scenario.upper_bounds),
-            maximize=maximize,
+            func=objective_function,
+            bounds=list(zip(self.scenario.lower_bounds, self.scenario.upper_bounds)),
+            args=fargs,
+            tol=0,
+            maxiter=self.iterations,
+            popsize=self.config.population,
+            mutation=(0.2, self.config.mutation),
+            recombination=self.config.recombination,
+            disp=True,
+            polish=False,
+            updating="deferred",
+            callback=self.callback,
+            workers=1,
             vectorized=True,
-            constraints=True,
-            return_scaled=False,
         )
+        return result
 
-        algorithm = MGAProblem(
-            problem=problem,
-            x0=starting_points[0],
-            log_dir=log_path,
-            log_freq=self.config.mga_log_freq,
-            random_seed=None,
-            parallelize=False,  # we implement parallelisation independently
-            callback=self.mga_extrema_callback,
-            include_obj_in_fitness=True,
-        )
 
-        algorithm.starting_points = starting_points
+class SingleTimeSolver(DeSolverBase):
+    """ simple optimisation """
 
-        algorithm.add_niches(num_niches=1)  # pure optimisation
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        polish_flag = getattr(self.config, "polish_flag", False)
+        self.iterations = int(self.config.iterations // 2) if polish_flag else self.config.iterations
 
-        return algorithm
+    def evaluate(self) -> None:
+        self.scenario.logger.info("[Single Time] Starting evaluation")
+        self.initialise_callback()
+        self.run_differential_evolution(self.objective_function, self.fargs)
+        self.scenario.logger.info("[Single Time] Optimisation complete")
+        return None
 
-    def find_starting_points_in_population(self, weighting):
-        # from firm_ce.optimisation.mhmga_extrema import apply_new_weighting
 
-        pop_path = os.path.join(self.scenario.solution_dir, "population.csv")
-        det_path = os.path.join(self.scenario.solution_dir, "details.csv")
-        pop_exists = os.path.exists(pop_path)
-        det_exists = os.path.exists(det_path)
-        if not pop_exists or not det_exists:
-            raise FileNotFoundError(
-                f"[MHMGA-E] Could not find '{'population.csv' if not pop_exists else ''}'"
-                f"{' and ' if not pop_exists and not det_exists else ''}"
-                f"{'details.csv' if not det_exists else ''}'. "
-                f"Expected in '{self.scenario.solution_dir}'"
-            )
+class BroadOptimumSolver(DeSolverBase):
+    """Handles broad optimum banding and midpoint exploration."""
 
-        pop = pd.read_csv(pop_path, header=None).to_numpy()
-        # det = pd.read_csv(det_path, header=None).to_numpy()
-
-        optimal_lcoe = pop[pop[:, 1] == 0, 0].min()  # best objective among feasible solutions
-        noptimal_rel = self.config.mga_noptimal_rel[0]
-        noptimal_abs = self.config.mga_noptimal_abs[0]
-        noptimal_lcoe = optimal_lcoe + abs(optimal_lcoe) * (noptimal_rel) + noptimal_abs
-
-        new_objective = pop[:, 3:] @ weighting  # weighted sum of decision variables
-        feasible_mask = (pop[:, 0] <= noptimal_lcoe) & (pop[:, 1] == 0)  # near-optimal, feasible solutions
-        feasible_objectives = new_objective[feasible_mask]
-        feasible_points = pop[feasible_mask]
-
-        pop_size = self.config.mga_pop_size[0]
-        max_indices = np.argpartition(feasible_objectives, -pop_size)[-pop_size:]  # indices that maximize new objective
-        min_indices = np.argpartition(feasible_objectives, pop_size-1)[:pop_size]  # indices that minimize new objective
-
-        max_points = feasible_points[max_indices]
-        min_points = feasible_points[min_indices]
-        return max_points, min_points, noptimal_lcoe
-
-    def generate_extrema(self):
-        self.scenario.logger.info("[MHMGA-E] Starting extrema generation.")
-
-        path_name = os.path.join(self.mga_log_dir, "mga")
-
-        weightings = []
-        weightings.extend(construct_variable_weightings(self.scenario))
-        weightings.extend(construct_unit_type_weightings(self.scenario))
-        weightings.extend(construct_node_weightings(self.scenario))
-
-        nweight = len(weightings)
-        self.scenario.logger.info(f"[MHMGA-E] Constructed {nweight} weightings for extrema generation.")
-
-        for w, weighting in enumerate(weightings):
-            print(f"[MHMGA-E] Starting extremum generation for extremum {w+1}/{nweight}.")
-            max_points, min_points, noptimal_lcoe, = self.find_starting_points_in_population(weighting)
-
-            for maximize, points in zip((True, False), (max_points, min_points)):
-                algorithm = self.instantiate_extrema_algorithm(
-                    path_name, maximize, weighting, noptimal_lcoe, points
-                )
-
-                for step in range(self.config.mga_steps):
-                    algorithm.set_verbosity(
-                        self.config.mga_disp_rate[step],
-                        self.config.mga_verbose_level[step],
-                    )
-
-                    start_time_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                    self.scenario.logger.info(f"[MHMGA] Starting step {step+1}/{self.config.mga_steps} at {start_time_str}")
-
-                    algorithm.update_hyperparameters(
-                        max_iter=self.config.mga_iter[step],
-                        pop_size=self.config.mga_pop_size[step],
-                        champ_count=self.config.mga_champ_count[step],
-                        elite_count=self.config.mga_elite_count[step],
-                        tourn_count=self.config.mga_tourn_count[step],
-                        tourn_size=self.config.mga_tourn_size[step],
-                        mutation_prob=self.config.mga_mutation_prob[step],
-                        mutation_sigma=self.config.mga_mutation_sigma[step],
-                        crossover_prob=self.config.mga_crossover_prob[step],
-                        niche_elitism=0,
-                        noptimal_rel=0,
-                        noptimal_abs=np.inf,
-                        violation_factor=PENALTY_MULTIPLIER,
-                        mutation_scaler='bounds',  # TODO: enlargen weightings?
-                    )
-
-                    abs_min = self.scenario.lower_bounds[weighting > 0].sum()
-                    abs_max = self.scenario.upper_bounds[weighting > 0].sum()
-
-                    algorithm.step(
-                        termination_criteria=[
-                            mgat.FixedValue(
-                                value=abs_max if maximize else abs_min,
-                                maximize=maximize,
-                                attribute="current_optimum",
-                                attribute_in_population=True,
-                            ),  # terminate on reaching theoretical max/min of the weighted sum objective
-                            mgat.GradientStagnation(
-                                window=10,
-                                improvement=0.01*abs_max,
-                                maximize=maximize,
-                                attribute="current_optimum",
-                                attribute_in_population=True,
-                            )  # terminate if less than 1% of theoretic max improvement in 10 iterations
-                        ]
-                    )
-
-        #       log population - dedicated callback func?
-        #   log extremum
-
-        # second pass?
-
-    def _write_mhmga_config_summary(self) -> None:
-        """Writes a JSON summary of MHMGA hyperparameters to the solution directory."""
-        summary_path = os.path.join(self.scenario.solution_dir, "mhmga_config.json")
-
-        mhmga_config = {}
-        for key, value in self.config.__dict__.items():
-            if key.startswith("mga_"):
-                # Convert numpy arrays to lists for JSON serialization
-                if isinstance(value, np.ndarray):
-                    mhmga_config[key] = value.tolist()
-                else:
-                    mhmga_config[key] = value
-
-        # Inject structural data possibly relevant for loading populations later
-        mhmga_config["ndim"] = len(self.scenario.lower_bounds)
-        mhmga_config["lower_bounds"] = self.scenario.lower_bounds.tolist()
-        mhmga_config["upper_bounds"] = self.scenario.upper_bounds.tolist()
-        mhmga_config["unit_type_idxs"] = self.scenario.unit_type_idx
-
-        with open(summary_path, "w") as f:
-            json.dump(mhmga_config, f, indent=4)
-
-    def save_mga_results(self, results: Dict) -> None:
-        filepath = os.path.join(self.mga_log_dir, "mga_alternatives.csv")
-
-        optima = results['optima']
-        fitness = results['fitness']
-        objective = results['objective']
-        noptimality = results['noptimality']
-
-        # Create header: meta-data columns first, then decision variables
-        header = ["fitness", "objective", "is_noptimal"] + [f"x{i}" for i in range(optima.shape[1])]
-
-        with open(filepath, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(header)
-            for i in range(optima.shape[0]):
-                row = [fitness[i], objective[i], noptimality[i]] + list(optima[i])
-                writer.writerow(row)
-
-    def mga_callback(self, population: Population) -> None:
-        out_dir = self.scenario.solution_dir
-
-        # Save best solution from last iteration
-        with open(os.path.join(out_dir, "callback.csv"), "a", newline="") as f:
-            writer = csv.writer(f)
-            best_row = [
-                population.optima_raw_objectives[0],
-                population.optima_violations[0],
-                population.optima_fitnesses[0],
-                *population.optima_points[0]
-            ]
-            writer.writerow(best_row)
-
-        if SAVE_POPULATION:
-            # Vectorized flattening: reshape(-1) turns (num_niches, pop_size) into (total_pop,)
-            # reshape(-1, ndim) turns (num_niches, pop_size, ndim) into (total_pop, ndim)
-            obj_flat = population.raw_objectives.reshape(-1)
-            viol_flat = population.violations.reshape(-1)
-            fit_flat = population.fitnesses.reshape(-1)
-            pts_flat = population.points.reshape(-1, population.points.shape[-1])
-
-            # Combine everything into one matrix: [Obj, Viol, Fit, X0, X1, ...]
-            # Shape: (total_pop, 3 + ndim)
-            combined_block = np.column_stack((obj_flat, viol_flat, fit_flat, pts_flat))
-
-            with open(os.path.join(out_dir, "population.csv"), "a", newline="") as f_all, \
-                 open(os.path.join(out_dir, "latest_population.csv"), "w", newline="") as f_latest:
-
-                writer_all = csv.writer(f_all)
-                writer_latest = csv.writer(f_latest)
-
-                writer_all.writerows(combined_block)
-                writer_latest.writerows(combined_block)
-
-            num_niches, pop_size, ndim = population.points.shape
-            details_flat = self.details[:num_niches, :pop_size].reshape(num_niches * pop_size, -1)
-
-            if self.config.save_details:
-                with open(os.path.join(out_dir, "details.csv"), "a", newline="") as f_all, \
-                     open(os.path.join(out_dir, "latest_details.csv"), "w", newline="") as f_latest:
-                    writer_all = csv.writer(f_all)
-                    writer_latest = csv.writer(f_latest)
-
-                    writer_all.writerows(details_flat)
-                    writer_latest.writerows(details_flat)
-
-    def mga_extrema_callback(self, population: Population) -> None:
-        out_dir = self.scenario.solution_dir
-
-        if SAVE_POPULATION:
-            # Vectorized flattening: reshape(-1) turns (num_niches, pop_size) into (total_pop,)
-            # reshape(-1, ndim) turns (num_niches, pop_size, ndim) into (total_pop, ndim)
-            obj_flat = population.raw_objectives.reshape(-1)
-            viol_flat = population.violations.reshape(-1)
-            fit_flat = population.fitnesses.reshape(-1)
-            pts_flat = population.points.reshape(-1, population.points.shape[-1])
-
-            combined_block = np.column_stack((obj_flat, viol_flat, fit_flat, pts_flat))
-
-            with open(os.path.join(out_dir, "population.csv"), "a", newline="") as f_all, \
-                 open(os.path.join(out_dir, "latest_population.csv"), "w", newline="") as f_latest:
-
-                writer_all = csv.writer(f_all)
-                writer_latest = csv.writer(f_latest)
-
-                writer_all.writerows(combined_block)
-                writer_latest.writerows(combined_block)
-
-            num_niches, pop_size, ndim = population.points.shape
-            details_flat = self.details[:num_niches, :pop_size].reshape(num_niches * pop_size, ndim)
-
-            if self.config.save_details:
-                with open(os.path.join(out_dir, "details.csv"), "a", newline="") as f_all, \
-                     open(os.path.join(out_dir, "latest_details.csv"), "w", newline="") as f_latest:
-                    writer_all = csv.writer(f_all)
-                    writer_latest = csv.writer(f_latest)
-
-                    writer_all.writerows(details_flat)
-                    writer_latest.writerows(details_flat)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.broad_optimum_var_info = build_broad_optimum_var_info(self.scenario.fleet, self.scenario.network)
 
     def get_band_lcoe_max(self) -> float:
-        solution = Solution(self.decision_x0, *self.get_differential_evolution_args())
+        from firm_ce.backend.scalar.solution import Solution
 
+        solution = Solution(self.decision_x0, *self.fargs)
+        # TODO: evaluation??
         if solution.penalties > 1:
             self.scenario.logger.warning(
                 f"Initial guess (assumed optimal solution) has a penalty of {solution.penalties}."
-                f"It is recommended to double-check initial_guess.csv contains the correct optimal solution."
+                "It is recommended to double-check initial_guess.csv contains the correct optimal solution."
             )
 
         self.optimal_lcoe = solution.lcoe
@@ -586,7 +170,7 @@ class Solver:
                         self.scenario.logger.info(f"[near_optimum] finding MAX for group '{group_key}'")
 
                 args = (
-                    self.get_differential_evolution_args(),
+                    self.fargs,
                     group_key,
                     band_lcoe_max,
                     idx_list,
@@ -605,7 +189,7 @@ class Solver:
             self.scenario.name,
             self.broad_optimum_var_info,
             bands,
-            self.get_differential_evolution_args(),
+            self.fargs,
             band_lcoe_max,
             groups,
         )
@@ -637,7 +221,7 @@ class Solver:
                 )
 
                 args = (
-                    self.get_differential_evolution_args(),
+                    self.fargs,
                     group_key,
                     band_lcoe_max,
                     idx_list,
@@ -654,6 +238,58 @@ class Solver:
         self.scenario.logger.info(f"[midpoint_explore] finished; wrote {len(evaluation_records)} feasible points to {csv_path}")
 
         return None
+
+    def evaluate(self) -> None:
+        if self.config.type == "near_optimum":
+            self.scenario.logger.info("[near_optimum] Starting band finding.")
+            self.find_near_optimal_band()
+
+        elif self.config.type == "midpoint_explore":
+            self.scenario.logger.info("[midpoint_explore] Starting midpoint exploration.")
+            self.explore_midpoints()
+
+        return None
+
+
+class MhmgaSolverBase(BaseSolver):
+    """ Handles generation of near-optimal alternatives using MHMGA """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if getattr(self.config, "save_details", False):
+            self.details = self.fargs[-1]
+
+    @abstractmethod
+    def callback(self) -> None:
+        """Callback function implemented by subclass"""
+        pass
+
+    @abstractmethod
+    def instantiate_algorithm(self) -> None:
+        """Algorithm instantiation implemented by subclass"""
+        pass
+
+    def _write_mhmga_config_summary(self) -> None:
+        """Writes a JSON summary of MHMGA hyperparameters to the solution directory."""
+        summary_path = os.path.join(self.scenario.solution_dir, "mhmga_config.json")
+
+        mhmga_config = {}
+        for key, value in self.config.__dict__.items():
+            if key.startswith("mga_"):
+                # Convert numpy arrays to lists for JSON serialization
+                if isinstance(value, np.ndarray):
+                    mhmga_config[key] = value.tolist()
+                else:
+                    mhmga_config[key] = value
+
+        # Inject structural data possibly relevant for loading populations later
+        mhmga_config["ndim"] = len(self.scenario.lower_bounds)
+        mhmga_config["lower_bounds"] = self.scenario.lower_bounds.tolist()
+        mhmga_config["upper_bounds"] = self.scenario.upper_bounds.tolist()
+        mhmga_config["unit_type_idxs"] = self.scenario.unit_type_idx
+
+        with open(summary_path, "w") as f:
+            json.dump(mhmga_config, f, indent=4)
 
     def get_approximate_jacobian(self) -> NDArray[np.float64]:
         """Calculates approximate dC/dx for all assets in the x vector."""
@@ -737,7 +373,7 @@ class Solver:
         #     writer = csv.writer(f)
         #     writer.writerow(jacobian)
 
-        algorithm = self.instantiate_mhmga_algorithm(log_path=None, init_callback=False)
+        algorithm = self.instantiate_algorithm(log_path=None, init_callback=False)
         algorithm.add_niches(num_niches=1)
 
         config_hyperparameters = dict(
@@ -783,29 +419,401 @@ class Solver:
 
         return result
 
-    def capacity_expansion(self):
-        pass
+
+class MhmgaSolver(MhmgaSolverBase):
+    """Handles generation of near-optimal alternatives using MHMGA"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.mga_log_dir = os.path.join(self.scenario.solution_dir, "mga_logs")
+        os.makedirs(self.mga_log_dir, exist_ok=True)
+
+    def instantiate_algorithm(self, log_path: str, init_callback: bool) -> MGAProblem:
+        if self.config.restart_optimisation:
+            if self.config.model_location == "new":
+                pop_dir = "results/temp"
+            else:
+                pop_dir = self.scenario.solution_dir
+
+            import pandas as pd
+            ndim = len(self.scenario.lower_bounds)
+            if not os.path.exists(os.path.join(pop_dir, "latest_population.csv")):
+                raise FileNotFoundError(
+                    f"No population file found for restarting. Expected at {os.path.join(pop_dir, 'latest_population.csv')}"
+                )
+
+            previous = pd.read_csv(
+                os.path.join(pop_dir, "latest_population.csv"),
+                header=None,
+                dtype=float,
+                usecols=range(3, ndim+3)
+            ).to_numpy()
+            num_niches = self.config.mga_start_niches + self.config.mga_new_niches[0]
+            previous = previous.reshape(num_niches, self.config.mga_pop_size[0], ndim)
+            x0 = previous[0]
+        else:
+            previous = None
+            x0 = self.decision_x0
+
+        problem = OptimizationProblem(
+            objective=self.objective_function,
+            fargs=self.fargs,
+            bounds=(self.scenario.lower_bounds, self.scenario.upper_bounds),
+            maximize=False,
+            vectorized=True,
+            constraints=True,
+            return_scaled=False,
+        )
+
+        algorithm = MGAProblem(
+            problem=problem,
+            x0=x0,
+            log_dir=log_path,
+            log_freq=self.config.mga_log_freq,
+            random_seed=None,
+            parallelize=False,  # we implement parallelisation independently
+            callback=self.callback,
+            include_obj_in_fitness=True,
+        )
+
+        algorithm.starting_points = previous
+
+        if init_callback:
+            # callback inited after "results/temp/latest_population.csv" is loaded (if restarting from temp)
+            self.initialise_callback()
+
+        return algorithm
+
+    def save_results(self, results: Dict) -> None:
+        filepath = os.path.join(self.mga_log_dir, "mga_alternatives.csv")
+
+        optima = results['optima']
+        fitness = results['fitness']
+        objective = results['objective']
+        noptimality = results['noptimality']
+
+        # Create header: meta-data columns first, then decision variables
+        header = ["fitness", "objective", "is_noptimal"] + [f"x{i}" for i in range(optima.shape[1])]
+
+        with open(filepath, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
+            for i in range(optima.shape[0]):
+                row = [fitness[i], objective[i], noptimality[i]] + list(optima[i])
+                writer.writerow(row)
+
+    def callback(self, population: Population) -> None:
+        out_dir = self.scenario.solution_dir
+
+        # Save best solution from last iteration
+        with open(os.path.join(out_dir, "callback.csv"), "a", newline="") as f:
+            writer = csv.writer(f)
+            best_row = [
+                population.optima_raw_objectives[0],
+                population.optima_violations[0],
+                population.optima_fitnesses[0],
+                *population.optima_points[0]
+            ]
+            writer.writerow(best_row)
+
+        if SAVE_POPULATION:
+            # Vectorized flattening: reshape(-1) turns (num_niches, pop_size) into (total_pop,)
+            # reshape(-1, ndim) turns (num_niches, pop_size, ndim) into (total_pop, ndim)
+            obj_flat = population.raw_objectives.reshape(-1)
+            viol_flat = population.violations.reshape(-1)
+            fit_flat = population.fitnesses.reshape(-1)
+            pts_flat = population.points.reshape(-1, population.points.shape[-1])
+
+            # Combine everything into one matrix: [Obj, Viol, Fit, X0, X1, ...]
+            # Shape: (total_pop, 3 + ndim)
+            combined_block = np.column_stack((obj_flat, viol_flat, fit_flat, pts_flat))
+
+            with open(os.path.join(out_dir, "population.csv"), "a", newline="") as f_all, \
+                 open(os.path.join(out_dir, "latest_population.csv"), "w", newline="") as f_latest:
+
+                writer_all = csv.writer(f_all)
+                writer_latest = csv.writer(f_latest)
+
+                writer_all.writerows(combined_block)
+                writer_latest.writerows(combined_block)
+
+            num_niches, pop_size, ndim = population.points.shape
+            details_flat = self.details[:num_niches, :pop_size].reshape(num_niches * pop_size, -1)
+
+            if self.config.save_details:
+                with open(os.path.join(out_dir, "details.csv"), "a", newline="") as f_all, \
+                     open(os.path.join(out_dir, "latest_details.csv"), "w", newline="") as f_latest:
+                    writer_all = csv.writer(f_all)
+                    writer_latest = csv.writer(f_latest)
+
+                    writer_all.writerows(details_flat)
+                    writer_latest.writerows(details_flat)
 
     def evaluate(self) -> None:
-        if self.config.type == "single_time":
-            self.single_time()
-        elif self.config.type == "near_optimum":
-            self.find_near_optimal_band()
-        elif self.config.type == "midpoint_explore":
-            self.explore_midpoints()
-        elif self.config.type == "capacity_expansion":
-            self.capacity_expansion()
-        elif self.config.type == "mhmga":
-            self.generate_alternatives()
-        elif self.config.type == "mhmga_extrema":
-            self.generate_extrema()
-        else:
-            raise Exception(
-                "Model type in config must be 'single_time', 'capacity_expansion', 'near_optimum',"
-                "'midpoint_explore', or 'mhmga'."
+        self.scenario.logger.info("[MHMGA] Initialising MGA algorithm.")
+
+        # jacobian = self.get_approximate_jacobian()
+        path_name = os.path.join(self.mga_log_dir, "mga")
+
+        self._write_mhmga_config_summary()
+
+        algorithm = self.instantiate_algorithm(path_name, True)
+
+        algorithm.add_niches(num_niches=self.config.mga_start_niches)
+        self.scenario.logger.info(f"[MHMGA] MGA algorithm initialised with {self.config.mga_start_niches} niches.")
+
+        for step in range(self.config.mga_steps):
+            algorithm.set_verbosity(
+                self.config.mga_disp_rate[step],
+                self.config.mga_verbose_level[step],
             )
 
+            start_time_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+            self.scenario.logger.info(f"[MHMGA] Starting step {step+1}/{self.config.mga_steps} at {start_time_str}")
 
+            if self.config.mga_new_niches[step] > 0:
+                self.scenario.logger.info(f"[MHMGA] Adding {self.config.mga_new_niches[step]} niches.")
+                algorithm.add_niches(num_niches=self.config.mga_new_niches[step])
+
+            algorithm.update_hyperparameters(
+                max_iter=self.config.mga_iter[step],
+                pop_size=self.config.mga_pop_size[step],
+                champ_count=self.config.mga_champ_count[step],
+                elite_count=self.config.mga_elite_count[step],
+                tourn_count=self.config.mga_tourn_count[step],
+                tourn_size=self.config.mga_tourn_size[step],
+                mutation_prob=self.config.mga_mutation_prob[step],
+                mutation_sigma=self.config.mga_mutation_sigma[step],
+                crossover_prob=self.config.mga_crossover_prob[step],
+                niche_elitism=self.config.mga_niche_elitism[step],
+                noptimal_rel=self.config.mga_noptimal_rel[step],
+                noptimal_abs=self.config.mga_noptimal_abs[step],
+                violation_factor=PENALTY_MULTIPLIER,
+                mutation_scaler=np.ones_like(self.scenario.lower_bounds),
+                space_scaler=self.scenario.projection_matrix,
+                objective_scaler=1.0,
+                fitness_method=self.config.mga_fitness[step]
+            )
+
+            algorithm.step()
+
+            # 4. Terminate and get results
+            results = algorithm.get_results()
+            self.save_results(results)
+
+            self.scenario.logger.info("[MHMGA] MGA complete. Results saved.")
+
+        self.result = algorithm.population.optima_points[0]
+
+
+class MhmgaExtremaSolver(MhmgaSolverBase):
+    """Handles searching for geometric extrema in the near-optimal space."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.mga_log_dir = os.path.join(self.scenario.solution_dir, "mhmga_extrema_logs")
+        os.makedirs(self.mga_log_dir, exist_ok=True)
+
+    def instantiate_algorithm(self, log_path, maximize, weighting, lcoe_constr, starting_points):
+        problem = OptimizationProblem(
+            objective=self.objective_function,
+            fargs=self.fargs,
+            bounds=(self.scenario.lower_bounds, self.scenario.upper_bounds),
+            maximize=maximize,
+            vectorized=True,
+            constraints=True,
+            return_scaled=False,
+        )
+
+        algorithm = MGAProblem(
+            problem=problem,
+            x0=starting_points[0],
+            log_dir=log_path,
+            log_freq=self.config.mga_log_freq,
+            random_seed=None,
+            parallelize=False,  # we implement parallelisation independently
+            callback=self.mga_extrema_callback,
+            include_obj_in_fitness=True,
+        )
+
+        algorithm.starting_points = starting_points
+
+        algorithm.add_niches(num_niches=1)  # pure optimisation
+
+        return algorithm
+
+    def find_starting_points_in_population(self, weighting):
+        # from firm_ce.optimisation.mhmga_extrema import apply_new_weighting
+
+        pop_path = os.path.join(self.scenario.solution_dir, "population.csv")
+        det_path = os.path.join(self.scenario.solution_dir, "details.csv")
+        pop_exists = os.path.exists(pop_path)
+        det_exists = os.path.exists(det_path)
+        if not pop_exists or not det_exists:
+            raise FileNotFoundError(
+                f"[MHMGA-E] Could not find '{'population.csv' if not pop_exists else ''}'"
+                f"{' and ' if not pop_exists and not det_exists else ''}"
+                f"{'details.csv' if not det_exists else ''}'. "
+                f"Expected in '{self.scenario.solution_dir}'"
+            )
+
+        pop = pd.read_csv(pop_path, header=None).to_numpy()
+        # det = pd.read_csv(det_path, header=None).to_numpy()
+
+        optimal_lcoe = pop[pop[:, 1] == 0, 0].min()  # best objective among feasible solutions
+        noptimal_rel = self.config.mga_noptimal_rel[0]
+        noptimal_abs = self.config.mga_noptimal_abs[0]
+        noptimal_lcoe = optimal_lcoe + abs(optimal_lcoe) * (noptimal_rel) + noptimal_abs
+
+        new_objective = pop[:, 3:] @ weighting  # weighted sum of decision variables
+        feasible_mask = (pop[:, 0] <= noptimal_lcoe) & (pop[:, 1] == 0)  # near-optimal, feasible solutions
+        feasible_objectives = new_objective[feasible_mask]
+        feasible_points = pop[feasible_mask]
+
+        pop_size = self.config.mga_pop_size[0]
+        max_indices = np.argpartition(feasible_objectives, -pop_size)[-pop_size:]  # indices that maximize new objective
+        min_indices = np.argpartition(feasible_objectives, pop_size-1)[:pop_size]  # indices that minimize new objective
+
+        max_points = feasible_points[max_indices]
+        min_points = feasible_points[min_indices]
+        return max_points, min_points, noptimal_lcoe
+
+    def callback(self, population: Population) -> None:
+        out_dir = self.scenario.solution_dir
+
+        if SAVE_POPULATION:
+            # Vectorized flattening: reshape(-1) turns (num_niches, pop_size) into (total_pop,)
+            # reshape(-1, ndim) turns (num_niches, pop_size, ndim) into (total_pop, ndim)
+            obj_flat = population.raw_objectives.reshape(-1)
+            viol_flat = population.violations.reshape(-1)
+            fit_flat = population.fitnesses.reshape(-1)
+            pts_flat = population.points.reshape(-1, population.points.shape[-1])
+
+            combined_block = np.column_stack((obj_flat, viol_flat, fit_flat, pts_flat))
+
+            with open(os.path.join(out_dir, "population.csv"), "a", newline="") as f_all, \
+                 open(os.path.join(out_dir, "latest_population.csv"), "w", newline="") as f_latest:
+
+                writer_all = csv.writer(f_all)
+                writer_latest = csv.writer(f_latest)
+
+                writer_all.writerows(combined_block)
+                writer_latest.writerows(combined_block)
+
+            num_niches, pop_size, ndim = population.points.shape
+            details_flat = self.details[:num_niches, :pop_size].reshape(num_niches * pop_size, ndim)
+
+            if self.config.save_details:
+                with open(os.path.join(out_dir, "details.csv"), "a", newline="") as f_all, \
+                     open(os.path.join(out_dir, "latest_details.csv"), "w", newline="") as f_latest:
+                    writer_all = csv.writer(f_all)
+                    writer_latest = csv.writer(f_latest)
+
+                    writer_all.writerows(details_flat)
+                    writer_latest.writerows(details_flat)
+
+    def evaluate(self):
+        self.scenario.logger.info("[MHMGA-E] Starting extrema generation.")
+
+        path_name = os.path.join(self.mga_log_dir, "mga")
+
+        weightings = []
+        weightings.extend(construct_variable_weightings(self.scenario))
+        weightings.extend(construct_unit_type_weightings(self.scenario))
+        weightings.extend(construct_node_weightings(self.scenario))
+
+        nweight = len(weightings)
+        self.scenario.logger.info(f"[MHMGA-E] Constructed {nweight} weightings for extrema generation.")
+
+        for w, weighting in enumerate(weightings):
+            print(f"[MHMGA-E] Starting extremum generation for extremum {w+1}/{nweight}.")
+            max_points, min_points, noptimal_lcoe, = self.find_starting_points_in_population(weighting)
+
+            for maximize, points in zip((True, False), (max_points, min_points)):
+                algorithm = self.instantiate_algorithm(
+                    path_name, maximize, weighting, noptimal_lcoe, points
+                )
+
+                for step in range(self.config.mga_steps):
+                    algorithm.set_verbosity(
+                        self.config.mga_disp_rate[step],
+                        self.config.mga_verbose_level[step],
+                    )
+
+                    start_time_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                    self.scenario.logger.info(f"[MHMGA] Starting step {step+1}/{self.config.mga_steps} at {start_time_str}")
+
+                    algorithm.update_hyperparameters(
+                        max_iter=self.config.mga_iter[step],
+                        pop_size=self.config.mga_pop_size[step],
+                        champ_count=self.config.mga_champ_count[step],
+                        elite_count=self.config.mga_elite_count[step],
+                        tourn_count=self.config.mga_tourn_count[step],
+                        tourn_size=self.config.mga_tourn_size[step],
+                        mutation_prob=self.config.mga_mutation_prob[step],
+                        mutation_sigma=self.config.mga_mutation_sigma[step],
+                        crossover_prob=self.config.mga_crossover_prob[step],
+                        niche_elitism=0,
+                        noptimal_rel=0,
+                        noptimal_abs=np.inf,
+                        violation_factor=PENALTY_MULTIPLIER,
+                        mutation_scaler='bounds',  # TODO: enlargen weightings?
+                    )
+
+                    abs_min = self.scenario.lower_bounds[weighting > 0].sum()
+                    abs_max = self.scenario.upper_bounds[weighting > 0].sum()
+
+                    algorithm.step(
+                        termination_criteria=[
+                            mgat.FixedValue(
+                                value=abs_max if maximize else abs_min,
+                                maximize=maximize,
+                                attribute="current_optimum",
+                                attribute_in_population=True,
+                            ),  # terminate on reaching theoretical max/min of the weighted sum objective
+                            mgat.GradientStagnation(
+                                window=10,
+                                improvement=0.01*abs_max,
+                                maximize=maximize,
+                                attribute="current_optimum",
+                                attribute_in_population=True,
+                            )  # terminate if less than 1% of theoretic max improvement in 10 iterations
+                        ]
+                    )
+
+        #       log population - dedicated callback func?
+        #   log extremum
+
+        # second pass?
+
+
+def get_solver(
+    scenario,
+    config,
+    initial_population: Optional[np.ndarray] = None,
+) -> BaseSolver:
+    """Factory function to instantiate the correct solver strategy."""
+
+    strategies = {
+        "single_time": SingleTimeSolver,
+        "mhmga": MhmgaSolver,
+        "mhmga_extrema": MhmgaExtremaSolver,
+        "near_optimum": BroadOptimumSolver,
+        "midpoint_explore": BroadOptimumSolver,
+    }
+
+    solver_class = strategies.get(config.type)
+
+    if not solver_class:
+        raise ValueError(
+            f"Unsupported config.type: '{config.type}'. "
+            f"Must be one of {list(strategies.keys())}."
+        )
+
+    return solver_class(scenario, config, initial_population)
+
+
+# TODO: dev
 def construct_variable_weightings(scenario):
     weightings = []
     for i in range(len(scenario.lower_bounds)):

@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult
 
 from firm_ce.common.helpers import parse_comma_separated
-from firm_ce.common.typing import npfloat
+from firm_ce.common.typing import npfloat, npintp, nbintp, unicode_type, TypedDict
 from firm_ce.constructors.component_cons import construct_Fleet_object
 from firm_ce.constructors.parameter_cons import construct_ScenarioParameters_object
 from firm_ce.constructors.topology_cons import construct_Network_object
@@ -23,37 +23,31 @@ from firm_ce.constructors.traces_cons import (
     unload_data_from_storages,
     unload_data_from_network,
 )
+from firm_ce.system.tensors import StaticTensor, CostTensor
 from firm_ce.fast_methods import static_m
 from firm_ce.io.file_manager import DataFile
 from firm_ce.io.data_model import ModelData
-from firm_ce.optimisation.solver import Solver
+from firm_ce.optimisation.solver import get_solver
 from firm_ce.system.parameters import ModelConfig
 
 
 class Scenario:
-    def __init__(self, model_data: ModelData, scenario_id: int) -> None:
+    def __init__(
+        self,
+        model_data: ModelData,
+        config: ModelConfig,
+        scenario_id: int
+    ) -> None:
         self.data_status = False
         self.logger, self.results_dir = model_data.logger, model_data.results_dir
 
         self.model_data = model_data
+        self.config = config
         self.scenario_data = self.model_data.scenarios[scenario_id]
         self.id = scenario_id
         self.name = self.scenario_data["scenario_name"].lower()
 
-        self.limit_timesteps = None
-        self.demand_multiple = npfloat(1.0)
-        self.interval_aggregation = 1
-        for item in self.model_data.config.values():
-            if item["name"] == "limit_timesteps":
-                self.limit_timesteps = int(item["value"])
-            elif item["name"] == "balancing_type":
-                balancing_type = str(item["value"])
-            elif item["name"] == "demand_multiple":
-                self.demand_multiple = npfloat(item["value"])
-            elif item["name"] == "interval_aggregation":
-                self.interval_aggregation = int(item["value"])
-
-        safe_name = sub(r"[^a-zA-Z0-9_\-]", "_", f"{self.name}_{balancing_type}")
+        safe_name = sub(r"[^a-zA-Z0-9_\-]", "_", f"{self.name}_{self.balancing_type}")
         self.solution_dir = os.path.join(self.results_dir, safe_name)
 
         self.network = construct_Network_object(
@@ -62,7 +56,10 @@ class Scenario:
             self.scenario_data["networksteps_max"],
         )
         self.static = construct_ScenarioParameters_object(
-            self.scenario_data, len(self.network.nodes), self.limit_timesteps, self.interval_aggregation
+            self.scenario_data,
+            len(self.network.nodes),
+            self.config.limit_timesteps,
+            self.config.interval_aggregation
         )
         self.fleet = construct_Fleet_object(
             self.get_scenario_dicts(model_data.generators),
@@ -72,7 +69,7 @@ class Scenario:
             self.network.nodes,
         )
 
-        self.lower_bounds, self.upper_bounds, self.dim_mask = self.assign_indices_and_get_bounds()
+        self.lower_bounds, self.upper_bounds = self.assign_indices_and_get_bounds()
         self.x0 = self._get_x0(model_data.x0s)
 
         if len(self.x0) > 0:
@@ -91,54 +88,84 @@ class Scenario:
         os.makedirs(self.solution_dir, exist_ok=True)
 
     def assign_indices_and_get_bounds(self) -> None:
-        lower, upper, mask = [], [], []
+        lower, upper = [], []
         x_index = 0
 
+        # ensure unit_types are contiguous in x
+        g_unit_types = defaultdict(list)
         for gen in self.fleet.generators.values():
-            if gen.max_build > 0:
-                mask.append(True)
-                gen.candidate_x_idx = x_index
-                lower.append(gen.min_build)
-                upper.append(gen.max_build)
-                x_index += 1
-            else:
-                mask.append(False)
-                gen.candidate_x_idx = -1
+            g_unit_types[gen.unit_type].append(gen.node.order)
 
+        s_unit_types = defaultdict(list)
         for sto in self.fleet.storages.values():
-            if sto.max_build_p > 0:
-                mask.append(True)
-                sto.candidate_p_x_idx = x_index
-                lower.append(sto.min_build_p)
-                upper.append(sto.max_build_p)
-                x_index += 1
-            else:
-                sto.candidate_p_x_idx = -1
-                mask.append(False)
+            s_unit_types[sto.unit_type].append(sto.node.order)
 
-        for sto in self.fleet.storages.values():
-            if sto.max_build_e > 0 and sto.duration == 0:
-                mask.append(True)
-                sto.candidate_e_x_idx = x_index
-                lower.append(sto.min_build_e)
-                upper.append(sto.max_build_e)
-                x_index += 1
-            else:
-                sto.candidate_e_x_idx = -1
-                mask.append(False)
+        for unit_type in g_unit_types.keys():
+            for gen in self.fleet.generators.values():
+                if gen.unit_type != unit_type:
+                    continue
+                if gen.max_build > 0:
+                    gen.candidate_x_idx = x_index
+                    lower.append(gen.min_build)
+                    upper.append(gen.max_build)
+                    x_index += 1
+                else:
+                    gen.candidate_x_idx = -1
+
+        for unit_type in s_unit_types.keys():
+            for sto in self.fleet.storages.values():
+                if sto.unit_type != unit_type:
+                    continue
+                if sto.max_build_p > 0:
+                    sto.candidate_p_x_idx = x_index
+                    lower.append(sto.min_build_p)
+                    upper.append(sto.max_build_p)
+                    x_index += 1
+                else:
+                    sto.candidate_p_x_idx = -1
+
+        for unit_type in s_unit_types.keys():
+            for sto in self.fleet.storages.values():
+                if sto.unit_type != unit_type:
+                    continue
+                if sto.max_build_e > 0 and sto.duration == 0:
+                    sto.candidate_e_x_idx = x_index
+                    lower.append(sto.min_build_e)
+                    upper.append(sto.max_build_e)
+                    x_index += 1
+                else:
+                    sto.candidate_e_x_idx = -1
 
         for line in self.network.major_lines.values():
             if line.max_build > 0:
-                mask.append(True)
                 line.candidate_x_idx = x_index
                 lower.append(line.min_build)
                 upper.append(line.max_build)
                 x_index += 1
             else:
                 line.candidate_x_idx = -1
-                mask.append(False)
 
-        return np.array(lower, npfloat), np.array(upper, npfloat), np.array(mask, np.bool_)
+        self.asset_node_map = TypedDict.empty(key_type=unicode_type, value_type=nbintp[:])
+        for k, v in g_unit_types.items():
+            self.asset_node_map[k] = np.array(v, dtype=npintp)
+        for k, v in s_unit_types.items():
+            self.asset_node_map[k] = np.array(v, dtype=npintp)
+
+        return np.array(lower, npfloat), np.array(upper, npfloat)
+
+    def construct_tensors(
+        self,
+    ):
+        if not self.data_status:
+            raise RuntimeError("Load datafiles before constructing tensors")
+
+        self.staticTensor = StaticTensor(self.static, self.fleet, self.network, self.asset_node_map)
+        self.costTensor = CostTensor(self.static, self.fleet, self.network)
+
+    def deconstruct_tensors(
+        self,
+    ):
+        del self.staticTensor, self.costTensor
 
     def load_datafiles(
         self,
@@ -150,23 +177,47 @@ class Scenario:
         yeartuple = None
 
         if self.limit_timesteps is not None:
-            self.logger.info(f"Slicing data to first {self.limit_timesteps} timesteps per config file.")
+            self.logger.info(f"Slicing data to first {self.config.limit_timesteps} timesteps per config file.")
         else:
             firstyear = self.scenario_data.get("firstyear", "auto")
             finalyear = self.scenario_data.get("finalyear", "auto")
             yeartuple = firstyear, finalyear
 
         load_datafiles_to_network(
-            self.network, datafiles, self.limit_timesteps, yeartuple, self.demand_multiple, self.interval_aggregation
+            self.network,
+            datafiles,
+            self.config.limit_timesteps,
+            yeartuple,
+            self.config.demand_multiple,
+            self.config.interval_aggregation,
         )
         load_datafiles_to_generators(
-            self.fleet, datafiles, self.static.resolution, self.limit_timesteps, yeartuple, self.interval_aggregation
+            self.fleet,
+            datafiles,
+            self.static.resolution,
+            self.config.limit_timesteps,
+            yeartuple,
+            self.config.interval_aggregation,
         )
-        load_datafiles_to_fuels(self.fleet, datafiles, yeartuple, self.interval_aggregation)
-        load_datafiles_to_storages(self.fleet, datafiles, self.limit_timesteps, yeartuple, self.interval_aggregation)
+        load_datafiles_to_fuels(
+            self.fleet,
+            datafiles,
+            yeartuple,
+            self.config.interval_aggregation,
+        )
+        load_datafiles_to_storages(
+            self.fleet,
+            datafiles,
+            self.config.limit_timesteps,
+            yeartuple,
+            self.config.interval_aggregation
+        )
 
         static_m.set_year_energy_demand(self.static, self.network.nodes)
         self.data_status = True
+
+        if self.config.backend == "tensor":
+            self.constructTensors()
 
         if len(self.x0) == 0:
             self.x0 = self._approximate_feasible_solution()
@@ -180,6 +231,8 @@ class Scenario:
         unload_data_from_storages(self.fleet)
 
         static_m.unset_year_energy_demand(self.static)
+
+        self.deconstruct_tensors()
         self.data_status = False
 
         gc.collect()
@@ -360,14 +413,13 @@ class Scenario:
 
     def inspect_mhmga_recombination(
         self,
-        config: ModelConfig,
         starting_population: np.ndarray,
         objectives: np.ndarray = None,
         constraints: np.ndarray = None,
         evaluate_offspring: bool = True,
         **hyperparameters,
     ) -> dict:
-        solver = Solver(self, config)
+        solver = get_solver(self)
         return solver.inspect_mhmga_recombination(
             starting_population,
             objectives,
@@ -414,16 +466,17 @@ class Scenario:
 
         return dict(tech_map)
 
-    def solve(self, config: ModelConfig) -> OptimizeResult:
+    def solve(self) -> OptimizeResult:
         self.create_solution_directory()
 
-        solver = Solver(self, config)
+        solver = get_solver(self)
         solver.evaluate()
         return solver.result
 
-    def polish(self, config: ModelConfig, initial_population: NDArray[npfloat]) -> OptimizeResult:
-        solver = Solver(
-            self, config, True, initial_population
-        )
+    def polish(self, initial_population: NDArray[npfloat]) -> OptimizeResult:
+        _polish_flag = self.config.polish_flag
+        self.config.polish_flag = True
+        solver = get_solver(self, initial_population)
         solver.evaluate()
+        self.config.polish_flag = _polish_flag
         return solver.result

@@ -1,0 +1,9 @@
+2026-06-26 15:32:19,193 - INFO - Logger initialized. Writing to temp\log.txt
+2026-06-26 15:32:19,195 - INFO - config.csv validated!
+2026-06-26 15:32:19,195 - INFO - scenarios.csv validated!
+2026-06-26 15:32:19,195 - INFO - nodes.csv validated!
+2026-06-26 15:32:19,200 - INFO - fuels.csv validated!
+2026-06-26 15:32:19,200 - INFO - lines.csv validated!
+2026-06-26 15:32:19,210 - INFO - generators.csv validated!
+2026-06-26 15:32:19,218 - INFO - storages.csv validated!
+2026-06-26 15:32:19,220 - INFO - initial_guess.csv validated!

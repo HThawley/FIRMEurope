@@ -15,7 +15,7 @@ from firm_ce.common.constants import SAVE_POPULATION
 from firm_ce.common.typing import npfloat
 from firm_ce.analysis.accessor import Accessor
 from firm_ce.io.file_manager import ResultFile
-from firm_ce.optimisation.st_solution import Solution, evaluate
+from firm_ce.backend.scalar.solution import Solution, evaluate
 from firm_ce.system.components import Fleet_InstanceType
 from firm_ce.system.parameters import ScenarioParameters_InstanceType
 from firm_ce.system.topology import Network_InstanceType

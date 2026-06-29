@@ -6,7 +6,7 @@ from warnings import warn
 
 from firm_ce.analysis.accessor import Accessor
 from firm_ce.common.constants import VALIDATION_TOL
-from firm_ce.optimisation.single_time import evaluate
+from firm_ce.backend.scalar.single_time import evaluate
 
 
 class ValidationWarning(UserWarning):

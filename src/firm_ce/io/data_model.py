@@ -3,7 +3,7 @@ import os
 
 import numpy as np
 
-from firm_ce.common.helpers import parse_comma_separated
+from firm_ce.common.helpers import parse_comma_separated, parse_ditherable_hyperparameter
 from firm_ce.io.file_manager import import_config_csvs
 
 
@@ -83,6 +83,7 @@ def is_nan(val):
 def validate_model_config(config_dict, model_logger):
     flag = True
     validators = {
+        "backend": lambda v: str(v).lower() in ("tensor", "scalar"),
         "mutation": lambda v: validate_range(v, 0, 2, inclusive=False),
         "iterations": validate_positive_int,
         "population": validate_positive_int,
@@ -97,10 +98,7 @@ def validate_model_config(config_dict, model_logger):
         "model_name": None,
         "near_optimal_tol": lambda v: validate_range(v, 0, 1),
         "midpoint_count": validate_positive_int,
-        "balancing_type": lambda v: validate_enum(
-            v,
-            ["simple", "full"],
-        ),
+        "balancing_type": lambda v: validate_enum(v, ["simple", "full"]),
         "simple_blocks_per_day": validate_positive_int,
         "fixed_costs_threshold": lambda v: validate_range(v, 0),
         "limit_timesteps": validate_positive_int,
@@ -114,7 +112,7 @@ def validate_model_config(config_dict, model_logger):
 
         if name not in validators:
             if name.startswith("mga_"):
-                # parameters are validated elsewhere
+                # Skip here, handled by parse_and_validate_mga bel
                 continue
             model_logger.warning(f"Unknown configuration name {name}")
             continue
@@ -130,7 +128,9 @@ def validate_model_config(config_dict, model_logger):
             model_logger.exception("Exception during validation of '%s': %s", name, e)
             flag = False
 
-    return flag
+    mga_flag = parse_and_validate_mga(config_dict, model_logger)
+
+    return flag and mga_flag
 
 
 def validate_scenarios(scenarios_dict, model_logger):
@@ -635,3 +635,121 @@ def validate_data(all_datafiles, scenario_name, model_logger, datafiles_director
         model_logger.info(f'Flexible limits validated for scenario {scenario_name}!') """
 
     return flag
+
+
+def coercive_type_cast(item, target):
+    try:
+        return target(item)
+    except ValueError:
+        return None
+
+
+def check_type(param_name, param_dict, item):
+    typepass = False
+    for typer in param_dict["types"]:
+        if typer[0] == str:
+            if not isinstance(item, typer[0]):
+                continue
+            if item not in typer[1]:
+                continue
+        elif typer[0] == bool:
+            if not item.lower() in ('false', 'none', 'true'):
+                continue
+        else:  # numeric
+            item = coercive_type_cast(item, typer[0])
+            if not isinstance(item, typer[0]):
+                continue
+            if item < typer[1]:
+                continue
+            if item > typer[2]:
+                continue
+        typepass = typer[0]
+        break
+    if not typepass:
+        raise TypeError(f"dtype of {param_name} was not of acceptable type or out of bounds (got: {item} of type: {type(item)})")
+    return typepass
+
+
+expected_mga_hyperparameters = {
+    "mga_iter": {"default": 100, "ditherable": False, "broadcastable": True, "types": ((int, 1, np.inf),)},
+    "mga_pop_size": {"default": 100, "ditherable": False, "broadcastable": True, "types": ((int, 2, np.inf),)},
+    "mga_noptimal_rel": {"default": 0.0, "ditherable": False, "broadcastable": True, "types": ((float, 0, np.inf),)},
+    "mga_noptimal_abs": {"default": 0.0, "ditherable": False, "broadcastable": True, "types": ((float, 0, np.inf),)},
+    "mga_mutation_prob": {"default": 0.2, "ditherable": True, "broadcastable": True, "types": ((float, 0, 1),)},
+    "mga_mutation_sigma": {"default": 0.1, "ditherable": True, "broadcastable": True, "types": ((float, 0, np.inf),)},
+    "mga_mutation_alpha": {"default": 0.0, "ditherable": False, "broadcastable": True, "types": ((float, -np.inf, np.inf),)},
+    "mga_crossover_prob": {"default": 0.2, "ditherable": True, "broadcastable": True, "types": ((float, 0, 1),)},
+    "mga_tourn_size": {"default": 2, "ditherable": False, "broadcastable": True, "types": ((int, 2, np.inf),)},
+    "mga_tourn_count": {"default": 0.8, "ditherable": False, "broadcastable": True, "types": ((float, 0, 1), (int, -1, np.inf),)},
+    "mga_elite_count": {"default": 0.2, "ditherable": False, "broadcastable": True, "types": ((float, 0, 1), (int, -1, np.inf),)},
+    "mga_champ_count": {"default": 0, "ditherable": False, "broadcastable": True, "types": ((float, 0, 1), (int, -1, np.inf),)},
+    "mga_start_niches": {"default": 10, "ditherable": False, "broadcastable": False, "types": ((int, 1, np.inf),)},
+    "mga_new_niches": {"default": 0, "ditherable": False, "broadcastable": True, "types": ((int, 0, np.inf),)},
+    "mga_niche_elitism": {"default": True, "ditherable": False, "broadcastable": True, "types": ((bool, ("none", "selfish", "unselfish")),)},
+    "mga_log_freq": {"default": 1, "ditherable": False, "broadcastable": False, "types": ((int, -1, np.inf),)},
+    "mga_disp_rate": {"default": 1, "ditherable": False, "broadcastable": True, "types": ((int, -1, np.inf),)},
+    "mga_verbose_level": {"default": 3, "ditherable": False, "broadcastable": True, "types": ((int, 0, np.inf),)},
+    "mga_fitness": {"default": "angular", "ditherable": False, "broadcastable": True, "types": ((str, ("angular", "l2", "l1")),)},
+}
+
+
+def parse_and_validate_mga(config_dict, model_logger):
+    """Parses, broadcasts, and validates MHMGA parameters, writing them back to the config_dict."""
+    flag = True
+    config_by_name = {item["name"]: item for item in config_dict.values()}
+    
+    # 1. Establish mga_steps
+    mga_steps = 1
+    if "mga_steps" in config_by_name:
+        try:
+            mga_steps = int(config_by_name["mga_steps"]["value"])
+            config_by_name["mga_steps"]["value"] = mga_steps
+        except ValueError:
+            model_logger.error("'mga_steps' must be an integer")
+            flag = False
+
+    # 2. Parse and Broadcast all schema properties
+    for param_name, param_dict in expected_mga_hyperparameters.items():
+        string = config_by_name.get(param_name, {}).get("value", param_dict["default"])
+        
+        try:
+            if param_dict["ditherable"]:
+                value = np.array(parse_ditherable_hyperparameter(str(string)))
+                if value.shape[0] == 1:
+                    value = np.stack((value[0],) * mga_steps)
+                elif value.shape[0] != mga_steps:
+                    raise ValueError(f"{param_name} not broadcastable to mga_steps")
+                    
+                for item in value.flatten():
+                    check_type(param_name, param_dict, item)
+                final_value = value
+
+            elif param_dict["broadcastable"]:
+                value = parse_comma_separated(str(string))
+                if len(value) == 1:
+                    value = value * mga_steps
+                elif len(value) != mga_steps:
+                    raise ValueError(f"{param_name} not broadcastable to mga_steps")
+                    
+                for i, item in enumerate(value):
+                    valid_type = check_type(param_name, param_dict, item)
+                    value[i] = True if str(item).lower() == 'true' else False if valid_type is bool else valid_type(item)
+                final_value = value
+
+            else:
+                valid_type = check_type(param_name, param_dict, string)
+                final_value = valid_type(string)
+
+            # Write the clean Python object back into the raw config dictionary
+            if param_name in config_by_name:
+                config_by_name[param_name]["value"] = final_value
+            else:
+                # Add default values missing from the CSV so ModelConfig can access them
+                config_dict[f"auto_{param_name}"] = {"name": param_name, "value": final_value}
+
+        except (ValueError, TypeError) as e:
+            model_logger.error(f"Validation failed for '{param_name}': {str(e)}")
+            flag = False
+
+    return flag
+

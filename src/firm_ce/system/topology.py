@@ -5,7 +5,18 @@ import numpy as np
 
 from firm_ce.common.constants import JIT_ENABLED
 from firm_ce.common.jit_overload import jitclass
-from firm_ce.common.typing import DictType, ListType, UniTuple, boolean, nbfloat, npfloat, nbint, nbintp, npintp, unicode_type
+from firm_ce.common.typing import (
+    boolean,
+    DictType,
+    ListType,
+    nbfloat,
+    nbint,
+    nbintp,
+    npfloat,
+    npintp,
+    unicode_type,
+    UniTuple,
+)
 from firm_ce.system.costs import LTCosts, LTCosts_InstanceType, UnitCost_InstanceType
 
 if JIT_ENABLED:

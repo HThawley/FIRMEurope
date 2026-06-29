@@ -17,7 +17,7 @@ from firm_ce.model import Model
 from firm_ce.common.constants import FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import njit, prange
 from firm_ce.common.typing import npfloat
-from firm_ce.optimisation.single_time import Solution, evaluate_from_details
+from firm_ce.backend.scalar.single_time import Solution, evaluate_from_details
 
 
 def _try_path(folder, filename):

@@ -330,8 +330,8 @@ def construct_Network_object(
     """
 
     nodes = TypedDict.empty(key_type=nbintp, value_type=Node_InstanceType)
-    for order in nodes_imported_dict:
-        nodes[order] = construct_Node_object(order, nodes_imported_dict[order])
+    for order, idx in enumerate(nodes_imported_dict):
+        nodes[order] = construct_Node_object(order, nodes_imported_dict[idx])
 
     major_lines = TypedDict.empty(key_type=nbintp, value_type=Line_InstanceType)
     minor_lines = TypedDict.empty(key_type=nbintp, value_type=Line_InstanceType)

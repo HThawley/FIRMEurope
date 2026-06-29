@@ -7,7 +7,7 @@ from firm_ce.common.typing import nbintp, nbfloat, npfloat, unicode_type
 from firm_ce.system.components import Fleet_InstanceType
 from firm_ce.system.parameters import ScenarioParameters_InstanceType
 from firm_ce.system.topology import Network_InstanceType
-from firm_ce.optimisation.st_solution import Solution, evaluate, extract_details
+from firm_ce.backend.scalar.solution import Solution, evaluate, extract_details
 
 
 @njit(parallel=True, fastmath=FASTMATH, boundscheck=BOUNDSCHECK)

@@ -81,7 +81,7 @@ class Model:
 
         self.datafile_filenames_dict = model_data.datafiles
         self.scenarios = {
-            model_data.scenarios[scenario_id]["scenario_name"]: Scenario(model_data, scenario_id)
+            model_data.scenarios[scenario_id]["scenario_name"]: Scenario(model_data, self.config, scenario_id)
             for scenario_id in model_data.scenarios
         }
 
