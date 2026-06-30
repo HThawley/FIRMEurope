@@ -52,7 +52,7 @@ class Statistics:
 
         self.statistics_dir = self.create_solution_directory(
             solution_results_directory,
-            f"statistics/{self.scenario_name}_{self.balancing_type}"
+            f"{self.scenario_name}_{self.balancing_type}"
         )
         self.copy_temp_files(copy_callback)
         self.result_files = None
@@ -181,7 +181,7 @@ class Statistics:
 
     def create_solution_directory(self, result_directory: str, solution_name: str) -> str:
         safe_name = sub(r"[^a-zA-Z0-9_\-]", "_", solution_name)
-        solution_dir = os.path.join(result_directory, safe_name)
+        solution_dir = os.path.join(result_directory, safe_name, "statistics")
         os.makedirs(solution_dir, exist_ok=True)
         return solution_dir
 
