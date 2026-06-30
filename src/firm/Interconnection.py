@@ -23,31 +23,32 @@ def Interconnection(solution, Fillt, Surplust, netflowt, Importt, Exportt):  # n
     priority_order = np.argsort(Fillt)[::-1]
     total_surplus = Surplust.sum()
 
+    # map out network
+    for line in range(nhvi):
+        line_eff = solution.static.line_efficiencies[line]
+
+        # Forward direction (start -> end)
+        if netflowt[line] < -1e-6:  # Countering existing reverse flow
+            cap_fwd[line] = -netflowt[line] * line_eff
+            # Eff > 1.0 because injecting 1 MW here saves >1 MW at the original source
+            eff_fwd[line] = 1.0 / line_eff
+        else:  # Pushing new forward flow
+            cap_fwd[line] = solution.assets.Clines[line] - netflowt[line]
+            eff_fwd[line] = line_eff
+
+        # Reverse direction (end -> start)
+        if netflowt[line] > 1e-6:  # Countering existing forward flow
+            cap_rev[line] = netflowt[line] * line_eff
+            eff_rev[line] = 1.0 / line_eff
+        else:  # Pushing new reverse flow
+            cap_rev[line] = solution.assets.Clines[line] + netflowt[line]
+            eff_rev[line] = line_eff
+
     for n in priority_order:
         if Fillt[n] < 1e-6:
             break  # No more significant deficits
 
         while Fillt[n] > 1e-6 and total_surplus > 1e-6:
-
-            for line in range(nhvi):
-                line_eff = solution.static.line_efficiencies[line]
-
-                # Forward direction (start -> end)
-                if netflowt[line] < -1e-6:  # Countering existing reverse flow
-                    cap_fwd[line] = -netflowt[line] * line_eff
-                    # Eff > 1.0 because injecting 1 MW here saves >1 MW at the original source
-                    eff_fwd[line] = 1.0 / line_eff
-                else:  # Pushing new forward flow
-                    cap_fwd[line] = solution.assets.Clines[line] - netflowt[line]
-                    eff_fwd[line] = line_eff
-
-                # Reverse direction (end -> start)
-                if netflowt[line] > 1e-6:  # Countering existing forward flow
-                    cap_rev[line] = netflowt[line] * line_eff
-                    eff_rev[line] = 1.0 / line_eff
-                else:  # Pushing new reverse flow
-                    cap_rev[line] = solution.assets.Clines[line] + netflowt[line]
-                    eff_rev[line] = line_eff
 
             # Dijkstra setup
             eff.fill(0.0)
@@ -55,6 +56,7 @@ def Interconnection(solution, Fillt, Surplust, netflowt, Importt, Exportt):  # n
             visited.fill(False)
             parent_node.fill(-1)
             parent_line.fill(-1)
+            best_surplus_node = -1
 
             # Dijkstra execution
             for _ in range(nodes):
@@ -134,20 +136,11 @@ def Interconnection(solution, Fillt, Surplust, netflowt, Importt, Exportt):  # n
                     max_initial_send = bottleneck_send
                 cum_eff *= edge_e
 
-            if max_initial_send < 1e-6:
-                # Path exists but is functionally congested to zero
-                Surplust[best_surplus_node] -= 1e-6  # prevent infinite loop
-                total_surplus -= 1e-6
-                continue
-
             # Scale if received power overfills the deficit
             received = max_initial_send * cum_eff
             if received > Fillt[n]:
                 received = Fillt[n]
                 max_initial_send = received / cum_eff
-
-            if max_initial_send < 1e-6:
-                break
 
             # Apply physical transfers
             current_flow = max_initial_send
@@ -163,8 +156,8 @@ def Interconnection(solution, Fillt, Surplust, netflowt, Importt, Exportt):  # n
                 edge_e = eff_fwd[line] if is_fwd else eff_rev[line]
 
                 # Update nodal boundary injections (Preserves UpdateUnbalancedt logic)
-                Exportt[sender, line] -= current_flow
-                Importt[receiver, line] += current_flow * edge_e
+                Exportt[sender] -= current_flow
+                Importt[receiver] += current_flow * edge_e
 
                 # Update line netflow state
                 if is_fwd:
@@ -177,6 +170,21 @@ def Interconnection(solution, Fillt, Surplust, netflowt, Importt, Exportt):  # n
                         netflowt[line] -= current_flow * edge_e
                     else:
                         netflowt[line] -= current_flow
+
+                # Update line capacities
+                if netflowt[line] < -1e-6:
+                    cap_fwd[line] = -netflowt[line] * line_eff
+                    eff_fwd[line] = 1.0 / line_eff
+                else:
+                    cap_fwd[line] = solution.assets.Clines[line] - netflowt[line]
+                    eff_fwd[line] = line_eff
+
+                if netflowt[line] > 1e-6:
+                    cap_rev[line] = netflowt[line] * line_eff
+                    eff_rev[line] = 1.0 / line_eff
+                else:
+                    cap_rev[line] = solution.assets.Clines[line] + netflowt[line]
+                    eff_rev[line] = line_eff
 
                 current_flow *= edge_e
 

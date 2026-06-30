@@ -1,35 +1,63 @@
 import numpy as np
-from numba import int64
+from numba import njit, int64
 from numba.typed.typeddict import Dict as TypedDict
 
 
-def generate_network(network, Nodel_int):
-    network_mask = np.isin(network[:, 0], Nodel_int) & np.isin(network[:, 1], Nodel_int)
-    valid_network = network[network_mask, :]
+@njit
+def generate_network(network, Nodel_int):  # noqa: C901
+    networkdict = TypedDict.empty(int64, int64)
+    for k in range(len(Nodel_int)):
+        networkdict[Nodel_int[k]] = k
 
-    networkdict = {v: k for k, v in enumerate(Nodel_int)}
+    num_lines = network.shape[0]
+    network_mask = np.zeros(num_lines, dtype=np.bool_)
+    valid_count = 0
 
-    valid_network = np.array([networkdict[n] for n in valid_network.flatten()], np.int64).reshape(valid_network.shape)
+    for i in range(num_lines):
+        start_node = network[i, 0]
+        end_node = network[i, 1]
 
-    trans_mask = np.zeros((len(Nodel_int), len(valid_network)), np.bool_)
-    for line, row in enumerate(valid_network):
-        trans_mask[row[0], line] = True
+        # Check if both start and end are in our valid nodes dict
+        if start_node in networkdict and end_node in networkdict:
+            network_mask[i] = True
+            valid_count += 1
 
+    # Create valid_network and remap indices
+    valid_network = np.empty((valid_count, 2), dtype=np.int64)
+    idx = 0
+    for i in range(num_lines):
+        if network_mask[i]:
+            valid_network[idx, 0] = networkdict[network[i, 0]]
+            valid_network[idx, 1] = networkdict[network[i, 1]]
+            idx += 1
+
+    # Build cache
     cache_0_donors = TypedDict.empty(int64, int64[:, :])
+    nodes = len(Nodel_int)
 
-    for n in range(len(Nodel_int)):
-        donors = []
-        for line, row in enumerate(valid_network):
-            if row[0] == n:
-                donors.append((row[1], line))
-            elif row[1] == n:
-                donors.append((row[0], line))
+    for n in range(nodes):
+        # count the number of connections to pre-allocate arrays
+        count = 0
+        for line in range(valid_count):
+            if valid_network[line, 0] == n or valid_network[line, 1] == n:
+                count += 1
 
-        if donors:
-            pdonors = np.array([d[0] for d in donors], dtype=np.int64)
-            plines = np.array([d[1] for d in donors], dtype=np.int64)
-            cache_0_donors[n] = np.vstack((pdonors, plines))
+        # allocate and fill
+        if count > 0:
+            res_matrix = np.empty((2, count), dtype=np.int64)
+            c = 0
+            for line in range(valid_count):
+                if valid_network[line, 0] == n:
+                    res_matrix[0, c] = valid_network[line, 1]
+                    res_matrix[1, c] = line
+                    c += 1
+                elif valid_network[line, 1] == n:
+                    res_matrix[0, c] = valid_network[line, 0]
+                    res_matrix[1, c] = line
+                    c += 1
+
+            cache_0_donors[n] = res_matrix
         else:
             cache_0_donors[n] = np.empty((2, 0), dtype=np.int64)
 
-    return valid_network, network_mask, trans_mask, cache_0_donors
+    return valid_network, network_mask, cache_0_donors
