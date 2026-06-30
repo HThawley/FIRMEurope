@@ -92,7 +92,7 @@ def InitHydroMinFuture(solution, t):
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
 def InitStorageMinMaxFuture(solution, t):
     for n in range(solution.static.nodes):
-        for s in range(4):
+        for s in range(solution.static.nstor):
             solution.operations.storage_min_future[n, s] = solution.operations.Mstorage[t, n, s]
             solution.operations.storage_max_future[n, s] = solution.operations.Mstorage[t, n, s]
 
@@ -111,7 +111,7 @@ def UpdateHydroMinFuture(solution, t):
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
 def UpdateStorageMinMaxFuture(solution, t):
     for n in range(solution.static.nodes):
-        for s in range(4):
+        for s in range(solution.static.nstor):
             solution.operations.storage_min_future[n, s] = min(
                 solution.operations.storage_min_future[n, s], solution.operations.Mstorage[t, n, s]
             )
@@ -130,13 +130,13 @@ def SetupPrechargePools(solution, t):
     node_precharge_fill.fill(0.0)
 
     for n in range(nodes):
-        for s in range(4):
+        for s in range(solution.static.nstor):
             solution.operations.precharge_flag[n, s] = False
             solution.operations.charge_max_t[t, n, s] = 0.0
 
         if rolling_deficits[n] > TOLERANCE:
             remaining_fill = rolling_deficits[n]
-            for s in (3, 2, 1, 0):  # Shortest duration first
+            for s in range(solution.static.nstor-1, -1, -1):  # Shortest duration first
                 headroom = GetReverseStorageHeadroom(solution, t, n, s)
 
                 if headroom > TOLERANCE:
@@ -158,12 +158,12 @@ def SetupPrechargePools(solution, t):
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def SetupStorageDonors(solution, t):
     for n in range(solution.static.nodes):
-        for s in range(4):
+        for s in range(solution.static.nstor):
             solution.operations.trickling_flag[n, s] = False
             solution.operations.discharge_max_t[t, n, s] = 0.0
 
         if solution.operations.Mcurtail[t, n] > TOLERANCE:
-            for s in (0, 1, 2, 3):  # Longest duration first
+            for s in range(solution.static.nstor - 1, -1, -1):  # Longest duration first
                 available_e_power = (
                     solution.operations.storage_min_future[n, s]
                     * solution.static.storage_discha_eff[s]
@@ -182,7 +182,7 @@ def FillPrechargers(solution, t, n, transfer_amount):
     res = solution.static.resolution
     rolling_deficits = solution.operations.rolling_deficits
 
-    for s in (3, 2, 1, 0):
+    for s in range(solution.static.nstor -1, -1, -1):
         if solution.operations.precharge_flag[n, s] and transfer_amount > TOLERANCE:
             allocated = min(transfer_amount, solution.operations.charge_max_t[t, n, s])
             solution.operations.Mcharge[t, n, s] += allocated
@@ -214,7 +214,7 @@ def DrainHydroDonors(solution, t, n, transfer_amount):
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
 def DrainStorageDonors(solution, t, n, transfer_amount):
     res = solution.static.resolution
-    for s in (0, 1, 2, 3):
+    for s in range(solution.static.nstor - 1, -1, -1):
         if solution.operations.trickling_flag[n, s] and transfer_amount > TOLERANCE:
             allocated = min(transfer_amount, solution.operations.discharge_max_t[t, n, s])
             solution.operations.Mdischarge[t, n, s] += allocated
@@ -252,7 +252,7 @@ def TrickleStorageHydro(solution, t):  # noqa: C901
             surplus[n] += available
 
         # Storage Headroom
-        for s in range(4):
+        for s in range(solution.static.nstor):
             if solution.operations.trickling_flag[n, s]:
                 surplus[n] += solution.operations.discharge_max_t[t, n, s]
 
@@ -296,7 +296,7 @@ def TrickleStorageHydro(solution, t):  # noqa: C901
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
 def TricklePeak(solution, t):
-    for k in range(3):
+    for k in range(solution.static.npeak):
         if not (solution.operations.fill_buffer > 1e-6).any():
             break  # remaining precharge demand already fully met by a preferred tier
         LocalTrickleTier(solution, t, k)

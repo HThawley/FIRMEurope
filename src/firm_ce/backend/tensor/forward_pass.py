@@ -93,11 +93,10 @@ def ForwardPassRenewables(solution):  # noqa: C901
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def ForwardPassPeak(solution):  # noqa: C901
     for t in range(solution.static.intervals):
-        for k in range(3):
+        for k in range(solution.static.npeak):
             if solution.operations.has_deficit_t:
                 LocalDispatchPeakTier(solution, t, k)
             NetworkDispatchPeakTier(solution, t, k)
-
         UpdateUnbalancedt(solution, t)
     UpdateSOCt(solution, t)
 
@@ -108,7 +107,7 @@ def GetForwardStorageHeadroom(solution, t, n):
     res = solution.static.resolution
 
     headroom = 0.0
-    for s in range(4):
+    for s in range(solution.static.nstor):
         prev_soc = solution.operations.Mstorage_init[n, s] if t == 0 else solution.operations.Mstorage[t - 1, n, s]
         if s == 0:
             prev_soc += solution.static.TSphes_inflow[t, n]
@@ -127,7 +126,7 @@ def GetForwardStorageHeadroom(solution, t, n):
     return headroom
 
 
-@njit(inline="always")
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
 def LocalDispatchPeakTier(solution, t, k):
     nodes = solution.static.nodes
     for n in range(nodes):
@@ -139,7 +138,7 @@ def LocalDispatchPeakTier(solution, t, k):
                 solution.operations.Mdeficit[t, n] -= dispatched
 
 
-@njit(inline="always")
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
 def NetworkDispatchPeakTier(solution, t, k):
     nodes = solution.static.nodes
     working_buffer = solution.operations.surplus_buffer

@@ -31,8 +31,8 @@ def Simulate(solution):
         else:
             ReversePassPeak(solution)
             UpdateDynamics(solution)
-            solution.estimated_deficit = solution.operations.deficit.sum()
-            solution.feasible = not solution.operations.deficit.sum() > TOLERANCE
+            solution.estimated_deficit = solution.operations.Mdeficit.sum()
+            solution.feasible = not solution.operations.Mdeficit.sum() > TOLERANCE
 
     else:
         solution.feasible = True

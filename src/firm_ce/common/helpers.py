@@ -7,7 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from firm_ce.common.typing import nbfloat
-from firm_ce.common.constants import FASTMATH
+from firm_ce.common.constants import FASTMATH, BOUNDSCHECK
 
 
 def parse_comma_separated(value: str, lower: bool = True) -> List[str]:
@@ -75,7 +75,7 @@ def njit_safe_divide(
     return fail
 
 
-@njit(fastmath=FASTMATH)
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def safe_divide_array(
     num: NDArray[nbfloat],
     denom: NDArray[nbfloat],

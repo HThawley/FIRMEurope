@@ -8,13 +8,13 @@ def GetSurplust(solution, t, Msurplust):
     res = solution.static.resolution
     for n in range(solution.static.nodes):
         surplus = solution.operations.Mcurtail[t, n]
-        for s in range(4):
+        for s in range(solution.static.nstor):
             prev_soc = solution.operations.Mstorage_init[n, s] if t == 0 else solution.operations.Mstorage[t - 1, n, s]
             surplus += solution.operations.Mcharge[t, n, s]
             surplus += min(solution.assets.CstorageP[n, s], (prev_soc * solution.static.storage_discha_eff[s]) / res)
             surplus -= solution.operations.Mdischarge[t, n, s]
 
-        for h in range(2):
+        for h in range(solution.static.nhyd):
             prev_soc = (
                 solution.operations.Mreservoir_init[n, h] if t == 0
                 else solution.operations.Mreservoir[t - 1, n, h]
@@ -63,13 +63,13 @@ def UpdateLocalCharge(solution, t):
         unbal = solution.operations.Munbalanced[t, n]
 
         # Wipe local arrays to allow safe recalculation from scratch
-        for s in range(4):
+        for s in range(solution.static.nstor):
             solution.operations.Mcharge[t, n, s] = 0.0
         solution.operations.Mdeficit[t, n] = 0.0
         solution.operations.Mcurtail[t, n] = 0.0
 
         if unbal < -TOLERANCE:
-            for s in range(4):
+            for s in range(solution.static.nstor):
                 prev_soc = (
                     solution.operations.Mstorage_init[n, s] if t == 0
                     else solution.operations.Mstorage[t - 1, n, s]
@@ -103,13 +103,13 @@ def UpdateLocalDischarge(solution, t):
         unbal = solution.operations.Munbalanced[t, n]
 
         # Unbal must account for any charging that has happened
-        for s in range(4):
+        for s in range(solution.static.nstor):
             unbal += solution.operations.Mcharge[t, n, s]
 
         # Wipe discharge arrays
-        for s in range(4):
+        for s in range(solution.static.nstor):
             solution.operations.Mdischarge[t, n, s] = 0.0
-        for h in range(2):
+        for h in range(solution.static.nhyd):
             solution.operations.Mhydro[t, n, h] = 0.0
 
         if unbal > TOLERANCE:
@@ -126,7 +126,7 @@ def UpdateLocalDischarge(solution, t):
             unbal -= discharge_amt
 
             # Storage (s=0 to 3)
-            for s in range(4):
+            for s in range(solution.static.nstor):
                 prev_soc = (
                     solution.operations.Mstorage_init[n, s] if t == 0
                     else solution.operations.Mstorage[t - 1, n, s]
@@ -152,7 +152,7 @@ def UpdateLocalDischarge(solution, t):
             unbal -= discharge_amt
 
             # peak deduction
-            for k in range(3):
+            for k in range(solution.static.npeak):
                 unbal -= solution.operations.Mpeak[t, n, k]
 
             if unbal > TOLERANCE:
@@ -173,7 +173,7 @@ def GetLongDurSurplust(solution, t, Msurplust):
     for n in range(solution.static.nodes):
         surplus = 0.0
         # Pondage & Reservoir
-        for h in range(2):
+        for h in range(solution.static.nhyd):
             prev_soc = (solution.operations.Mreservoir_init[n, h] if t == 0
                         else solution.operations.Mreservoir[t - 1, n, h])
             inflow_e = solution.static.TShyd_inflow[t, n, h]
@@ -200,7 +200,7 @@ def GetShortDurSurplust(solution, t, Msurplust):
     for n in range(solution.static.nodes):
         surplus = 0.0
         # B4, B2, B1 (s=1, 2, 3)
-        for s in range(1, 4):
+        for s in range(1, solution.static.nstor):
             prev_soc = solution.operations.Mstorage_init[n, s] if t == 0 else solution.operations.Mstorage[t - 1, n, s]
             discharge_cap = prev_soc * solution.static.storage_discha_eff[s] / res
             surplus += max(
@@ -218,11 +218,11 @@ def CommitTrickle(solution, t):
     for n in range(solution.static.nodes):
         unbal = solution.operations.Munbalanced[t, n]
 
-        for s in range(4):
+        for s in range(solution.static.nstor):
             unbal += solution.operations.Mcharge[t, n, s] - solution.operations.Mdischarge[t, n, s]
-        for h in range(2):
+        for h in range(solution.static.nhyd):
             unbal -= solution.operations.Mhydro[t, n, h]
-        for k in range(3):
+        for k in range(solution.static.npeak):
             unbal -= solution.operations.Mpeak[t, n, k]
 
         if unbal > TOLERANCE:
@@ -245,7 +245,7 @@ def CommitTrickle(solution, t):
 def UpdateSOCt(solution, t):
     res = solution.static.resolution
     for n in range(solution.static.nodes):
-        for h in range(2):
+        for h in range(solution.static.nhyd):
             prev_soc = (
                 solution.operations.Mreservoir_init[n, h] if t == 0
                 else solution.operations.Mreservoir[t - 1, n, h]
@@ -257,7 +257,7 @@ def UpdateSOCt(solution, t):
             solution.operations.Mhyd_spill[t, n, h] = max(0.0, theoretical_soc - solution.assets.ChydE[n, h])
             solution.operations.Mreservoir[t, n, h] = min(solution.assets.ChydE[n, h], theoretical_soc)
 
-        for s in range(4):
+        for s in range(solution.static.nstor):
             prev_soc = solution.operations.Mstorage_init[n, s] if t == 0 else solution.operations.Mstorage[t - 1, n, s]
             net_charge = res * (
                 solution.operations.Mcharge[t, n, s] * solution.static.storage_charge_eff[s]
@@ -273,7 +273,7 @@ def UpdateSOCt(solution, t):
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
 def ResetAnnualBudgets(solution):
-    solution.operations.remaining_peak_budget[:, :] = solution.Bpeak
+    solution.operations.remaining_peak_budget[:, :] = solution.static.Bpeak
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")

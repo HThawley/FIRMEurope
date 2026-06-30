@@ -47,7 +47,7 @@ class Scenario:
         self.id = scenario_id
         self.name = self.scenario_data["scenario_name"].lower()
 
-        safe_name = sub(r"[^a-zA-Z0-9_\-]", "_", f"{self.name}_{self.balancing_type}")
+        safe_name = sub(r"[^a-zA-Z0-9_\-]", "_", f"{self.name}_{self.config.balancing_type}")
         self.solution_dir = os.path.join(self.results_dir, safe_name)
 
         self.network = construct_Network_object(
@@ -160,7 +160,7 @@ class Scenario:
             raise RuntimeError("Load datafiles before constructing tensors")
 
         self.staticTensor = StaticTensor(self.static, self.fleet, self.network, self.asset_node_map)
-        self.costTensor = CostTensor(self.static, self.fleet, self.network)
+        self.costTensor = CostTensor(self.staticTensor, self.fleet, self.network)
 
     def deconstruct_tensors(
         self,
@@ -169,14 +169,13 @@ class Scenario:
 
     def load_datafiles(
         self,
-        datafile_filenames_dict: Dict[str, DataFile],
-        data_directory: str,
     ) -> None:
-        datafiles = self._get_datafiles(datafile_filenames_dict, data_directory)
+        
+        datafiles = self._get_datafiles(self.model_data.datafiles, self.model_data.data_directory)
 
         yeartuple = None
 
-        if self.limit_timesteps is not None:
+        if self.config.limit_timesteps is not None:
             self.logger.info(f"Slicing data to first {self.config.limit_timesteps} timesteps per config file.")
         else:
             firstyear = self.scenario_data.get("firstyear", "auto")
@@ -217,7 +216,7 @@ class Scenario:
         self.data_status = True
 
         if self.config.backend == "tensor":
-            self.constructTensors()
+            self.construct_tensors()
 
         if len(self.x0) == 0:
             self.x0 = self._approximate_feasible_solution()

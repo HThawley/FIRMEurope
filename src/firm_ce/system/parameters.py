@@ -95,9 +95,9 @@ class ModelConfig:
         self.model_location = str(config.get("model_location", "new"))
         self.balancing_type = str(config["balancing_type"])
         self.fixed_costs_threshold = float(config.get("fixed_costs_threshold", 500.0))
-        self.limit_timesteps = config.get("limit_timesteps")
-        self.demand_multiple = config.get("demand_multiple", 1.0)
-        self.interval_aggregation = config.get("interval_aggregation", 1)
+        self.limit_timesteps = int(config.get("limit_timesteps")) if config.get("limit_timesteps") is not None else None
+        self.demand_multiple = float(config.get("demand_multiple", 1.0))
+        self.interval_aggregation = int(config.get("interval_aggregation", 1))
 
         if self.type == "single_time":
             self.iterations = int(config["iterations"])
@@ -112,7 +112,7 @@ class ModelConfig:
         if self.type == "mhmga":
             self.mga_steps = int(config.get("mga_steps", 1))  # default: 1
 
-            for param_name in expected_mga_hyperparameters.key():
+            for param_name in expected_mga_hyperparameters.keys():
                 setattr(self, param_name, config[param_name])
 
     def update(self, new_params: dict) -> None:

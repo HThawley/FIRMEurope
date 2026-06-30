@@ -9,7 +9,7 @@ only generated for scenarios with an initial guess provided in `initial_guess.cs
 Alternative filepaths for the config and data folders can be provided as arguments to the Model instantiation.
 """
 import time
-# import os
+import os
 import pandas as pd
 
 from firm_ce.model import Model
@@ -21,22 +21,22 @@ from firm_ce.analysis.display import Display
 def run_statistics(scenario, run_mode):
     scenario.load_datafiles(model.datafile_filenames_dict, model.data_directory)
 
-    # if run_mode == "new":
-    #     if scenario.x0.size == 0:
-    #         print(f"skipping {scenario.name} as no initial guess provided")
-    #         scenario.unload_datafiles()
-    #         return
-    #     x = scenario.x0
-    #     scenario.create_solution_directory()
+    if run_mode == "new":
+        if scenario.x0.size == 0:
+            print(f"skipping {scenario.name} as no initial guess provided")
+            scenario.unload_datafiles()
+            return
+        x = scenario.x0
+        scenario.create_solution_directory()
 
-    # else:
-    #     x_csv = os.path.join(scenario.solution_dir, "x.csv")
-    #     if os.path.exists(x_csv):
-    #         x = pd.read_csv(x_csv, header=None).to_numpy().flatten()
-    #     else:
-    #         scenario.unload_datafiles()
-    #         raise FileNotFoundError("Could not find x.csv. Has the solution been run?")
-    x = scenario.x0
+    else:
+        x_csv = os.path.join(scenario.solution_dir, "x.csv")
+        if os.path.exists(x_csv):
+            x = pd.read_csv(x_csv, header=None).to_numpy().flatten()
+        else:
+            scenario.unload_datafiles()
+            raise FileNotFoundError("Could not find x.csv. Has the solution been run?")
+    # x = scenario.x0
 
     print(f"Instantiating statistics for scenario: '{scenario.name}'")
     scenario.statistics = Statistics(
@@ -51,7 +51,7 @@ def run_statistics(scenario, run_mode):
         False,
     )
     print(f"Generating statistics for scenario {scenario.name}")
-    scenario.statistics.generate_result_files(write=True, delete=True)
+    # scenario.statistics.generate_result_files(write=True, delete=True)
     print(f"Writing statistics results for scenario {scenario.name}")
     # scenario.statistics.write_results()
 
@@ -92,13 +92,14 @@ def run_statistics(scenario, run_mode):
 
 if __name__ == "__main__":
 
-    RUN_MODE = "latest"
+    # RUN_MODE = "latest"
+    RUN_MODE = "results/firmeur_tensor"
 
     start_time = time.time()
     model = Model(model_location=RUN_MODE)
     model_build_time = time.time()
     print(f"Model build time: {model_build_time - start_time:.4f} seconds")
 
-    for name in ("test",):
+    for name in ("base",):
         scenario = model.scenarios[name]
         run_statistics(scenario, RUN_MODE)

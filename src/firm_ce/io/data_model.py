@@ -8,8 +8,9 @@ from firm_ce.io.file_manager import import_config_csvs
 
 
 class ModelData:
-    def __init__(self, config_directory: str) -> None:
+    def __init__(self, config_directory: str, data_directory: str) -> None:
         self.config_directory = config_directory
+        self.data_directory = data_directory
 
         # Get the config settings for the csvs
         self.config_data = import_config_csvs(config_directory=config_directory)

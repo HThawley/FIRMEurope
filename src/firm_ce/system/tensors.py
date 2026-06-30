@@ -7,6 +7,7 @@ from firm_ce.system.topology import Network_InstanceType
 from firm_ce.common.constants import JIT_ENABLED
 from firm_ce.common.jit_overload import jitclass, njit
 from firm_ce.common.typing import DictType, TypedDict, boolean, nbfloat, npfloat, nbintp, npint, npintp, unicode_type, nbint
+from firm_ce.common.helpers import safe_divide_array
 
 
 @njit(boundscheck=True)
@@ -75,12 +76,12 @@ if JIT_ENABLED:
         ("resolution", nbfloat),
         ("allowance", nbfloat),
         ("intervals", nbintp),
-        ("asset_node_map", DictType(unicode_type, npintp[:]))
+        ("asset_node_map", DictType(unicode_type, nbintp[:])),
 
         # -- Static Data --
         ("years", nbintp),
         ("years_float", nbfloat),
-        ("year_of_interval", nbintp[:])
+        ("year_of_interval", nbintp[:]),
         ("energy", nbfloat),
         ("legacy_costs", nbfloat),
 
@@ -116,6 +117,9 @@ if JIT_ENABLED:
         # (nodes, static.nhyd)
         ("EhydP", nbfloat[:, :]),
         ("EhydE", nbfloat[:, :]),
+        # (nodes, static.nstor)
+        ("EstorageP", nbfloat[:, :]),
+        ("EstorageE", nbfloat[:, :]),
 
         # -- Power Traces (nodal) --
         # (intervals, nodes)
@@ -198,7 +202,7 @@ class StaticTensor:
         scenario_parameters: ScenarioParameters_InstanceType,
         fleet: Fleet_InstanceType,
         network: Network_InstanceType,
-        asset_node_map: DictType[unicode_type, nbintp[:]],
+        asset_node_map: TypedDict[unicode_type, nbintp[:]],
     ):
         self.resolution = scenario_parameters.resolution
         self.allowance = scenario_parameters.allowance
@@ -240,57 +244,72 @@ class StaticTensor:
                 raise Exception
 
         # computationally efficient x-vector mapping
+        empty_nodes = np.empty(0, dtype=npintp)
+
+        _map = asset_node_map.get("pv_fixed", empty_nodes)
         self.pfix_offset = 0
-        self.pfix_nodes = asset_node_map["pv_fixed"]
-        self.pfix_len = len(asset_node_map["pv_fixed"])
+        self.pfix_nodes = _map
+        self.pfix_len = len(_map)
 
+        _map = asset_node_map.get("pv_track", empty_nodes)
         self.psat_offset = self.pfix_len
-        self.psat_nodes = asset_node_map["pv_track"]
-        self.psat_len = len(asset_node_map["pv_track"])
+        self.psat_nodes = _map
+        self.psat_len = len(_map)
 
+        _map = asset_node_map.get("offw", empty_nodes)
         self.offw_offset = self.psat_len + self.psat_offset
-        self.offw_nodes = asset_node_map["offw"]
-        self.offw_len = len(asset_node_map["offw"])
+        self.offw_nodes = _map
+        self.offw_len = len(_map)
 
+        _map = asset_node_map.get("onsw", empty_nodes)
         self.onsw_offset = self.offw_len + self.offw_offset
-        self.onsw_nodes = asset_node_map["onsw"]
-        self.onsw_len = len(asset_node_map["onsw"])
+        self.onsw_nodes = _map
+        self.onsw_len = len(_map)
 
+        _map = asset_node_map.get("biogas", empty_nodes)
         self.biog_offset = self.onsw_len + self.onsw_offset
-        self.biog_nodes = asset_node_map["biogas"]
-        self.biog_len = len(asset_node_map["biogas"])
+        self.biog_nodes = _map
+        self.biog_len = len(_map)
 
+        _map = asset_node_map.get("biomass", empty_nodes)
         self.biom_offset = self.biog_len + self.biog_offset
-        self.biom_nodes = asset_node_map["biomass"]
-        self.biom_len = len(asset_node_map["biomass"])
+        self.biom_nodes = _map
+        self.biom_len = len(_map)
 
+        _map = asset_node_map.get("ccgt", empty_nodes)
         self.ccgt_offset = self.biom_len + self.biom_offset
-        self.ccgt_nodes = asset_node_map["ccgt"]
-        self.ccgt_len = len(asset_node_map["ccgt"])
+        self.ccgt_nodes = _map
+        self.ccgt_len = len(_map)
 
+        _map = asset_node_map.get("nuclear", empty_nodes)
         self.nuke_offset = self.ccgt_len + self.ccgt_offset
-        self.nuke_nodes = asset_node_map["nuclear"]
-        self.nuke_len = len(asset_node_map["nuclear"])
+        self.nuke_nodes = _map
+        self.nuke_len = len(_map)
 
+        _map = asset_node_map.get("nuclear_lte", empty_nodes)
         self.nlte_offset = self.nuke_len + self.nuke_offset
-        self.nlte_nodes = asset_node_map["nuclear_lte"]
-        self.nlte_len = len(asset_node_map["nuclear_lte"])
+        self.nlte_nodes = _map
+        self.nlte_len = len(_map)
 
+        _map = asset_node_map.get("nphes", empty_nodes)
         self.php_offset = self.nlte_len + self.nlte_offset
-        self.php_nodes = asset_node_map["nphes"]
-        self.php_len = len(asset_node_map["nphes"])
+        self.php_nodes = _map
+        self.php_len = len(_map)
 
+        _map = asset_node_map.get("2hr_bess", empty_nodes)
         self.b2p_offset = self.php_len + self.php_offset
-        self.b2p_nodes = asset_node_map["2hr_bess"]
-        self.b2p_len = len(asset_node_map["2hr_bess"])
+        self.b2p_nodes = _map
+        self.b2p_len = len(_map)
 
+        _map = asset_node_map.get("4hr_bess", empty_nodes)
         self.b4p_offset = self.b2p_len + self.b2p_offset
-        self.b4p_nodes = asset_node_map["4hr_bess"]
-        self.b4p_len = len(asset_node_map["4hr_bess"])
+        self.b4p_nodes = _map
+        self.b4p_len = len(_map)
 
+        _map = asset_node_map.get("nphes", empty_nodes)
         self.phe_offset = self.b4p_len + self.b4p_offset
-        self.phe_nodes = asset_node_map["nphes"]
-        self.phe_len = len(asset_node_map["nphes"])
+        self.phe_nodes = _map
+        self.phe_len = len(_map)
 
         self.lines_offset = self.phe_len + self.phe_offset
 
@@ -307,6 +326,14 @@ class StaticTensor:
         self.nstor = 3  # TODO: dynamic
         self.nhyd = 2  # TODO: dynamic
         self.npeak = 3  # TODO: dynamic
+
+        self.Bpeak = np.zeros((self.years, self.npeak-1), npfloat)
+        for fuel in fleet.fuels.values():
+            if fuel.name == "biomass":
+                self.Bpeak[:, 0] = fuel.annual_limit
+            if fuel.name == "biogas":
+                self.Bpeak[:, 1] = fuel.annual_limit
+
         self.storage_charge_eff = np.zeros(self.nstor, npfloat)
         self.storage_discha_eff = np.zeros(self.nstor, npfloat)
         storage_type_count = np.zeros(self.nstor, npint)
@@ -375,12 +402,12 @@ class StaticTensor:
 
         self.Rnuke_Rnlte_mask = self.Rnlte_mask[self.Rnuke_mask]
         # This ought to be full of 1s and 0s. Future dev
-        self.TSpfix /= counts[0]
-        self.TSpsat /= counts[1]
-        self.TSoffw /= counts[2]
-        self.TSonsw /= counts[3]
-        self.TSnuke /= counts[4]
-        self.TSnlte /= counts[5]
+        self.TSpfix = safe_divide_array(self.TSpfix, counts[0])
+        self.TSpsat = safe_divide_array(self.TSpsat, counts[1])
+        self.TSoffw = safe_divide_array(self.TSoffw, counts[2])
+        self.TSonsw = safe_divide_array(self.TSonsw, counts[3])
+        self.TSnuke = safe_divide_array(self.TSnuke, counts[4])
+        self.TSnlte = safe_divide_array(self.TSnlte, counts[5])
 
         for sto in fleet.storages.values():
             n = sto.node.order
@@ -745,7 +772,7 @@ if JIT_ENABLED:
         ("discharge_max_t", nbfloat[:, :, :]),
         # (nodes, nhydro)
         ("hydro_headroom", nbfloat[:, :]),
-        # (years, npeak)
+        # (years, npeak-1)
         ("remaining_peak_budget", nbfloat[:, :]),
     ]
 
@@ -780,8 +807,8 @@ class OperationTensor:
         )
 
         self.Munbalanced = self.Mnetload.copy()
-        self.Mdeficit = np.maximum(0, self.Mnetload)
-        self.Mcurtail = -np.minimum(0, self.Mnetload)
+        self.Mdeficit = np.maximum(npfloat(0.0), self.Mnetload)
+        self.Mcurtail = -np.minimum(npfloat(0.0), self.Mnetload)
 
         self.Mimport = np.zeros((static.intervals, static.nodes), dtype=npfloat)
         self.Mexport = np.zeros((static.intervals, static.nodes), dtype=npfloat)
@@ -790,13 +817,13 @@ class OperationTensor:
         self.Mdischarge = np.zeros((static.intervals, static.nodes, static.nstor), dtype=npfloat)
         self.Mcharge = np.zeros((static.intervals, static.nodes, static.nstor), dtype=npfloat)
         self.Mstorage = np.zeros((static.intervals, static.nodes, static.nstor), dtype=npfloat)
-        self.Mstorage_init = 0.5 * assets.CstorageE
-        self.Mphes_spill = np.zeros((static.intervals, static.nodes))
+        self.Mstorage_init = npfloat(0.5) * assets.CstorageE
+        self.Mphes_spill = np.zeros((static.intervals, static.nodes), dtype=npfloat)
 
         self.Mhydro = np.zeros((static.intervals, static.nodes, static.nhyd), dtype=npfloat)
         self.Mreservoir = np.zeros((static.intervals, static.nodes, static.nhyd), dtype=npfloat)
-        self.Mreservoir_init = 0.5 * assets.ChydE
-        self.Mhyd_spill = np.zeros((static.intervals, static.nodes, static.nhyd))
+        self.Mreservoir_init = npfloat(0.5) * assets.ChydE
+        self.Mhyd_spill = np.zeros((static.intervals, static.nodes, static.nhyd), dtype=npfloat)
 
         self.has_deficit_t = False
         self.has_curtail_t = False
@@ -829,6 +856,8 @@ class OperationTensor:
 
         self.charge_max_t = np.zeros((static.intervals, static.nodes, static.nstor), dtype=npfloat)
         self.discharge_max_t = np.zeros((static.intervals, static.nodes, static.nstor), dtype=npfloat)
+        
+        self.remaining_peak_budget = np.zeros((static.years, static.npeak-1), dtype=npfloat)
 
 
 OperationTensorType = OperationTensor.class_type.instance_type

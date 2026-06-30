@@ -63,6 +63,7 @@ class Model:
 
         model_data = ModelData(
             config_directory=self.config_directory,
+            data_directory=self.data_directory,
         )
 
         self.config = ModelConfig(model_data.config)
@@ -90,7 +91,7 @@ class Model:
         start_time_str = start_time.strftime("%d/%m/%Y %H:%M:%S")
         scenario.logger.info(f"[Single Time] Started scenario {scenario.name} at {start_time_str}.")
 
-        scenario.load_datafiles(self.datafile_filenames_dict, self.data_directory)
+        scenario.load_datafiles()
         datafile_loadtime = datetime.now()
         datafile_loadtime_str = datafile_loadtime.strftime("%d/%m/%Y %H:%M:%S")
         scenario.logger.info(
@@ -146,7 +147,7 @@ class Model:
         start_time_str = start_time.strftime("%d/%m/%Y %H:%M:%S")
         scenario.logger.info(f"[MHMGA] Started scenario '{scenario.name}' at {start_time_str}.")
 
-        scenario.load_datafiles(self.datafile_filenames_dict, self.data_directory)
+        scenario.load_datafiles()
         datafile_loadtime = datetime.now()
         datafile_loadtime_str = datafile_loadtime.strftime("%d/%m/%Y %H:%M:%S")
         scenario.logger.info(
@@ -260,7 +261,7 @@ class Model:
             raise ValueError(f"Scenario '{scenario_name}' not found.")
 
         scenario.logger.info(f"[Inspect] Loading datafiles for {scenario.name}...")
-        scenario.load_datafiles(self.datafile_filenames_dict, self.data_directory)
+        scenario.load_datafiles()
 
         results = scenario.inspect_mhmga_recombination(
             self.config,
