@@ -205,7 +205,7 @@ def calculate_fom(
     if asset_type == "generator" or asset_type == "storage":
         ltcosts_instance.fom = power_capacity * 1e6 * unit_costs.fom
     elif asset_type == "line":
-        ltcosts_instance.fom = power_capacity * 1e3 * line_length * unit_costs.fom
+        ltcosts_instance.fom = power_capacity * 1e6 * line_length * unit_costs.fom
     return None
 
 

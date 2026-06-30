@@ -1,0 +1,130 @@
+# type: ignore
+import numpy as np
+
+from firm_ce.common.constants import TOLERANCE
+from firm_ce.system.scenario import Scenario
+from firm_ce.backend.scalar.solution import Solution, Solution_InstanceType
+from firm_ce.backend.tensor.solution import SolutionTensor, SolutionTensorType
+from firm_ce.fast_methods import generator_m, storage_m, line_m
+
+def map_tensor_to_scalar(
+    scenario: Scenario,
+    solutionTensor: SolutionTensorType,
+    ) -> Solution_InstanceType:
+
+    assets = solutionTensor.assets
+    ops = solutionTensor.operations
+    res = solutionTensor.static.resolution
+    x = solutionTensor.x
+
+    solution = Solution(
+        x,
+        scenario.static,
+        scenario.fleet,
+        scenario.network,
+        scenario.config.balancing_type,
+        scenario.config.fixed_costs_threshold,
+    )
+
+    for gen in solution.fleet.generators.values():
+        n = gen.node.order
+
+        gen.new_build = x[gen.candidate_x_idx] if gen.candidate_x_idx != -1 else 0.0
+        gen.capacity = gen.initial_capacity + gen.new_build
+
+        if gen.unit_type == "pv_fixed":
+            agg_cap, agg_dispatch = assets.Cpfix[n], ops.Mpfix[:, n]
+        elif gen.unit_type == "pv_track":
+            agg_cap, agg_dispatch = assets.Cpsat[n], ops.Mpsat[:, n]
+        elif gen.unit_type == "offw":
+            agg_cap, agg_dispatch = assets.Coffw[n], ops.Moffw[:, n]
+        elif gen.unit_type == "onsw":
+            agg_cap, agg_dispatch = assets.Consw[n], ops.Monsw[:, n]
+        elif gen.unit_type == "biomass":
+            agg_cap, agg_dispatch = assets.Cpeak[n, 0], ops.Mpeak[:, n, 0]
+        elif gen.unit_type == "biogas":
+            agg_cap, agg_dispatch = assets.Cpeak[n, 1], ops.Mpeak[:, n, 1]
+        elif gen.unit_type == "ccgt":
+            agg_cap, agg_dispatch = assets.Cpeak[n, 2], ops.Mpeak[:, n, 2]
+        elif gen.unit_type == "nuclear":
+            agg_cap, agg_dispatch = assets.Cnuke[n], ops.Mnuke[:, n]
+        elif gen.unit_type == "nuclear_lte":
+            agg_cap, agg_dispatch = assets.Cnuke[n], ops.Mnuke[:, n]
+        else:
+            continue
+
+        ratio = gen.capacity / agg_cap if agg_cap > TOLERANCE else 0.0
+
+        if gen.is_flexible:
+            generator_m.allocate_memory(gen, solution.static.intervals_count)
+
+        # apportion dispatch by power in the case of multiple generators at a single node
+        gen.dispatch_power = agg_dispatch * ratio
+
+        if gen.is_flexible:
+            generator_m.calculate_lt_generation(gen, res)
+        else:
+            generator_m.update_lt_generation(gen, gen.dispatch_power, res)
+
+    # Update Storages
+    for sto in solution.fleet.storages.values():
+        n = sto.node.order
+        
+        sto.new_build_p = x[sto.candidate_p_x_idx] if sto.candidate_p_x_idx != -1 else 0.0
+        sto.power_capacity = sto.initial_power_capacity + sto.new_build_p
+        
+        sto.new_build_e = x[sto.candidate_e_x_idx] if sto.candidate_e_x_idx != -1 else 0.0
+        sto.energy_capacity = sto.initial_energy_capacity + sto.new_build_e
+
+        # Apportionment mapping
+        if "phes" in sto.unit_type:
+            agg_cap_p, agg_cap_e = assets.CstorageP[n, 0], assets.CstorageE[n, 0]
+            agg_dispatch = ops.Mdischarge[:, n, 0] - ops.Mcharge[:, n, 0]
+            agg_soc = ops.Mstorage[:, n, 0]
+        elif sto.unit_type == "4hr_battery":
+            agg_cap_p, agg_cap_e = assets.CstorageP[n, 1], assets.CstorageE[n, 1]
+            agg_dispatch = ops.Mdischarge[:, n, 1] - ops.Mcharge[:, n, 1]
+            agg_soc = ops.Mstorage[:, n, 1]
+        elif sto.unit_type == "2hr_battery":
+            agg_cap_p, agg_cap_e = assets.CstorageP[n, 2], assets.CstorageE[n, 2]
+            agg_dispatch = ops.Mdischarge[:, n, 2] - ops.Mcharge[:, n, 2]
+            agg_soc = ops.Mstorage[:, n, 2]
+        elif sto.unit_type == "pond":
+            agg_cap_p, agg_cap_e = assets.ChydP[n, 0], assets.ChydE[n, 0]
+            agg_dispatch = ops.Mhydro[:, n, 0]
+            agg_soc = ops.Mreservoir[:, n, 0]
+        elif sto.unit_type == "hydro":
+            agg_cap_p, agg_cap_e = assets.ChydP[n, 1], assets.ChydE[n, 1]
+            agg_dispatch = ops.Mhydro[:, n, 1]
+            agg_soc = ops.Mreservoir[:, n, 1]
+        else:
+            continue
+
+        ratio_p = sto.power_capacity / agg_cap_p if agg_cap_p > 1e-9 else 0.0
+        ratio_e = sto.energy_capacity / agg_cap_e if agg_cap_e > 1e-9 else 0.0
+
+        storage_m.allocate_memory(sto, solution.static.intervals_count)
+        
+        sto.dispatch_power = agg_dispatch * ratio_p
+        sto.stored_energy = agg_soc * ratio_e
+        
+        storage_m.calculate_lt_generation(sto, res)
+
+    # Update Major Lines
+    for line in solution.network.major_lines.values():
+        idx = line.order
+        line.new_build = x[line.candidate_x_idx] if line.candidate_x_idx != -1 else 0.0
+        line.capacity = line.initial_capacity + line.new_build
+        line.flows = ops.Tnetflow[:, idx]
+        line.lt_flows = np.sum(np.abs(line.flows)) * res
+
+    # Update Nodes
+    for node in solution.network.nodes.values():
+        n = node.order
+        node.deficits = ops.Mdeficit[:, n]
+        node.spillage = ops.Mcurtail[:, n]
+        node.imports_exports = ops.Mimport[:, n] - ops.Mexport[:, n]
+        
+    solution.evaluated = solutionTensor.evaluated
+
+    return solution

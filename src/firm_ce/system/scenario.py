@@ -24,6 +24,7 @@ from firm_ce.constructors.traces_cons import (
     unload_data_from_network,
 )
 from firm_ce.system.tensors import StaticTensor, CostTensor
+from firm_ce.backend.tensor.solution import SolutionTensor
 from firm_ce.fast_methods import static_m
 from firm_ce.io.file_manager import DataFile
 from firm_ce.io.data_model import ModelData

@@ -575,8 +575,8 @@ class CostTensor:
         for line in network.major_lines.values():
             n = line.order
             Fval = 1e6 * (
-                (line.capacity * line.length * line.cost.capex_p / line.cost.annuity_factor)
-                + (line.capacity * line.cost.transformer_capex / line.cost.annuity_factor)
+                (line.length * line.cost.capex_p / line.cost.annuity_factor)
+                + (line.cost.transformer_capex / line.cost.annuity_factor)
                 + (line.cost.fom)
             )
             Vval = 1e3 * line.cost.vom / static.years_float

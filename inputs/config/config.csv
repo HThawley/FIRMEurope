@@ -2,8 +2,8 @@ id,name,value
 0,type,mhmga
 1,backend,"tensor"
 2,model_name,FIRMeur_tensor
-3,restart_optimisation,True
-4,save_details,True
+3,restart_optimisation,False
+4,save_details,False
 5,model_location,new
 6,balancing_type,full
 7,fixed_costs_threshold,500

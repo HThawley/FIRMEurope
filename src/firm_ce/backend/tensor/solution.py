@@ -122,7 +122,10 @@ def CalculateCost(
         + Mdischarge_sum[:, 2] * c.Vb2
     ).sum()
 
-    cost += (np.abs(o.Tnetflow).sum(axis=0) * c.Vlines).sum()
+    cost += (
+        a.Clines * c.Flines
+        + np.abs(o.Tnetflow).sum(axis=0) * c.Vlines
+    ).sum()
 
     solution.total_annual_cost = cost
     solution.lcoe = cost / (solution.static.energy / solution.static.years_float)

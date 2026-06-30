@@ -77,8 +77,7 @@ def ReversePassPeak(solution):
         intervals_since_stall_check += 1
         if intervals_since_stall_check >= STALL_WINDOW:
             intervals_since_stall_check = 0
-            if CheckNodeStalls(solution):
-                print("stalled")
+            # if CheckNodeStalls(solution):
                 # return False  # disabled for now
 
 
