@@ -78,7 +78,7 @@ def ReversePassPeak(solution):
         if intervals_since_stall_check >= STALL_WINDOW:
             intervals_since_stall_check = 0
             # if CheckNodeStalls(solution):
-                # return False  # disabled for now
+            #     return False  # disabled for now
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
@@ -181,7 +181,7 @@ def FillPrechargers(solution, t, n, transfer_amount):
     res = solution.static.resolution
     rolling_deficits = solution.operations.rolling_deficits
 
-    for s in range(solution.static.nstor -1, -1, -1):
+    for s in range(solution.static.nstor - 1, -1, -1):
         if solution.operations.precharge_flag[n, s] and transfer_amount > TOLERANCE:
             allocated = min(transfer_amount, solution.operations.charge_max_t[t, n, s])
             solution.operations.Mcharge[t, n, s] += allocated

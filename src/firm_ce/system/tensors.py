@@ -491,35 +491,41 @@ class CostTensor:
         fleet: Fleet_InstanceType,
         network: Network_InstanceType,
     ):
-        # Initialize arrays based on static node dimensions
-        self.Fpfix = np.zeros(static.nodes, dtype=npfloat)
-        self.Fpsat = np.zeros(static.nodes, dtype=npfloat)
-        self.Foffw = np.zeros(static.nodes, dtype=npfloat)
-        self.Fonsw = np.zeros(static.nodes, dtype=npfloat)
-        self.Fbiog = np.zeros(static.nodes, dtype=npfloat)
-        self.Fbiom = np.zeros(static.nodes, dtype=npfloat)
-        self.Fgas = np.zeros(static.nodes, dtype=npfloat)
-        self.Fnuke = np.zeros(static.nodes, dtype=npfloat)
-        self.Fnlte = np.zeros(static.nodes, dtype=npfloat)
-        self.FphP = np.zeros(static.nodes, dtype=npfloat)
-        self.FphE = np.zeros(static.nodes, dtype=npfloat)
-        self.Fb4P = np.zeros(static.nodes, dtype=npfloat)
-        self.Fb2P = np.zeros(static.nodes, dtype=npfloat)
-        self.Flines = np.zeros(static.nhvi, dtype=npfloat)
+        res = static.resolution
+        nodes = static.nodes
+        nhvi = static.nhvi
+        years_float = static.years_float
 
-        self.Vpfix = np.zeros(static.nodes, dtype=npfloat)
-        self.Vpsat = np.zeros(static.nodes, dtype=npfloat)
-        self.Voffw = np.zeros(static.nodes, dtype=npfloat)
-        self.Vonsw = np.zeros(static.nodes, dtype=npfloat)
-        self.Vbiog = np.zeros(static.nodes, dtype=npfloat)
-        self.Vbiom = np.zeros(static.nodes, dtype=npfloat)
-        self.Vgas = np.zeros(static.nodes, dtype=npfloat)
-        self.Vnuke = np.zeros(static.nodes, dtype=npfloat)
-        self.Vnlte = np.zeros(static.nodes, dtype=npfloat)
-        self.Vph = np.zeros(static.nodes, dtype=npfloat)
-        self.Vb4 = np.zeros(static.nodes, dtype=npfloat)
-        self.Vb2 = np.zeros(static.nodes, dtype=npfloat)
-        self.Vlines = np.zeros(static.nhvi, dtype=npfloat)
+        # Initialize arrays based on static node dimensions
+        self.Fpfix = np.zeros(nodes, dtype=npfloat)
+        self.Fpsat = np.zeros(nodes, dtype=npfloat)
+        self.Foffw = np.zeros(nodes, dtype=npfloat)
+        self.Fonsw = np.zeros(nodes, dtype=npfloat)
+        self.Fbiog = np.zeros(nodes, dtype=npfloat)
+        self.Fbiom = np.zeros(nodes, dtype=npfloat)
+        self.Fgas = np.zeros(nodes, dtype=npfloat)
+        self.Fnuke = np.zeros(nodes, dtype=npfloat)
+        self.Fnlte = np.zeros(nodes, dtype=npfloat)
+        self.FphP = np.zeros(nodes, dtype=npfloat)
+        self.FphE = np.zeros(nodes, dtype=npfloat)
+        self.Fb4P = np.zeros(nodes, dtype=npfloat)
+        self.Fb2P = np.zeros(nodes, dtype=npfloat)
+        #  Batteries have no capex_e
+        self.Flines = np.zeros(nhvi, dtype=npfloat)
+
+        self.Vpfix = np.zeros(nodes, dtype=npfloat)
+        self.Vpsat = np.zeros(nodes, dtype=npfloat)
+        self.Voffw = np.zeros(nodes, dtype=npfloat)
+        self.Vonsw = np.zeros(nodes, dtype=npfloat)
+        self.Vbiog = np.zeros(nodes, dtype=npfloat)
+        self.Vbiom = np.zeros(nodes, dtype=npfloat)
+        self.Vgas = np.zeros(nodes, dtype=npfloat)
+        self.Vnuke = np.zeros(nodes, dtype=npfloat)
+        self.Vnlte = np.zeros(nodes, dtype=npfloat)
+        self.Vph = np.zeros(nodes, dtype=npfloat)
+        self.Vb4 = np.zeros(nodes, dtype=npfloat)
+        self.Vb2 = np.zeros(nodes, dtype=npfloat)
+        self.Vlines = np.zeros(nhvi, dtype=npfloat)
         # TODO:  legacy hydro vom. Low priority as currently 0 $
         # self.Vlegacy_hydro
 
@@ -527,7 +533,8 @@ class CostTensor:
             n = gen.node.order
             # Pre-calculate annualized fixed costs per unit capacity
             Fval = 1e6 * ((gen.cost.capex_p / gen.cost.annuity_factor) + gen.cost.fom)
-            Vval = 1e3 * (gen.cost.vom + gen.cost.fuel_cost_mwh) / static.years_float
+            # fuel_cost_h currently 0 for all generators
+            Vval = res * 1e3 * (gen.cost.vom + gen.cost.fuel_cost_mwh) / years_float
             if gen.unit_type == "pv_fixed":
                 self.Fpfix[n] = Fval
                 self.Vpfix[n] = Vval
@@ -560,7 +567,7 @@ class CostTensor:
             n = sto.node.order
             FvalP = 1e6 * ((sto.cost.capex_p / sto.cost.annuity_factor) + sto.cost.fom)
             FvalE = 1e6 * (sto.cost.capex_e / sto.cost.annuity_factor)
-            Vval = 1e3 * sto.cost.vom / static.years_float
+            Vval = res * 1e3 * sto.cost.vom / years_float
             if sto.unit_type == "nphes":
                 self.FphP[n] = FvalP
                 self.FphE[n] = FvalE
@@ -577,11 +584,15 @@ class CostTensor:
             Fval = 1e6 * (
                 (line.length * line.cost.capex_p / line.cost.annuity_factor)
                 + (line.cost.transformer_capex / line.cost.annuity_factor)
-                + (line.cost.fom)
+                + (line.length * line.cost.fom)
             )
-            Vval = 1e3 * line.cost.vom / static.years_float
+            Vval = res * 1e3 * line.cost.vom / years_float
             self.Flines[n] = Fval
             self.Vlines[n] = Vval
+
+        # minor_lines currently have no costs
+        # for line in network.minor_lines.values():
+        #     pass
 
 
 if JIT_ENABLED:
@@ -624,20 +635,22 @@ class AssetTensor:
         x: np.ndarray[npfloat],
         static: StaticTensorType,
     ):
-        self.Cpfix = np.zeros(static.nodes, dtype=npfloat)
-        self.Cpsat = np.zeros(static.nodes, dtype=npfloat)
-        self.Coffw = np.zeros(static.nodes, dtype=npfloat)
-        self.Consw = np.zeros(static.nodes, dtype=npfloat)
-        # self.Cbiog = np.zeros(static.nodes, dtype=npfloat)
-        # self.Cbiom = np.zeros(static.nodes, dtype=npfloat)
-        # self.Cgas = np.zeros(static.nodes, dtype=npfloat)
-        self.Cpeak = np.zeros((static.nodes, static.npeak), dtype=npfloat)
+        nodes = static.nodes
+
+        self.Cpfix = np.zeros(nodes, dtype=npfloat)
+        self.Cpsat = np.zeros(nodes, dtype=npfloat)
+        self.Coffw = np.zeros(nodes, dtype=npfloat)
+        self.Consw = np.zeros(nodes, dtype=npfloat)
+        # self.Cbiog = np.zeros(nodes, dtype=npfloat)
+        # self.Cbiom = np.zeros(nodes, dtype=npfloat)
+        # self.Cgas = np.zeros(nodes, dtype=npfloat)
+        self.Cpeak = np.zeros((nodes, static.npeak), dtype=npfloat)
         self.Cnuke = static.Enuke.copy()
-        self.Cnlte = np.zeros(static.nodes, dtype=npfloat)
+        self.Cnlte = np.zeros(nodes, dtype=npfloat)
         self.ChydP = static.EhydP.copy()
         self.ChydE = static.EhydE.copy()
-        self.CnphP = np.zeros(static.nodes, dtype=npfloat)
-        self.CnphE = np.zeros(static.nodes, dtype=npfloat)
+        self.CnphP = np.zeros(nodes, dtype=npfloat)
+        self.CnphE = np.zeros(nodes, dtype=npfloat)
         self.CstorageP = static.EstorageP.copy()
         self.CstorageE = static.EstorageE.copy()
         self.Clines = static.Elines.copy()
@@ -787,15 +800,21 @@ class OperationTensor:
         static: StaticTensorType,
         assets: AssetTensorType,
     ):
+        nodes = static.nodes
+        intervals = static.intervals
+        nhvi = static.nhvi
+        nhyd = static.nhyd
+        nstor = static.nstor
+
         self.Mpfix = assets.Cpfix * static.TSpfix
         self.Mpsat = assets.Cpsat * static.TSpsat
         self.Monsw = assets.Consw * static.TSonsw
         self.Moffw = assets.Coffw * static.TSoffw
         self.Mnuke = assets.Cnuke * static.TSnuke
-        # self.Mbiog = np.zeros((static.intervals, static.nodes), dtype=npfloat)
-        # self.Mbiom = np.zeros((static.intervals, static.nodes), dtype=npfloat)
-        # self.Mgas = np.zeros((static.intervals, static.nodes), dtype=npfloat)
-        self.Mpeak = np.zeros((static.intervals, static.nodes, static.npeak), dtype=npfloat)
+        # self.Mbiog = np.zeros((intervals, nodes), dtype=npfloat)
+        # self.Mbiom = np.zeros((intervals, nodes), dtype=npfloat)
+        # self.Mgas = np.zeros((intervals, nodes), dtype=npfloat)
+        self.Mpeak = np.zeros((intervals, nodes, static.npeak), dtype=npfloat)
 
         self.Mnetload = (
             static.Mnetload_mror
@@ -810,53 +829,53 @@ class OperationTensor:
         self.Mdeficit = np.maximum(npfloat(0.0), self.Mnetload)
         self.Mcurtail = -np.minimum(npfloat(0.0), self.Mnetload)
 
-        self.Mimport = np.zeros((static.intervals, static.nodes), dtype=npfloat)
-        self.Mexport = np.zeros((static.intervals, static.nodes), dtype=npfloat)
-        self.Tnetflow = np.zeros((static.intervals, static.nhvi), dtype=npfloat)
+        self.Mimport = np.zeros((intervals, nodes), dtype=npfloat)
+        self.Mexport = np.zeros((intervals, nodes), dtype=npfloat)
+        self.Tnetflow = np.zeros((intervals, nhvi), dtype=npfloat)
 
-        self.Mdischarge = np.zeros((static.intervals, static.nodes, static.nstor), dtype=npfloat)
-        self.Mcharge = np.zeros((static.intervals, static.nodes, static.nstor), dtype=npfloat)
-        self.Mstorage = np.zeros((static.intervals, static.nodes, static.nstor), dtype=npfloat)
+        self.Mdischarge = np.zeros((intervals, nodes, nstor), dtype=npfloat)
+        self.Mcharge = np.zeros((intervals, nodes, nstor), dtype=npfloat)
+        self.Mstorage = np.zeros((intervals, nodes, nstor), dtype=npfloat)
         self.Mstorage_init = npfloat(0.5) * assets.CstorageE
-        self.Mphes_spill = np.zeros((static.intervals, static.nodes), dtype=npfloat)
+        self.Mphes_spill = np.zeros((intervals, nodes), dtype=npfloat)
 
-        self.Mhydro = np.zeros((static.intervals, static.nodes, static.nhyd), dtype=npfloat)
-        self.Mreservoir = np.zeros((static.intervals, static.nodes, static.nhyd), dtype=npfloat)
+        self.Mhydro = np.zeros((intervals, nodes, nhyd), dtype=npfloat)
+        self.Mreservoir = np.zeros((intervals, nodes, nhyd), dtype=npfloat)
         self.Mreservoir_init = npfloat(0.5) * assets.ChydE
-        self.Mhyd_spill = np.zeros((static.intervals, static.nodes, static.nhyd), dtype=npfloat)
+        self.Mhyd_spill = np.zeros((intervals, nodes, nhyd), dtype=npfloat)
 
         self.has_deficit_t = False
         self.has_curtail_t = False
 
-        self.cap_fwd = np.empty(static.nhvi, dtype=npfloat)
-        self.cap_rev = np.empty(static.nhvi, dtype=npfloat)
-        self.eff_fwd = np.empty(static.nhvi, dtype=npfloat)
-        self.eff_rev = np.empty(static.nhvi, dtype=npfloat)
-        self.eff = np.empty(static.nodes, dtype=npfloat)
-        self.visited = np.empty(static.nodes, dtype=np.bool_)
-        self.parent_node = np.empty(static.nodes, dtype=npintp)
-        self.parent_line = np.empty(static.nodes, dtype=npintp)
-        self.path_nodes = np.empty(static.nodes, dtype=npintp)
-        self.path_lines = np.empty(static.nodes, dtype=npintp)
-        self.rolling_deficits = np.empty(static.nodes, dtype=npfloat)
-        self.surplus_buffer = np.empty(static.nodes, dtype=npfloat)
-        self.surplus_orig = np.empty(static.nodes, dtype=npfloat)
-        self.fill_buffer = np.empty(static.nodes, dtype=npfloat)
-        self.fill_orig = np.empty(static.nodes, dtype=npfloat)
-        self.stall_checkpoint = np.empty(static.nodes, dtype=npfloat)
-        self.stall_counter = np.empty(static.nodes, dtype=npint)
+        self.cap_fwd = np.empty(nhvi, dtype=npfloat)
+        self.cap_rev = np.empty(nhvi, dtype=npfloat)
+        self.eff_fwd = np.empty(nhvi, dtype=npfloat)
+        self.eff_rev = np.empty(nhvi, dtype=npfloat)
+        self.eff = np.empty(nodes, dtype=npfloat)
+        self.visited = np.empty(nodes, dtype=np.bool_)
+        self.parent_node = np.empty(nodes, dtype=npintp)
+        self.parent_line = np.empty(nodes, dtype=npintp)
+        self.path_nodes = np.empty(nodes, dtype=npintp)
+        self.path_lines = np.empty(nodes, dtype=npintp)
+        self.rolling_deficits = np.empty(nodes, dtype=npfloat)
+        self.surplus_buffer = np.empty(nodes, dtype=npfloat)
+        self.surplus_orig = np.empty(nodes, dtype=npfloat)
+        self.fill_buffer = np.empty(nodes, dtype=npfloat)
+        self.fill_orig = np.empty(nodes, dtype=npfloat)
+        self.stall_checkpoint = np.empty(nodes, dtype=npfloat)
+        self.stall_counter = np.empty(nodes, dtype=npint)
 
-        self.hydro_headroom = np.empty((static.nodes, static.nhyd), dtype=npfloat)
-        self.hydro_min_future = np.zeros((static.nodes, static.nhyd), dtype=npfloat)
+        self.hydro_headroom = np.empty((nodes, nhyd), dtype=npfloat)
+        self.hydro_min_future = np.zeros((nodes, nhyd), dtype=npfloat)
 
-        self.precharge_flag = np.zeros((static.nodes, static.nstor), dtype=np.bool_)
-        self.trickling_flag = np.zeros((static.nodes, static.nstor), dtype=np.bool_)
-        self.storage_min_future = np.zeros((static.nodes, static.nstor), dtype=npfloat)
-        self.storage_max_future = np.zeros((static.nodes, static.nstor), dtype=npfloat)
+        self.precharge_flag = np.zeros((nodes, nstor), dtype=np.bool_)
+        self.trickling_flag = np.zeros((nodes, nstor), dtype=np.bool_)
+        self.storage_min_future = np.zeros((nodes, nstor), dtype=npfloat)
+        self.storage_max_future = np.zeros((nodes, nstor), dtype=npfloat)
 
-        self.charge_max_t = np.zeros((static.intervals, static.nodes, static.nstor), dtype=npfloat)
-        self.discharge_max_t = np.zeros((static.intervals, static.nodes, static.nstor), dtype=npfloat)
-        
+        self.charge_max_t = np.zeros((intervals, nodes, nstor), dtype=npfloat)
+        self.discharge_max_t = np.zeros((intervals, nodes, nstor), dtype=npfloat)
+
         self.remaining_peak_budget = np.zeros((static.years, static.npeak-1), dtype=npfloat)
 
 
