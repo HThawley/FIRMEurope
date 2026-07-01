@@ -24,7 +24,6 @@ from firm_ce.constructors.traces_cons import (
     unload_data_from_network,
 )
 from firm_ce.system.tensors import StaticTensor, CostTensor
-from firm_ce.backend.tensor.solution import SolutionTensor
 from firm_ce.fast_methods import static_m
 from firm_ce.io.file_manager import DataFile
 from firm_ce.io.data_model import ModelData
@@ -154,12 +153,17 @@ class Scenario:
 
         return np.array(lower, npfloat), np.array(upper, npfloat)
 
+    def encode_nodes(self) -> None:
+        self.Nodel = [node.name for node in self.network.nodes.values()]
+        self.Nodel_int = np.arange(len(self.Nodel), dtype=npintp)
+
     def construct_tensors(
         self,
     ):
         if not self.data_status:
             raise RuntimeError("Load datafiles before constructing tensors")
 
+        self.encode_nodes()
         self.staticTensor = StaticTensor(self.static, self.fleet, self.network, self.asset_node_map)
         self.costTensor = CostTensor(self.staticTensor, self.fleet, self.network)
 
@@ -171,7 +175,6 @@ class Scenario:
     def load_datafiles(
         self,
     ) -> None:
-        
         datafiles = self._get_datafiles(self.model_data.datafiles, self.model_data.data_directory)
 
         yeartuple = None

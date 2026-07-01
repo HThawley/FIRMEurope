@@ -6,8 +6,7 @@ from warnings import warn
 
 from firm_ce.analysis.accessor import Accessor
 from firm_ce.common.constants import VALIDATION_TOL
-from firm_ce.backend.scalar.single_time import evaluate
-from firm_ce.backend.scalar.solution import Solution_InstanceType, EvaluateTensor
+from firm_ce.backend.scalar.solution import Solution_InstanceType, evaluate
 from firm_ce.backend.tensor.solution import SolutionTensorType, EvaluateTensor
 from firm_ce.system.scenario import Scenario
 
@@ -348,20 +347,20 @@ class Validation:
 def get_exceedance_stats(exceedance: np.ndarray):
     max_violation = np.max(exceedance)
     count = (exceedance > 0).sum()
-    
+
     if count == 0:
         return max_violation, count, np.nan, np.nan
 
     flat_idx1 = np.argmax(exceedance > 0)
     flat_idx2 = np.argmax(exceedance)
-    
+
     t1 = np.unravel_index(flat_idx1, exceedance.shape)
     t2 = np.unravel_index(flat_idx2, exceedance.shape)
-    
+
     # Revert to scalar for 1D arrays to match legacy string formatting
     if len(t1) == 1:
         t1, t2 = t1[0], t2[0]
-        
+
     return max_violation, count, t1, t2
 
 
@@ -378,7 +377,7 @@ class TensorValidation:
         if not getattr(self.solution, "evaluated", False):
             # Fallback to evaluate if it hasn't been run
             EvaluateTensor(solution)
-            
+
         self.results_dir = results_dir
         self.verbose = True
         self.logs = {}
@@ -448,119 +447,207 @@ class TensorValidation:
     def check_build_bounds(self) -> bool:
         """Check that tensor decision variables are strictly non-negative."""
         passed = True
-        
-        if np.any(self.solution.x < -VALIDATION_TOL):
-            exceedance = np.maximum(-self.solution.x - VALIDATION_TOL, 0)
-            max_violation, count, idx1, idx2 = get_exceedance_stats(exceedance)
+        x = self.solution.x
+        lb = self.scenario.lower_bounds
+        ub = self.scenario.upper_bounds
+
+        lb_exceedance = np.maximum(lb - x - VALIDATION_TOL, 0)
+        if np.any(lb_exceedance > 0):
+            max_violation, count, idx1, idx2 = get_exceedance_stats(lb_exceedance)
             self._log(
-                f"Bounds Violation: x-vector contains values below 0 by up to {max_violation:.4f}. "
-                f"Found {count} negative values. Largest at index {idx2}."
+                f"Bounds Violation: x-vector contains {count} values below lower bound "
+                f"by up to {max_violation:.4f}. Largest violation at index {idx2}."
             )
             passed = False
-            
+
+        ub_exceedance = np.maximum(x - ub - VALIDATION_TOL, 0)
+        if np.any(ub_exceedance > 0):
+            max_violation, count, idx1, idx2 = get_exceedance_stats(ub_exceedance)
+            self._log(
+                f"Bounds Violation: x-vector contains {count} values above upper bound "
+                f"by up to {max_violation:.4f}. Largest violation at index {idx2}."
+            )
+            passed = False
         return passed
 
-    def check_generator_limits(self) -> bool:
+    def _check_1d_trace(self, trace_1d: np.ndarray, capacity: float, label: str) -> bool:
+        """Check a 1D nodal trace is within [0, capacity]. Returns False if any violation found."""
+        passed = True
+        if np.any(trace_1d < -VALIDATION_TOL):
+            exc = np.maximum(-trace_1d - VALIDATION_TOL, 0)
+            max_v, count, t1, t2 = get_exceedance_stats(exc)
+            self._log(
+                f"{label} drops below 0 by up to {max_v:.4f}. "
+                f"Found: {count}. First at t={t1}. Largest at t={t2}."
+            )
+            passed = False
+        if np.any(trace_1d > capacity + VALIDATION_TOL):
+            exc = np.maximum(trace_1d - capacity - VALIDATION_TOL, 0)
+            max_v, count, t1, t2 = get_exceedance_stats(exc)
+            self._log(
+                f"{label} exceeds capacity by up to {max_v:.4f}. "
+                f"Found: {count}. First at t={t1}. Largest at t={t2}."
+            )
+            passed = False
+        return passed
+
+    def check_dispatch_limits(self) -> bool:
         """Check that dispatch values fall between 0 and installed capacity."""
         passed = True
         o = self.solution.operations
         a = self.solution.assets
-        
-        # 1. Non-negativity check for all generation traces
-        traces = {
-            "pfix": o.Mpfix, "psat": o.Mpsat, "offw": o.Moffw, 
-            "onsw": o.Monsw, "nuke": o.Mnuke, "peak": o.Mpeak
-        }
-        
-        for name, trace in traces.items():
-            if np.any(trace < -VALIDATION_TOL):
-                exceedance = np.maximum(-trace - VALIDATION_TOL, 0)
-                max_v, count, t1, t2 = get_exceedance_stats(exceedance)
-                self._log(f"Generator {name} dispatch dropped below 0 by up to {max_v:.4f}. Found: {count}.")
-                passed = False
+        static = self.solution.static
+        nodes = static.nodes
+        nodel = self.scenario.nodel
 
-        # 2. Max Capacity checks (Flexible only since VRE relies on strict TSpfix * Cpfix)
-        # Expansion of Cpeak to match Mpeak shape: (nodes, npeak) -> (1, nodes, npeak)
-        Cpeak_expanded = np.expand_dims(a.Cpeak, axis=0)
-        
-        if np.any(o.Mpeak > Cpeak_expanded + VALIDATION_TOL):
-            exceedance = np.maximum(o.Mpeak - Cpeak_expanded - VALIDATION_TOL, 0)
-            max_v, count, t1, t2 = get_exceedance_stats(exceedance)
-            self._log(f"Peak generator dispatch exceeded capacity by up to {max_v:.4f}. Found: {count}.")
-            passed = False
-            
+        traces_2d = {
+            "pfix": (o.Mpfix, a.Cpfix),
+            "psat": (o.Mpsat, a.Cpsat),
+            "offw": (o.Moffw, a.Coffw),
+            "onsw": (o.Monsw, a.Consw),
+            "nuke": (o.Mnuke, a.Cnuke),
+        }
+        for name, (trace, capacity) in traces_2d.items():
+            for n in range(nodes):
+                passed &= self._check_1d_trace(
+                    trace[:, n], capacity[n], f"Generator ({name}) at {nodel[n]}"
+                )
+
+        # Storage energy: Mdis/charge (intervals, nodes, nstor) vs CstorageP (nodes, nstor)
+        stor_names = {0: "phes", 1: "bess4h", 2: "bess2h"}
+        for s in range(static.nstor):
+            sname = stor_names.get(s, f"stor_{s}")
+            for n in range(nodes):
+                passed &= self._check_1d_trace(
+                    o.Mdischarge[:, n, s], a.CstorageP[n, s], f"Storage discharge ({sname}) at {nodel[n]}"
+                )
+
+                passed &= self._check_1d_trace(
+                    o.Mcharge[:, n, s], a.CstorageP[n, s], f"Storage charge ({sname}) at {nodel[n]}"
+                )
+
+        # Hydro power dispatch: Mhydro (intervals, nodes, nhyd) vs ChydP (nodes, nhyd)
+        hyd_names = {0: "pondage", 1: "reservoir"}
+        for s in range(static.nhyd):
+            hname = hyd_names.get(s, f"hyd_{s}")
+            for n in range(nodes):
+                passed &= self._check_1d_trace(
+                    o.Mhydro[:, n, s], a.ChydP[n, s], f"Hydro ({hname}) at {nodel[n]}"
+                )
+
+        # Peak dispatch: Mpeak (intervals, nodes, npeak) vs Cpeak (nodes, npeak)
+        # Ordering confirmed from StaticTensor: 0=biomass, 1=biogas, 2=ccgt
+        peak_names = {0: "biomass", 1: "biogas", 2: "ccgt"}
+        for s in range(static.npeak):
+            pname = peak_names.get(s, f"peak_{s}")
+            for n in range(nodes):
+                passed &= self._check_1d_trace(
+                    o.Mpeak[:, n, s], a.Cpeak[n, s], f"Generator ({pname}) at {nodel[n]}"
+                )
+
         return passed
 
     def check_transmission_limits(self) -> bool:
-        """Check that transmission lines are within their nominal build capacities."""
+        """Check that net line flows stay within installed capacity in both directions.
+
+        Tnetflow is signed (positive = start→end, negative = end→start). Interconnection
+        enforces cap_fwd = Clines - netflow ≥ 0 and cap_rev = Clines + netflow ≥ 0 at
+        every step, so |Tnetflow| ≤ Clines is a structural invariant. Violations here
+        indicate likely indicate a bug in flow accounting rather than a capacity breach
+        during dispatch.
+        """
         passed = True
         o = self.solution.operations
         a = self.solution.assets
-        
-        # Expand Clines (nhvi,) to match Tnetflow (intervals, nhvi)
-        Clines_expanded = np.expand_dims(a.Clines, axis=0)
-        
-        if np.any(np.abs(o.Tnetflow) > Clines_expanded + VALIDATION_TOL):
-            exceedance = np.maximum(np.abs(o.Tnetflow) - Clines_expanded - VALIDATION_TOL, 0)
-            max_v, count, t1, t2 = get_exceedance_stats(exceedance)
-            self._log(f"Transmission flow exceeded line capacity by up to {max_v:.4f}. Found: {count}.")
-            passed = False
-            
+        s = self.solution.static
+        nodel = self.scenario.nodel
+
+        for i in range(s.nhvi):
+            start = s.network[i, 0]
+            end = s.network[i, 1]
+            label = f"Line {nodel[start]}→{nodel[end]}"
+            abs_flow = np.abs(o.Tnetflow[:, i])
+            if np.any(abs_flow > a.Clines[i] + VALIDATION_TOL):
+                exc = np.maximum(abs_flow - a.Clines[i] - VALIDATION_TOL, 0)
+                max_v, count, t1, t2 = get_exceedance_stats(exc)
+                self._log(
+                    f"{label} net flow exceeds capacity by up to {max_v:.4f}. "
+                    f"Found: {count}. First at t={t1}. Largest at t={t2}."
+                )
+                passed = False
+
         return passed
 
     def check_energy_balance_and_flows(self) -> bool:
-        """Vectorized nodal summation to verify energy balances across all dimensions."""
+        """Verify import/export accounting and nodal energy balance across all intervals.
+
+        The import/export reconstruction from Tnetflow is exact only when no counter-flow
+        occurred. Interconnection uses edge_e = 1/line_eff for counter-flow transfers, which
+        means Mimport/Mexport diverge from the simple f_pos*eff / f_neg*eff formula when a
+        prior flow is being unwound. Reconstruction mismatches on affected nodes are expected
+        in that case. The nodal balance check uses the stored arrays directly and is always
+        authoritative.
+        """
         passed = True
         s = self.solution.static
         o = self.solution.operations
-        
-        # Recalculate imports/exports using the exact tensor network routing rules
+        nodel = self.scenario.nodel
+
+        # Reconstruct Mimport/Mexport from net Tnetflow (exact for non-counter-flow intervals)
         calculated_imports = np.zeros_like(s.Mload)
         calculated_exports = np.zeros_like(s.Mload)
-        
+
         f_pos = np.maximum(o.Tnetflow, 0)
         f_neg = np.maximum(-o.Tnetflow, 0)
-        
+
         for i in range(s.nhvi):
             start = s.network[i, 0]
             end = s.network[i, 1]
             eff = s.line_efficiencies[i]
-            
             calculated_exports[:, start] += f_pos[:, i]
             calculated_imports[:, start] += f_neg[:, i] * eff
-            
             calculated_imports[:, end] += f_pos[:, i] * eff
             calculated_exports[:, end] += f_neg[:, i]
 
-        # 1. Verify Imports/Exports match calculated flows
-        imp_mismatch = np.abs(calculated_imports - o.Mimport)
-        if np.any(imp_mismatch > VALIDATION_TOL):
-            max_v, count, t1, t2 = get_exceedance_stats(np.maximum(imp_mismatch - VALIDATION_TOL, 0))
-            self._log(f"Nodal Import calculations mismatched line flows by up to {max_v:.4f}. Found {count}.")
-            passed = False
+        # Import/export reconstruction vs stored values, per node
+        for n in range(s.nodes):
+            imp_exc = np.maximum(np.abs(calculated_imports[:, n] - o.Mimport[:, n]) - VALIDATION_TOL, 0)
+            if np.any(imp_exc > 0):
+                max_v, count, t1, t2 = get_exceedance_stats(imp_exc)
+                self._log(
+                    f"Import mismatch at {nodel[n]} by up to {max_v:.4f}. "
+                    f"Found: {count}. Largest at t={t2}."
+                )
+                passed = False
 
-        exp_mismatch = np.abs(calculated_exports - o.Mexport)
-        if np.any(exp_mismatch > VALIDATION_TOL):
-            max_v, count, t1, t2 = get_exceedance_stats(np.maximum(exp_mismatch - VALIDATION_TOL, 0))
-            self._log(f"Nodal Export calculations mismatched line flows by up to {max_v:.4f}. Found {count}.")
-            passed = False
+            exp_exc = np.maximum(np.abs(calculated_exports[:, n] - o.Mexport[:, n]) - VALIDATION_TOL, 0)
+            if np.any(exp_exc > 0):
+                max_v, count, t1, t2 = get_exceedance_stats(exp_exc)
+                self._log(
+                    f"Export mismatch at {nodel[n]} by up to {max_v:.4f}. "
+                    f"Found: {count}. Largest at t={t2}."
+                )
+                passed = False
 
-        # 2. Verify Nodal Balance
-        total_gen = (o.Mpfix + o.Mpsat + o.Moffw + o.Monsw + o.Mnuke + 
-                     np.sum(o.Mpeak, axis=2) + np.sum(o.Mdischarge, axis=2) + 
-                     np.sum(o.Mhydro, axis=2) + s.Mror)
-                     
+        # Nodal energy balance: Gen + Imports = Load + Exports + Curtailment - Deficit
+        total_gen = (o.Mpfix + o.Mpsat + o.Moffw + o.Monsw + o.Mnuke
+                     + np.sum(o.Mpeak, axis=2) + np.sum(o.Mdischarge, axis=2)
+                     + np.sum(o.Mhydro, axis=2) + s.Mror)
+
         total_load = s.Mload + np.sum(o.Mcharge, axis=2)
-        
-        # Generation + Imports = Load + Exports + Curtailment - Deficit
+
         nodal_balance = total_gen + o.Mimport - total_load - o.Mexport
         expected_balance = o.Mcurtail - o.Mdeficit
-        
-        balance_mismatch = np.abs(nodal_balance - expected_balance)
-        if np.any(balance_mismatch > VALIDATION_TOL):
-            max_v, count, t1, t2 = get_exceedance_stats(np.maximum(balance_mismatch - VALIDATION_TOL, 0))
-            self._log(f"Energy Balance violated by up to {max_v:.4f}. Found {count}.")
-            passed = False
+
+        for n in range(s.nodes):
+            exc = np.maximum(np.abs(nodal_balance[:, n] - expected_balance[:, n]) - VALIDATION_TOL, 0)
+            if np.any(exc > 0):
+                max_v, count, t1, t2 = get_exceedance_stats(exc)
+                self._log(
+                    f"Energy balance at {nodel[n]} violated by up to {max_v:.4f}. "
+                    f"Found: {count}. Largest at t={t2}."
+                )
+                passed = False
 
         return passed
 
@@ -569,61 +656,76 @@ class TensorValidation:
         passed = True
         o = self.solution.operations
         a = self.solution.assets
-        
-        # General Storage
-        Cstor_expanded = np.expand_dims(a.CstorageE, axis=0)
-        if np.any(o.Mstorage < -VALIDATION_TOL):
-            max_v, count, _, _ = get_exceedance_stats(np.maximum(-o.Mstorage - VALIDATION_TOL, 0))
-            self._log(f"Storage energy dropped below 0 by up to {max_v:.4f}. Found: {count}.")
-            passed = False
-            
-        if np.any(o.Mstorage > Cstor_expanded + VALIDATION_TOL):
-            max_v, count, _, _ = get_exceedance_stats(np.maximum(o.Mstorage - Cstor_expanded - VALIDATION_TOL, 0))
-            self._log(f"Storage energy exceeded capacity by up to {max_v:.4f}. Found: {count}.")
-            passed = False
+        static = self.solution.static
+        nodes = static.nodes
+        nodel = self.scenario.nodel
 
-        # Hydropower / Reservoir
-        Chyd_expanded = np.expand_dims(a.ChydE, axis=0)
-        if np.any(o.Mreservoir < -VALIDATION_TOL):
-            max_v, count, _, _ = get_exceedance_stats(np.maximum(-o.Mreservoir - VALIDATION_TOL, 0))
-            self._log(f"Hydro reservoir energy dropped below 0 by up to {max_v:.4f}. Found: {count}.")
-            passed = False
-            
-        if np.any(o.Mreservoir > Chyd_expanded + VALIDATION_TOL):
-            max_v, count, _, _ = get_exceedance_stats(np.maximum(o.Mreservoir - Chyd_expanded - VALIDATION_TOL, 0))
-            self._log(f"Hydro reservoir energy exceeded capacity by up to {max_v:.4f}. Found: {count}.")
-            passed = False
+        # Storage energy: Mstorage (intervals, nodes, nstor) vs CstorageE (nodes, nstor)
+        # Ordering from StaticTensor: 0=phes, 1=bess4h, 2=bess2h
+        stor_names = {0: "phes", 1: "bess4h", 2: "bess2h"}
+        for s in range(static.nstor):
+            sname = stor_names.get(s, f"stor_{s}")
+            for n in range(nodes):
+                passed &= self._check_1d_trace(
+                    o.Mstorage[:, n, s], a.CstorageE[n, s], f"Storage SOC ({sname}) at {nodel[n]}"
+                )
+
+        # Hydro power dispatch: Mreservoir (intervals, nodes, nhyd) vs ChydE (nodes, nhyd)
+        hyd_names = {0: "pondage", 1: "reservoir"}
+        for s in range(static.nhyd):
+            hname = hyd_names.get(s, f"hyd_{s}")
+            for n in range(nodes):
+                passed &= self._check_1d_trace(
+                    o.Mreservoir[:, n, s], a.ChydE[n, s], f"Hydro SOC ({hname}) at {nodel[n]}"
+                )
 
         return passed
 
     def check_storage_accrual(self) -> bool:
-        """Evaluate discrete interval tracking for state-of-charge consistency."""
+        """Verify state-of-charge transitions obey charge/discharge efficiencies and inflows.
+
+        Checks transitions from t=1 onward; the t=0 state (Mstorage_init → Mstorage[0])
+        is not covered here. PHES inflow is combined with delta before clipping, which
+        differs from GetForwardStorageHeadroom where inflow is clipped independently first —
+        this can produce a false mismatch when the PHES reservoir is near-full and inflow
+        alone would overflow. If that edge case fires frequently, align the clip order with
+        UpdateSOCt.
+        """
         passed = True
         s = self.solution.static
         o = self.solution.operations
         a = self.solution.assets
-        
-        # Broadcast efficiencies to (intervals-1, nodes, nstor)
+        nodel = self.scenario.nodel
+
+        # Compute full expected tensor first, then report per (storage type, node)
+        # eff_c, eff_d: (nstor,) — broadcast over (intervals-1, nodes, nstor)
         eff_c = s.storage_charge_eff
         eff_d = s.storage_discha_eff
-        
+
         expected_delta = (o.Mcharge[1:] * eff_c) - (o.Mdischarge[1:] / eff_d)
-        
-        # Inject PHES inflows strictly at nstor == 0
+
+        # PHES natural inflows injected at nstor == 0 (confirmed index from StaticTensor)
         phes_inflows = np.zeros_like(expected_delta)
         phes_inflows[:, :, 0] = s.TSphes_inflow[1:]
-        
+
         expected_energy = o.Mstorage[:-1] + (expected_delta * s.resolution) + phes_inflows
         Cstor_expanded = np.expand_dims(a.CstorageE, axis=0)
         expected_energy = np.clip(expected_energy, 0.0, Cstor_expanded)
-        
-        mismatch = np.abs(o.Mstorage[1:] - expected_energy)
-        exceedance = np.maximum(mismatch - VALIDATION_TOL, 0)
-        
-        if np.any(exceedance > 0):
-            max_v, count, t1, t2 = get_exceedance_stats(exceedance)
-            self._log(f"Storage Accrual violated by up to {max_v:.4f}. Found {count}. Largest at {t2}.")
-            passed = False
+
+        stor_names = {0: "phes", 1: "bess4h", 2: "bess2h"}
+        for stor_idx in range(s.nstor):
+            sname = stor_names.get(stor_idx, f"stor_{stor_idx}")
+            for n in range(s.nodes):
+                mismatch = np.abs(o.Mstorage[1:, n, stor_idx] - expected_energy[:, n, stor_idx])
+                exc = np.maximum(mismatch - VALIDATION_TOL, 0)
+                if np.any(exc > 0):
+                    max_v, count, t1, t2 = get_exceedance_stats(exc)
+                    # t indices are offset by 1 because the difference array starts at t=1
+                    self._log(
+                        f"Storage accrual ({sname}) at {nodel[n]} mismatched by up to {max_v:.4f}. "
+                        f"Found: {count}. Largest at t={t2 + 1}."
+                    )
+                    passed = False
 
         return passed
 
@@ -632,22 +734,25 @@ class TensorValidation:
         passed = True
         o = self.solution.operations
         s = self.solution.static
-        
+
         if np.any(o.remaining_peak_budget < -VALIDATION_TOL):
             max_v, count, t1, t2 = get_exceedance_stats(np.maximum(-o.remaining_peak_budget - VALIDATION_TOL, 0))
             self._log(f"Fuel limits dropped below 0 by up to {max_v:.4f}. Found: {count}.")
             passed = False
 
-        # Budget depletion check relies on checking year-end totals against static.Bpeak. 
+        # Budget depletion check relies on checking year-end totals against static.Bpeak.
         # (Assuming intervals map to single/multiple years based on static parameters)
         total_peak_consumption = np.sum(o.Mpeak, axis=(0, 1)) * s.resolution
-        
+
         # Only check the bounds that actually have budget data mapped inside static (npeak - 1 dimension)
-        # If total consumption across the model violates the total Bpeak bounds 
+        # If total consumption across the model violates the total Bpeak bounds
         if np.any(total_peak_consumption[:s.npeak-1] > np.sum(s.Bpeak, axis=0) + VALIDATION_TOL):
             exceedance = np.maximum(total_peak_consumption[:s.npeak-1] - np.sum(s.Bpeak, axis=0) - VALIDATION_TOL, 0)
             max_v, count, t1, t2 = get_exceedance_stats(exceedance)
-            self._log(f"Total fuel budget depleted below minimum thresholds by up to {max_v:.4f}.")
+            self._log(
+                f"Total fuel budget depleted below minimum thresholds by up to {max_v:.4f}."
+                f"Found: {count}. Largest at t={t2}."
+            )
             passed = False
 
         return passed
