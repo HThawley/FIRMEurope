@@ -7,7 +7,7 @@ from firm_ce.system.topology import Network_InstanceType
 from firm_ce.common.constants import JIT_ENABLED
 from firm_ce.common.jit_overload import jitclass, njit
 from firm_ce.common.typing import DictType, TypedDict, boolean, nbfloat, npfloat, nbintp, npint, npintp, unicode_type, nbint
-from firm_ce.common.helpers import safe_divide_array
+from firm_ce.common.helpers import safe_divide_2d_1d
 
 
 @njit(boundscheck=True)
@@ -296,12 +296,12 @@ class StaticTensor:
         self.php_nodes = _map
         self.php_len = len(_map)
 
-        _map = asset_node_map.get("2hr_bess", empty_nodes)
+        _map = asset_node_map.get("bess2h", empty_nodes)
         self.b2p_offset = self.php_len + self.php_offset
         self.b2p_nodes = _map
         self.b2p_len = len(_map)
 
-        _map = asset_node_map.get("4hr_bess", empty_nodes)
+        _map = asset_node_map.get("bess4h", empty_nodes)
         self.b4p_offset = self.b2p_len + self.b2p_offset
         self.b4p_nodes = _map
         self.b4p_len = len(_map)
@@ -343,9 +343,9 @@ class StaticTensor:
         for sto in fleet.storages.values():
             if "phes" in sto.unit_type:
                 s = 0  # PHES
-            elif np.isclose(sto.duration, 4.0):
+            elif sto.unit_type == 'bess4h':
                 s = 1  # 4-hour battery
-            elif np.isclose(sto.duration, 2.0):
+            elif sto.unit_type == 'bess2h':
                 s = 2  # 2-hour battery
             self.storage_charge_eff[s] += sto.charge_efficiency
             self.storage_discha_eff[s] += sto.discharge_efficiency
@@ -402,12 +402,12 @@ class StaticTensor:
 
         self.Rnuke_Rnlte_mask = self.Rnlte_mask[self.Rnuke_mask]
         # This ought to be full of 1s and 0s. Future dev
-        self.TSpfix = safe_divide_array(self.TSpfix, counts[0])
-        self.TSpsat = safe_divide_array(self.TSpsat, counts[1])
-        self.TSoffw = safe_divide_array(self.TSoffw, counts[2])
-        self.TSonsw = safe_divide_array(self.TSonsw, counts[3])
-        self.TSnuke = safe_divide_array(self.TSnuke, counts[4])
-        self.TSnlte = safe_divide_array(self.TSnlte, counts[5])
+        safe_divide_2d_1d(self.TSpfix, counts[0], self.TSpfix)
+        safe_divide_2d_1d(self.TSpsat, counts[1], self.TSpsat)
+        safe_divide_2d_1d(self.TSoffw, counts[2], self.TSoffw)
+        safe_divide_2d_1d(self.TSonsw, counts[3], self.TSonsw)
+        safe_divide_2d_1d(self.TSnuke, counts[4], self.TSnuke)
+        safe_divide_2d_1d(self.TSnlte, counts[5], self.TSnlte)
 
         for sto in fleet.storages.values():
             n = sto.node.order
@@ -572,10 +572,10 @@ class CostTensor:
                 self.FphP[n] = FvalP
                 self.FphE[n] = FvalE
                 self.Vph[n] = Vval
-            elif sto.unit_type == "4hr_battery":
+            elif sto.unit_type == "bess4h":
                 self.Fb4P[n] = FvalP
                 self.Vb4[n] = Vval
-            elif sto.unit_type == "2hr_battery":
+            elif sto.unit_type == "bess2h":
                 self.Fb2P[n] = FvalP
                 self.Vb2[n] = Vval
 

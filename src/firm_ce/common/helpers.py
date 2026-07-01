@@ -77,19 +77,47 @@ def njit_safe_divide(
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def safe_divide_array(
-    num: NDArray[nbfloat],
-    denom: NDArray[nbfloat],
+    num: NDArray,
+    denom: NDArray,
+    out: NDArray,
     fail: nbfloat = 0.0,
 ) -> NDArray[nbfloat]:
-    """ Zero-safe division of two arrays. """
-    retarr = num.copy().ravel()
+    """
+    Zero-safe elementwise division of two arrays of the same shape
+    Arrays MUST be C-contiguous
+    """
+    num_ravel = num.ravel()
     denom_ravel = denom.ravel()
-    for i in range(retarr.size):
+    out_ravel = out.ravel()
+    for i in range(out_ravel.size):
         if denom_ravel[i] == 0.0:
-            retarr[i] = fail
+            out_ravel[i] = fail
         else:
-            retarr[i] /= denom_ravel[i]
-    return retarr.reshape(num.shape)
+            out_ravel[i] = num_ravel[i] / denom_ravel[i]
+    return out
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
+def safe_divide_2d_1d(
+    num: NDArray,
+    denom: NDArray,
+    out: NDArray,
+    fail: nbfloat = 0.0,
+) -> NDArray[nbfloat]:
+    """ 
+    Zero-safe division of a 2D array by a 1D array along axis 1.
+    Expects num shape (I, N) and denom shape (N,).
+    """
+    rows, cols = out.shape
+    
+    for i in range(rows):
+        for j in range(cols):
+            if denom[j] == 0:
+                out[i, j] = fail
+            else:
+                out[i, j] = num[i, j] / denom[j]
+                
+    return out
 
 
 def safe_divide2(num: float, denom: Any, zero_fail: float = 0.0) -> Any:

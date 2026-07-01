@@ -549,7 +549,8 @@ class Accessor:
         asset_generation = np.maximum(0, self.get_power_trace(asset))
         spillage = self.get_spillage_trace(asset.node)
 
-        curtailment = spillage * safe_divide_array(asset_generation, nodal_generation)
+        curtailment = np.empty_like(spillage)
+        curtailment = spillage * safe_divide_array(asset_generation, nodal_generation, curtailment)
         return curtailment
 
     def get_expected_curtailment_trace(self, asset: Any) -> NDArray[npfloat]:
@@ -571,7 +572,8 @@ class Accessor:
 
         # Allocate curtailment pro-rata based on the asset's share of the tier's generation
         # If total_tier_gen is 0, asset_gen is 0, so safe_divide handles the 0/0 case correctly.
-        share_of_tier = safe_divide_array(asset_gen, total_tier_gen)
+        share_of_tier = np.empty_like(asset_gen)
+        share_of_tier = safe_divide_array(asset_gen, total_tier_gen, share_of_tier)
 
         return total_tier_curt * share_of_tier
 
@@ -740,7 +742,9 @@ class Accessor:
         exports = self.get_gross_export_trace(node)
 
         # Calculate retention factor per interval, preventing divide
-        retention = np.maximum(0, safe_divide_array(actual_nodal_gen - exports, actual_nodal_gen))
+        retention = np.empty_like(actual_nodal_gen)
+        retention = safe_divide_array(actual_nodal_gen - exports, actual_nodal_gen, retention)
+        retention = np.maximum(0, retention)
         return retention
 
     def get_local_consumption_net(self, asset: Any) -> float:

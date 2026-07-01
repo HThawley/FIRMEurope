@@ -87,8 +87,10 @@ def CalculateCost(
     Mnuke_sum = o.Mnuke.sum(axis=0)
 
     # Apportionment not entirely accurate but this is a miniscule cost component
-    _Mnuke_ratio = safe_divide_array(Mnuke_sum, a.Cnuke)
-    nphes_discharge = safe_divide_array(Mdischarge_sum[:, 0], a.CstorageP[:, 0]) * a.CnphP
+    _Mnuke_ratio = np.empty(solution.static.nodes, npfloat)
+    safe_divide_array(Mnuke_sum, a.Cnuke, _Mnuke_ratio)
+    nphes_discharge = np.empty(solution.static.nodes, npfloat)
+    safe_divide_array(Mdischarge_sum[:, 0], a.CstorageP[:, 0], nphes_discharge) * a.CnphP
 
     cost = solution.static.legacy_costs
     cost += (
