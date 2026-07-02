@@ -289,6 +289,8 @@ class StaticTensor:
                 s = 1  # 4-hour battery
             elif sto.unit_type == 'bess2h':
                 s = 2  # 2-hour battery
+            else:
+                continue
             self.storage_charge_eff[s] += sto.charge_efficiency
             self.storage_discha_eff[s] += sto.discharge_efficiency
             storage_type_count[s] += 1

@@ -185,7 +185,7 @@ class CostTensor:
         for line in network.major_lines.values():
             n = line.order
 
-            ann_build_p, ann_build_e, fom, vom = get_line_costs(line, res, years_float)
+            ann_build_p, fom, vom = get_line_costs(line, res, years_float)
             Fval = ann_build + fom
             Vval = vom
 

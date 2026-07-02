@@ -5,6 +5,12 @@ from firm_ce.common.constants import TOLERANCE
 from firm_ce.system.scenario import Scenario
 from firm_ce.backend.scalar.solution import Solution, Solution_InstanceType
 from firm_ce.backend.tensor.solution import SolutionTensorType
+from firm_ce.system.tensor.costs import (
+    get_generator_costs,
+    get_line_costs,
+    get_storage_costs,
+)
+
 from firm_ce.fast_methods import generator_m, storage_m
 
 
@@ -16,6 +22,7 @@ def map_tensor_to_scalar(
     assets = solutionTensor.assets
     ops = solutionTensor.operations
     res = solutionTensor.static.resolution
+    years_float = solutionTensor.static.years_float
     x = solutionTensor.x
 
     solution = Solution(
@@ -64,8 +71,16 @@ def map_tensor_to_scalar(
 
         if gen.is_flexible:
             generator_m.calculate_lt_generation(gen, res)
+            power_trace = gen.dispatch_power
         else:
             generator_m.update_lt_generation(gen, gen.dispatch_power, res)
+            power_trace = gen.data * gen.capacity
+
+        ann_build, fom, vom, fuel = get_generator_costs(gen, res, years_float)
+        gen.lt_costs.annualised_build_p = ann_build * gen.capacity
+        gen.lt_costs.fom = fom * gen.capacity
+        gen.lt_costs.vom = vom * power_trace.sum()  # res and years already in `vom`
+        gen.lt_costs.fuel = fuel * power_trace.sum()  # res and years already in `fuel`
 
     # Update Storages
     for sto in solution.fleet.storages.values():
@@ -111,6 +126,12 @@ def map_tensor_to_scalar(
 
         storage_m.calculate_lt_generation(sto, res)
 
+        ann_build_p, ann_build_e, fom, vom = get_storage_costs(sto, res, years_float)
+        sto.lt_costs.annualised_build_p = ann_build_p * sto.power_capacity
+        sto.lt_costs.annualised_build_e = ann_build_e * sto.energy_capacity
+        sto.lt_costs.fom = fom * sto.power_capacity
+        sto.lt_costs.vom = vom * sto.dispatch_power.sum()  # res and years already in `vom`
+
     # Update Major Lines
     for line in solution.network.major_lines.values():
         idx = line.order
@@ -118,6 +139,11 @@ def map_tensor_to_scalar(
         line.capacity = line.initial_capacity + line.new_build
         line.flows = ops.Tnetflow[:, idx]
         line.lt_flows = np.sum(np.abs(line.flows)) * res
+
+        ann_build, fom, vom, fuel = get_generator_costs(line, res, years_float)
+        line.lt_costs.annualised_build_p = ann_build_p * line.capacity
+        line.lt_costs.fom = fom * line.capacity
+        line.lt_costs.vom = vom * np.abs(line.flows).sum()
 
     # Update Nodes
     for node in solution.network.nodes.values():

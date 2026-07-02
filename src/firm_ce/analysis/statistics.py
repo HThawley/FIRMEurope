@@ -16,9 +16,9 @@ from firm_ce.common.typing import npfloat
 from firm_ce.analysis.accessor import Accessor
 from firm_ce.io.file_manager import ResultFile
 from firm_ce.backend.scalar.solution import Solution, evaluate
-from firm_ce.system.components import Fleet_InstanceType
-from firm_ce.system.parameters import ScenarioParameters_InstanceType
-from firm_ce.system.topology import Network_InstanceType
+from firm_ce.system.scalar.components import Fleet_InstanceType
+from firm_ce.system.scalar.parameters import ScenarioParameters_InstanceType
+from firm_ce.system.scalar.topology import Network_InstanceType
 
 
 class Statistics:
@@ -128,7 +128,7 @@ class Statistics:
                 row.update(dict(zip(energy_build_types, accessor.get_build_energy(asset, errors="coerce"))))
                 static_data.append(row)
 
-                if accessor.is_node(asset):
+                if is_node:
                     write_trace(meta_data, "Demand", accessor.get_power_trace(asset))
                     write_trace(meta_data, "Spillage", accessor.get_spillage_trace(asset))
                     write_trace(meta_data, "Deficit", accessor.get_deficit_trace(asset))
@@ -544,7 +544,6 @@ class Statistics:
             )
 
         else:
-            # Asset logic remains unchanged
             index_cols = ["Asset Name", "Asset Type", "Unit Type", "Node"]
             df = df_assets.select(index_cols + cost_cols + ["Power Capacity"]).fill_null(0.0)
             df = df.with_columns(pl.sum_horizontal(cost_cols).alias("Total Cost"))

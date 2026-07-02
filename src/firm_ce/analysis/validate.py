@@ -389,7 +389,7 @@ class TensorValidation:
 
         checks = {
             "Decision Variables Bounds": self.check_build_bounds,
-            "Generator Limits": self.check_generator_limits,
+            "Generator Limits": self.check_dispatch_limits,
             "Transmission Limits": self.check_transmission_limits,
             "Energy Balance & Flows": self.check_energy_balance_and_flows,
             "Storage Constraints": self.check_storage_limits,
@@ -498,7 +498,7 @@ class TensorValidation:
         a = self.solution.assets
         static = self.solution.static
         nodes = static.nodes
-        nodel = self.scenario.nodel
+        nodel = self.scenario.Nodel
 
         traces_2d = {
             "pfix": (o.Mpfix, a.Cpfix),
@@ -560,7 +560,7 @@ class TensorValidation:
         o = self.solution.operations
         a = self.solution.assets
         s = self.solution.static
-        nodel = self.scenario.nodel
+        nodel = self.scenario.Nodel
 
         for i in range(s.nhvi):
             start = s.network[i, 0]
@@ -591,7 +591,7 @@ class TensorValidation:
         passed = True
         s = self.solution.static
         o = self.solution.operations
-        nodel = self.scenario.nodel
+        nodel = self.scenario.Nodel
 
         # Reconstruct Mimport/Mexport from net Tnetflow (exact for non-counter-flow intervals)
         calculated_imports = np.zeros_like(s.Mload)
@@ -658,7 +658,7 @@ class TensorValidation:
         a = self.solution.assets
         static = self.solution.static
         nodes = static.nodes
-        nodel = self.scenario.nodel
+        nodel = self.scenario.Nodel
 
         # Storage energy: Mstorage (intervals, nodes, nstor) vs CstorageE (nodes, nstor)
         # Ordering from StaticTensor: 0=phes, 1=bess4h, 2=bess2h
@@ -695,7 +695,7 @@ class TensorValidation:
         s = self.solution.static
         o = self.solution.operations
         a = self.solution.assets
-        nodel = self.scenario.nodel
+        nodel = self.scenario.Nodel
 
         # Compute full expected tensor first, then report per (storage type, node)
         # eff_c, eff_d: (nstor,) — broadcast over (intervals-1, nodes, nstor)
