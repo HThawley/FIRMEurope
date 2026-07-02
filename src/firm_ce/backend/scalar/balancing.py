@@ -10,8 +10,8 @@ from firm_ce.fast_methods import (
     static_m,
     storage_m,
 )
-from firm_ce.system.components import Fleet_InstanceType
-from firm_ce.system.topology import Network_InstanceType
+from firm_ce.system.scalar.components import Fleet_InstanceType
+from firm_ce.system.scalar.topology import Network_InstanceType
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)

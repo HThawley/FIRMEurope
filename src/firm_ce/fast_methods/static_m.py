@@ -1,16 +1,14 @@
 # type: ignore
-from typing import Tuple
 
 import numpy as np
-from numpy.typing import NDArray
 from numba.core.types import UniTuple
 
 from firm_ce.common.constants import FASTMATH, LEAPDAYS, BOUNDSCHECK
 from firm_ce.common.jit_overload import njit
-from firm_ce.common.typing import DictType, boolean, nbfloat, npfloat, nbint, npint, nbintp, npintp
+from firm_ce.common.typing import DictType, boolean, nbfloat, npfloat, nbint, nbintp, npintp
 from firm_ce.fast_methods import node_m
-from firm_ce.system.parameters import ScenarioParameters_InstanceType
-from firm_ce.system.topology import Node_InstanceType
+from firm_ce.system.scalar.parameters import ScenarioParameters_InstanceType
+from firm_ce.system.scalar.topology import Node_InstanceType
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)

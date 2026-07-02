@@ -6,9 +6,9 @@ from firm_ce.common.jit_overload import jitclass, njit
 from firm_ce.common.typing import boolean, nbfloat, unicode_type
 from firm_ce.fast_methods import fleet_m, generator_m, line_m, network_m, static_m, storage_m, ltcosts_m
 from firm_ce.backend.scalar.balancing import balance_for_period
-from firm_ce.system.components import Fleet_InstanceType
-from firm_ce.system.parameters import ScenarioParameters_InstanceType
-from firm_ce.system.topology import Network_InstanceType
+from firm_ce.system.scalar.components import Fleet_InstanceType
+from firm_ce.system.scalar.parameters import ScenarioParameters_InstanceType
+from firm_ce.system.scalar.topology import Network_InstanceType
 
 
 if JIT_ENABLED:

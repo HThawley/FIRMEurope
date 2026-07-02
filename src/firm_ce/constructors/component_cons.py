@@ -6,7 +6,7 @@ import numpy as np
 from firm_ce.common.typing import DictType, TypedDict, nbintp
 from firm_ce.common.helpers import parse_boolean
 from firm_ce.constructors.cost_cons import construct_UnitCost_object
-from firm_ce.system.components import (
+from firm_ce.system.scalar.components import (
     Fleet,
     Fleet_InstanceType,
     Fuel,
@@ -16,7 +16,7 @@ from firm_ce.system.components import (
     Storage,
     Storage_InstanceType,
 )
-from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
+from firm_ce.system.scalar.topology import Line_InstanceType, Node_InstanceType
 
 
 def construct_Fuel_object(

@@ -6,7 +6,7 @@ from firm_ce.common.exceptions import raise_static_modification_error
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import DictType, TypedDict, TypedList, boolean, nbfloat, npfloat, nbint, nbintp, unicode_type
 from firm_ce.fast_methods import line_m, node_m, route_m
-from firm_ce.system.topology import (
+from firm_ce.system.scalar.topology import (
     Line_InstanceType,
     Network,
     Network_InstanceType,
@@ -15,7 +15,7 @@ from firm_ce.system.topology import (
     routes_key_type,
     routes_list_type,
 )
-from firm_ce.system.components import Generator_InstanceType, Storage_InstanceType
+from firm_ce.system.scalar.components import Generator_InstanceType, Storage_InstanceType
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
@@ -205,7 +205,7 @@ def calculate_period_unserved_energy(
         for t in range(first_t, last_t):
             _acc += node.deficits[t] * resolution
         unserved_energy += _acc
-    
+
     return unserved_energy
 
 

@@ -4,8 +4,14 @@ from firm_ce.common.exceptions import raise_static_modification_error
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import DictType, TypedDict, boolean, nbfloat, nbint, nbintp, unicode_type
 from firm_ce.fast_methods import generator_m, storage_m, fuel_m
-from firm_ce.system.components import Fleet, Fleet_InstanceType, Generator_InstanceType, Storage_InstanceType, Fuel_InstanceType
-from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
+from firm_ce.system.scalar.components import (
+    Fleet,
+    Fleet_InstanceType,
+    Fuel_InstanceType,
+    Generator_InstanceType,
+    Storage_InstanceType
+)
+from firm_ce.system.scalar.topology import Line_InstanceType, Node_InstanceType
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)

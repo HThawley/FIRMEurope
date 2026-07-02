@@ -12,8 +12,8 @@ from firm_ce.common.typing import (
     EvaluationRecord_Type,
 )
 from firm_ce.backend.scalar.single_time import Solution, parallel_wrapper
-from firm_ce.system.components import Fleet_InstanceType
-from firm_ce.system.topology import Network_InstanceType
+from firm_ce.system.scalar.components import Fleet_InstanceType
+from firm_ce.system.scalar.topology import Network_InstanceType
 
 
 def near_optimum_path(root: str, scenario_name: str):

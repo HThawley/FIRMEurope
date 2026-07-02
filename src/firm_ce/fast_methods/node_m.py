@@ -8,8 +8,8 @@ from firm_ce.common.exceptions import (
 )
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import DictType, boolean, nbfloat, npfloat, nbint, nbintp, npintp, unicode_type
-from firm_ce.system.components import Generator_InstanceType, Storage_InstanceType
-from firm_ce.system.topology import Node, Node_InstanceType
+from firm_ce.system.scalar.components import Generator_InstanceType, Storage_InstanceType
+from firm_ce.system.scalar.topology import Node, Node_InstanceType
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)

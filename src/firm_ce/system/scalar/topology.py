@@ -17,7 +17,7 @@ from firm_ce.common.typing import (
     unicode_type,
     UniTuple,
 )
-from firm_ce.system.costs import LTCosts, LTCosts_InstanceType, UnitCost_InstanceType
+from firm_ce.system.scalar.costs import LTCosts, LTCosts_InstanceType, UnitCost_InstanceType
 
 if JIT_ENABLED:
     node_spec = [

@@ -1,4 +1,4 @@
-from firm_ce.system.topology import Node
+from firm_ce.system.scalar.topology import Node
 
 
 def test_node_instantiation():

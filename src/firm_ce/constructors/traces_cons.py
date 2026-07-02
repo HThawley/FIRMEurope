@@ -8,8 +8,8 @@ from firm_ce.common.exceptions import ValidationError
 from firm_ce.common.typing import npfloat
 from firm_ce.fast_methods import generator_m, storage_m, node_m, fuel_m
 from firm_ce.io.file_manager import DataFile
-from firm_ce.system.components import Fleet_InstanceType
-from firm_ce.system.topology import Network_InstanceType
+from firm_ce.system.scalar.components import Fleet_InstanceType
+from firm_ce.system.scalar.topology import Network_InstanceType
 from firm_ce.io.aggregation import aggregate_trace
 
 

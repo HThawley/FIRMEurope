@@ -4,7 +4,7 @@ from typing import Tuple
 from firm_ce.common.constants import FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import DictType, TypedList, boolean, nbfloat, nbintp
-from firm_ce.system.topology import Line_InstanceType, Node_InstanceType, Route, Route_InstanceType
+from firm_ce.system.scalar.topology import Line_InstanceType, Node_InstanceType, Route, Route_InstanceType
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)

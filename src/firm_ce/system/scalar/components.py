@@ -4,8 +4,8 @@ import numpy as np
 from firm_ce.common.constants import JIT_ENABLED
 from firm_ce.common.jit_overload import jitclass
 from firm_ce.common.typing import DictType, boolean, nbfloat, npfloat, nbintp, unicode_type
-from firm_ce.system.costs import LTCosts, LTCosts_InstanceType, UnitCost_InstanceType
-from firm_ce.system.topology import Line_InstanceType, Node_InstanceType
+from firm_ce.system.scalar.costs import LTCosts, LTCosts_InstanceType, UnitCost_InstanceType
+from firm_ce.system.scalar.topology import Line_InstanceType, Node_InstanceType
 
 if JIT_ENABLED:
     fuel_spec = [

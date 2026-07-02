@@ -23,12 +23,13 @@ from firm_ce.constructors.traces_cons import (
     unload_data_from_storages,
     unload_data_from_network,
 )
-from firm_ce.system.tensors import StaticTensor, CostTensor
+from firm_ce.system.tensor.static import StaticTensor
+from firm_ce.system.tensor.costs import CostTensor
 from firm_ce.fast_methods import static_m
 from firm_ce.io.file_manager import DataFile
 from firm_ce.io.data_model import ModelData
 from firm_ce.optimisation.solver import get_solver
-from firm_ce.system.parameters import ModelConfig
+from firm_ce.system.scalar.parameters import ModelConfig
 
 
 class Scenario:

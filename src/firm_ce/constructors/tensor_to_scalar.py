@@ -4,13 +4,14 @@ import numpy as np
 from firm_ce.common.constants import TOLERANCE
 from firm_ce.system.scenario import Scenario
 from firm_ce.backend.scalar.solution import Solution, Solution_InstanceType
-from firm_ce.backend.tensor.solution import SolutionTensor, SolutionTensorType
-from firm_ce.fast_methods import generator_m, storage_m, line_m
+from firm_ce.backend.tensor.solution import SolutionTensorType
+from firm_ce.fast_methods import generator_m, storage_m
+
 
 def map_tensor_to_scalar(
     scenario: Scenario,
     solutionTensor: SolutionTensorType,
-    ) -> Solution_InstanceType:
+) -> Solution_InstanceType:
 
     assets = solutionTensor.assets
     ops = solutionTensor.operations
@@ -69,10 +70,10 @@ def map_tensor_to_scalar(
     # Update Storages
     for sto in solution.fleet.storages.values():
         n = sto.node.order
-        
+
         sto.new_build_p = x[sto.candidate_p_x_idx] if sto.candidate_p_x_idx != -1 else 0.0
         sto.power_capacity = sto.initial_power_capacity + sto.new_build_p
-        
+
         sto.new_build_e = x[sto.candidate_e_x_idx] if sto.candidate_e_x_idx != -1 else 0.0
         sto.energy_capacity = sto.initial_energy_capacity + sto.new_build_e
 
@@ -104,10 +105,10 @@ def map_tensor_to_scalar(
         ratio_e = sto.energy_capacity / agg_cap_e if agg_cap_e > 1e-9 else 0.0
 
         storage_m.allocate_memory(sto, solution.static.intervals_count)
-        
+
         sto.dispatch_power = agg_dispatch * ratio_p
         sto.stored_energy = agg_soc * ratio_e
-        
+
         storage_m.calculate_lt_generation(sto, res)
 
     # Update Major Lines
@@ -124,7 +125,7 @@ def map_tensor_to_scalar(
         node.deficits = ops.Mdeficit[:, n]
         node.spillage = ops.Mcurtail[:, n]
         node.imports_exports = ops.Mimport[:, n] - ops.Mexport[:, n]
-        
+
     solution.evaluated = solutionTensor.evaluated
 
     return solution

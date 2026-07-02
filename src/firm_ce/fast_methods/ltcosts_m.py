@@ -2,7 +2,7 @@
 from firm_ce.common.constants import FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import nbfloat, unicode_type
-from firm_ce.system.costs import LTCosts_InstanceType, UnitCost_InstanceType
+from firm_ce.system.scalar.costs import LTCosts_InstanceType, UnitCost_InstanceType
 from firm_ce.common.helpers import njit_safe_divide
 
 

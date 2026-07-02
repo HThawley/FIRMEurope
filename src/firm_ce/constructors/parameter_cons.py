@@ -7,7 +7,7 @@ from numpy.typing import NDArray
 
 from firm_ce.common.constants import LEAPDAYS
 from firm_ce.common.typing import npint, npintp, npfloat
-from firm_ce.system.parameters import ScenarioParameters, ScenarioParameters_InstanceType
+from firm_ce.system.scalar.parameters import ScenarioParameters, ScenarioParameters_InstanceType
 
 
 def determine_interval_parameters(

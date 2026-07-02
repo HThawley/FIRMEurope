@@ -4,17 +4,13 @@ import numpy as np
 from firm_ce.common.constants import JIT_ENABLED, NUM_THREADS, FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import jitclass, njit
 from firm_ce.common.typing import boolean, nbfloat, npfloat
-from firm_ce.system.tensors import (
-    AssetTensor,
-    AssetTensorType,
-    CostTensorType,
-    OperationTensor,
-    OperationTensorType,
-    StaticTensorType,
-)
 from firm_ce.common.helpers import safe_divide_array
 from firm_ce.backend.tensor.simulation import Simulate
 
+from firm_ce.system.tensor.assets import AssetTensor, AssetTensorType
+from firm_ce.system.tensor.costs import CostTensorType
+from firm_ce.system.tensor.operations import OperationTensor, OperationTensorType
+from firm_ce.system.tensor.static import StaticTensorType
 
 if JIT_ENABLED:
     from numba import set_num_threads

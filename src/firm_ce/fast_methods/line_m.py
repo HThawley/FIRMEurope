@@ -8,7 +8,7 @@ from firm_ce.common.exceptions import (
 from firm_ce.common.jit_overload import njit
 from firm_ce.common.typing import DictType, nbfloat, npfloat, nbint, nbintp, unicode_type
 from firm_ce.fast_methods import ltcosts_m
-from firm_ce.system.topology import Line, Line_InstanceType, Node, Node_InstanceType
+from firm_ce.system.scalar.topology import Line, Line_InstanceType, Node, Node_InstanceType
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)

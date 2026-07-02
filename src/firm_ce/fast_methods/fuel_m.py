@@ -3,9 +3,9 @@ import numpy as np
 
 from firm_ce.common.constants import FASTMATH, TOLERANCE, BOUNDSCHECK
 from firm_ce.common.exceptions import raise_static_modification_error, raise_getting_unloaded_data_error
-from firm_ce.common.typing import nbfloat, unicode_type, npfloat, nbintp, nbintp
+from firm_ce.common.typing import nbfloat, unicode_type, npfloat, nbintp
 from firm_ce.common.jit_overload import njit
-from firm_ce.system.components import Fuel, Fuel_InstanceType
+from firm_ce.system.scalar.components import Fuel, Fuel_InstanceType
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
