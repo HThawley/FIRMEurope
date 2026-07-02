@@ -4,10 +4,40 @@ import numpy as np
 from firm_ce.system.scalar.components import Fleet_InstanceType
 from firm_ce.system.scalar.topology import Network_InstanceType
 from firm_ce.common.constants import JIT_ENABLED
-from firm_ce.common.jit_overload import jitclass
+from firm_ce.common.jit_overload import jitclass, njit
 from firm_ce.common.typing import nbfloat, npfloat
 
 from firm_ce.system.tensor.static import StaticTensorType
+
+
+@njit
+def get_generator_costs(gen, res, years_float):
+    annual_build = 1e6 * (gen.cost.capex_p / gen.cost.annuity_factor)
+    fom = 1e6 * gen.cost.fom
+    vom = res * 1e3 * gen.cost.vom / years_float
+    # fuel_cost_h currently 0 for all generators
+    fuel = res * 1e3 * gen.cost.fuel_cost_mwh / years_float
+    return annual_build, fom, vom, fuel
+
+
+@njit
+def get_storage_costs(sto, res, years_float):
+    annual_build_p = 1e6 * (sto.cost.capex_p / sto.cost.annuity_factor)
+    annual_build_e = 1e6 * (sto.cost.capex_e / sto.cost.annuity_factor)
+    fom = 1e6 * sto.cost.fom
+    vom = res * 1e3 * sto.cost.vom / years_float
+    return annual_build_p, annual_build_e, fom, vom
+
+
+@njit
+def get_line_costs(line, res, years_float):
+    annual_build = 1e6 * (
+        (line.length * line.cost.capex_p / line.cost.annuity_factor)
+        + (line.cost.transformer_capex / line.cost.annuity_factor)
+    )
+    fom = 1e6 * (line.length * line.cost.fom)
+    vom = res * 1e3 * line.cost.vom / years_float
+    return annual_build, fom, vom
 
 
 if JIT_ENABLED:
@@ -99,10 +129,12 @@ class CostTensor:
 
         for gen in fleet.generators.values():
             n = gen.node.order
+
             # Pre-calculate annualized fixed costs per unit capacity
-            Fval = 1e6 * ((gen.cost.capex_p / gen.cost.annuity_factor) + gen.cost.fom)
-            # fuel_cost_h currently 0 for all generators
-            Vval = res * 1e3 * (gen.cost.vom + gen.cost.fuel_cost_mwh) / years_float
+            ann_build, fom, vom, fuel = get_generator_costs(gen, res, years_float)
+            Fval = ann_build + fom
+            Vval = vom + fuel
+
             if gen.unit_type == "pv_fixed":
                 self.Fpfix[n] = Fval
                 self.Vpfix[n] = Vval
@@ -133,9 +165,12 @@ class CostTensor:
 
         for sto in fleet.storages.values():
             n = sto.node.order
-            FvalP = 1e6 * ((sto.cost.capex_p / sto.cost.annuity_factor) + sto.cost.fom)
-            FvalE = 1e6 * (sto.cost.capex_e / sto.cost.annuity_factor)
-            Vval = res * 1e3 * sto.cost.vom / years_float
+
+            ann_build_p, ann_build_e, fom, vom = get_storage_costs(sto, res, years_float)
+            FvalP = ann_build_p + fom
+            FvalE = ann_build_e
+            Vval = vom
+
             if sto.unit_type == "nphes":
                 self.FphP[n] = FvalP
                 self.FphE[n] = FvalE
@@ -149,12 +184,11 @@ class CostTensor:
 
         for line in network.major_lines.values():
             n = line.order
-            Fval = 1e6 * (
-                (line.length * line.cost.capex_p / line.cost.annuity_factor)
-                + (line.cost.transformer_capex / line.cost.annuity_factor)
-                + (line.length * line.cost.fom)
-            )
-            Vval = res * 1e3 * line.cost.vom / years_float
+
+            ann_build_p, ann_build_e, fom, vom = get_line_costs(line, res, years_float)
+            Fval = ann_build + fom
+            Vval = vom
+
             self.Flines[n] = Fval
             self.Vlines[n] = Vval
 
