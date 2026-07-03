@@ -8,7 +8,6 @@ from firm_ce.common.helpers import safe_divide_array
 from firm_ce.backend.tensor.simulation import Simulate
 
 from firm_ce.system.tensor.assets import AssetTensor, AssetTensorType
-from firm_ce.system.tensor.costs import CostTensorType
 from firm_ce.system.tensor.operations import OperationTensor, OperationTensorType
 from firm_ce.system.tensor.static import StaticTensorType
 
@@ -22,7 +21,6 @@ if JIT_ENABLED:
 
         # -- Objects --
         ("static", StaticTensorType),
-        ("costs", CostTensorType),
         ("assets", AssetTensorType),
         ("operations", OperationTensorType),
 
@@ -47,11 +45,9 @@ class SolutionTensor:
         self,
         x: np.ndarray[npfloat],
         static: StaticTensorType,
-        costs: CostTensorType,
     ):
         self.x = x
         self.static = static
-        self.costs = costs
         self.assets = AssetTensor(x, self.static)
         self.operations = OperationTensor(self.static, self.assets)
         self.simulated = False
@@ -76,68 +72,70 @@ def CalculateCost(
 ):
     a = solution.assets
     o = solution.operations
-    c = solution.costs
-
-    Mdischarge_sum = o.Mdischarge.sum(axis=0)
-    Mpeak_sum = o.Mpeak.sum(axis=0)
-    Mnuke_sum = o.Mnuke.sum(axis=0)
+    c = solution.static.costs
 
     # Apportionment not entirely accurate but this is a miniscule cost component
-    _Mnuke_ratio = np.empty(solution.static.nodes, npfloat)
-    safe_divide_array(Mnuke_sum, a.Cnuke, _Mnuke_ratio)
-    nphes_discharge = np.empty(solution.static.nodes, npfloat)
-    safe_divide_array(Mdischarge_sum[:, 0], a.CstorageP[:, 0], nphes_discharge) * a.CnphP
+    _Mnuke_ratio = o.Mnuke.sum(axis=0)
+    safe_divide_array(_Mnuke_ratio, a.Cnuke, out=_Mnuke_ratio)
+
+    # Apportionment not entirely accurate but this is a miniscule cost component
+    _Mnphes_ratio = o.Mdischarge[:, :, 0].sum(axis=0)
+    safe_divide_array(_Mnphes_ratio, a.CstorageP[:, 0], out=_Mnphes_ratio)
 
     cost = solution.static.legacy_costs
-    cost += (
-        # Fixed Costs
-        a.Cpfix * c.Fpfix
-        + a.Cpsat * c.Fpsat
-        + a.Coffw * c.Foffw
-        + a.Consw * c.Fonsw
-        + a.Cpeak[:, 1] * c.Fbiog
-        + a.Cpeak[:, 0] * c.Fbiom
-        + a.Cpeak[:, 2] * c.Fgas
-        + (a.Cnuke - a.Cnlte) * c.Fnuke
-        + a.Cnlte * c.Fnlte
-        + a.CnphP * c.FphP
-        + a.CnphE * c.FphE
-        + a.CstorageP[:, 1] * c.Fb4P
-        + a.CstorageP[:, 2] * c.Fb2P
+
+    for n in range(solution.static.nodes):
+        cost += a.Cpfix[n] * c.Fpfix[n]
+        cost += a.Cpsat[n] * c.Fpsat[n]
+        cost += a.Coffw[n] * c.Foffw[n]
+        cost += a.Consw[n] * c.Fonsw[n]
+        cost += a.Cpeak[n, 1] * c.Fbiog[n]
+        cost += a.Cpeak[n, 0] * c.Fbiom[n]
+        cost += a.Cpeak[n, 2] * c.Fgas[n]
+        cost += (a.Cnuke[n] - a.Cnlte[n]) * c.Fnuke[n]
+        cost += a.Cnlte[n] * c.Fnlte[n]
+        cost += a.CnphP[n] * c.FphP[n]
+        cost += a.CnphE[n] * c.FphE[n]
+        cost += a.CstorageP[n, 1] * c.Fb4P[n]
+        cost += a.CstorageP[n, 2] * c.Fb2P[n]
 
         # Variable Costs
-        + o.Mpfix.sum(axis=0) * c.Vpfix
-        + o.Mpsat.sum(axis=0) * c.Vpsat
-        + o.Moffw.sum(axis=0) * c.Voffw
-        + o.Monsw.sum(axis=0) * c.Vonsw
-        + Mpeak_sum[:, 1] * c.Vbiog
-        + Mpeak_sum[:, 0] * c.Vbiom
-        + Mpeak_sum[:, 2] * c.Vgas
-        + (_Mnuke_ratio * (a.Cnuke - a.Cnlte)) * c.Vnuke
-        + (_Mnuke_ratio * a.Cnlte) * c.Vnlte
-        + nphes_discharge * c.Vph
-        + Mdischarge_sum[:, 1] * c.Vb4
-        + Mdischarge_sum[:, 2] * c.Vb2
-    ).sum()
+        cost += (_Mnuke_ratio[n] * (a.Cnuke[n] - a.Cnlte[n])) * c.Vnuke[n]
+        cost += (_Mnuke_ratio[n] * a.Cnlte[n]) * c.Vnlte[n]
+        cost += _Mnphes_ratio[n] * a.CnphP[n] * c.Vph[n]
 
-    cost += (
-        a.Clines * c.Flines
-        + np.abs(o.Tnetflow).sum(axis=0) * c.Vlines
-    ).sum()
+    for t in range(solution.static.intervals):
+        for n in range(solution.static.nodes):
+            cost += o.Mpeak[t, n, 1] * c.Vbiog[n]
+            cost += o.Mpeak[t, n, 0] * c.Vbiom[n]
+            cost += o.Mpeak[t, n, 2] * c.Vgas[n]
+
+            # -- These all have 0.0 vom in current model --
+            # cost += o.Mpfix[t, n] * c.Vpfix[n]
+            # cost += o.Mpsat[t, n] * c.Vpsat[n]
+            # cost += o.Moffw[t, n] * c.Voffw[n]
+            # cost += o.Monsw[t, n] * c.Vonsw[n]
+            # cost += np.abs(o.Tnetflow[t, n]) * c.Vlines[n]
+            # cost += o.Mdischarge[t, n, 1] * c.Vb4[n]
+            # cost += o.Mdischarge[t, n, 2] * c.Vb2[n]
+
+    for n in range(solution.static.nhvi):
+        cost += a.Clines[n] * c.Flines[n]
 
     solution.total_annual_cost = cost
-    solution.lcoe = cost / (solution.static.energy / solution.static.years_float)
+    solution.lcoe = cost / solution.static.mean_annual_demand_mwh
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def EvaluateTensor(
     solution: SolutionTensorType,
 ):
-    # TODO: import Simulate
     Simulate(solution)
     if solution.feasible:
         solution.penalties = 0.0
         solution.estimated_deficit = 0.0
         CalculateCost(solution)
     else:
-        solution.penalties = ...
+        solution.penalties = solution.estimated_deficit
+        CalculateCost(solution)
+    solution.evaluated = True

@@ -1,11 +1,14 @@
+# type: ignore
+import numpy as np
 from typing import Callable, Tuple, Any
 
 from firm_ce.backend.scalar.single_time import evaluate_vectorised_xs as default_st_obj
-from firm_ce.optimisation.mhmga import mga_wrapper as default_mga_obj
-from firm_ce.optimisation.mhmga import mga_wrapper_with_details
+from firm_ce.backend.scalar.mhmga import mga_wrapper as default_mga_obj
+from firm_ce.backend.scalar.mhmga import mga_wrapper_with_details
 
 # TODO: Import alternative backend implementations here
 # from firm_ce.backends.fast_c import fast_single_time as c_st_obj
+from firm_ce.backend.tensor.mhmga import mga_tensor_wrapper
 
 
 def _get_default_args(scenario, config) -> Tuple:
@@ -21,7 +24,6 @@ def _get_default_args(scenario, config) -> Tuple:
 
 def _get_mga_details_args(scenario, config) -> Tuple:
     """Appends the pre-allocated details array for MHMGA."""
-    import numpy as np
 
     # Logic extracted from the old get_mhmga_args
     details = np.empty(
@@ -62,10 +64,10 @@ def build_objective(scenario, config) -> Tuple[Callable, Tuple[Any, ...]]:
             return default_mga_obj, _get_default_args(scenario, config)
 
         elif backend == "tensor":
-            # TODO: new objective
+            # TODO: new objective for details
             if save_details:
-                return mga_wrapper_with_details, _get_mga_details_args(scenario, config)
-            return default_mga_obj, _get_default_args(scenario, config)
+                return mga_tensor_wrapper, _get_mga_details_args(scenario, config)
+            return mga_tensor_wrapper, _get_default_args(scenario, config)
 
         else:
             raise ValueError(f"Unknown backend '{backend}' for {opt_type}.")

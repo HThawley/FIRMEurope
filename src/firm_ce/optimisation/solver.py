@@ -18,7 +18,7 @@ import mga.utils.termination as mgat
 from firm_ce.common.constants import SAVE_POPULATION, PENALTY_MULTIPLIER
 from firm_ce.optimisation.objective_factory import build_objective
 from firm_ce.common.typing import npfloat
-from firm_ce.optimisation.broad_optimum import (
+from firm_ce.backend.scalar.broad_optimum import (
     append_to_midpoint_csv,
     broad_optimum_objective,
     build_broad_optimum_var_info,

@@ -10,6 +10,7 @@ from firm_ce.common.typing import DictType, TypedDict, boolean, nbfloat, npfloat
 from firm_ce.common.helpers import safe_divide_2d_1d
 
 from firm_ce.system.tensor.network import GenerateTensorNetwork
+from firm_ce.system.tensor.costs import CostTensor, CostTensorType
 
 
 if JIT_ENABLED:
@@ -21,6 +22,7 @@ if JIT_ENABLED:
         ("asset_node_map", DictType(unicode_type, nbintp[:])),
 
         # -- Static Data --
+        ("costs", CostTensorType),
         ("years", nbintp),
         ("years_float", nbfloat),
         ("year_of_interval", nbintp[:]),
@@ -155,6 +157,7 @@ class StaticTensor:
         self.nodes = scenario_parameters.node_count
         self.nhvi = network.major_line_count
         self.energy = scenario_parameters.demand_sum_mwh
+        self.mean_annual_demand_mwh = (self.energy / self.years_float)
 
         self.legacy_costs = 0.0
         for gen in fleet.generators.values():
@@ -378,6 +381,8 @@ class StaticTensor:
 
         self.nnuke = self.Rnuke_mask.sum()
         self.nnlte = self.Rnlte_mask.sum()
+
+        self.costs = CostTensor(self, fleet, network)
 
 
 if JIT_ENABLED:
