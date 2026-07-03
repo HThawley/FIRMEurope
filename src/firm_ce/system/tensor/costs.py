@@ -186,7 +186,7 @@ class CostTensor:
             n = line.order
 
             ann_build_p, fom, vom = get_line_costs(line, res, years_float)
-            Fval = ann_build + fom
+            Fval = ann_build_p + fom
             Vval = vom
 
             self.Flines[n] = Fval
