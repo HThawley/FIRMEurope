@@ -137,20 +137,20 @@ def map_tensor_to_scalar(
         idx = line.order
         line.new_build = x[line.candidate_x_idx] if line.candidate_x_idx != -1 else 0.0
         line.capacity = line.initial_capacity + line.new_build
-        line.flows = ops.Tnetflow[:, idx]
+        line.flows = ops.Tnetflow[:, idx].copy()
         line.lt_flows = np.sum(np.abs(line.flows)) * res
 
-        ann_build, fom, vom, fuel = get_generator_costs(line, res, years_float)
-        line.lt_costs.annualised_build_p = ann_build_p * line.capacity
+        ann_build, fom, vom = get_line_costs(line, res, years_float)
+        line.lt_costs.annualised_build_p = ann_build * line.capacity
         line.lt_costs.fom = fom * line.capacity
         line.lt_costs.vom = vom * np.abs(line.flows).sum()
 
     # Update Nodes
     for node in solution.network.nodes.values():
         n = node.order
-        node.deficits = ops.Mdeficit[:, n]
-        node.spillage = ops.Mcurtail[:, n]
-        node.imports_exports = ops.Mimport[:, n] - ops.Mexport[:, n]
+        node.deficits = ops.Mdeficit[:, n].copy()
+        node.spillage = ops.Mcurtail[:, n].copy()
+        node.imports_exports = ops.Mimport[:, n] + ops.Mexport[:, n]  # Mexport is negative
 
     solution.evaluated = solutionTensor.evaluated
 
