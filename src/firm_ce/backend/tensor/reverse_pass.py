@@ -161,7 +161,7 @@ def SetupStorageDonors(solution, t):
             solution.operations.trickling_flag[n, s] = False
             solution.operations.discharge_max_t[t, n, s] = 0.0
 
-        if solution.operations.Mcurtail[t, n] > TOLERANCE:
+        if solution.operations.rolling_deficits[n] <= TOLERANCE:
             for s in range(solution.static.nstor - 1, -1, -1):  # Longest duration first
                 available_e_power = (
                     solution.operations.storage_min_future[n, s]

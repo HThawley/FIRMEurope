@@ -86,6 +86,7 @@ def ForwardPassRenewables(solution):  # noqa: C901
                 )
                 UpdateUnbalancedt(solution, t)
                 UpdateLocalCharge(solution, t)
+                # UpdateLocalDischarge(solution, t)
 
         UpdateSOCt(solution, t)
 

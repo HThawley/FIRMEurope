@@ -97,11 +97,11 @@ def map_tensor_to_scalar(
             agg_cap_p, agg_cap_e = assets.CstorageP[n, 0], assets.CstorageE[n, 0]
             agg_dispatch = ops.Mdischarge[:, n, 0] - ops.Mcharge[:, n, 0]
             agg_soc = ops.Mstorage[:, n, 0]
-        elif sto.unit_type == "4hr_battery":
+        elif sto.unit_type == "bess4h":
             agg_cap_p, agg_cap_e = assets.CstorageP[n, 1], assets.CstorageE[n, 1]
             agg_dispatch = ops.Mdischarge[:, n, 1] - ops.Mcharge[:, n, 1]
             agg_soc = ops.Mstorage[:, n, 1]
-        elif sto.unit_type == "2hr_battery":
+        elif sto.unit_type == "bess2h":
             agg_cap_p, agg_cap_e = assets.CstorageP[n, 2], assets.CstorageE[n, 2]
             agg_dispatch = ops.Mdischarge[:, n, 2] - ops.Mcharge[:, n, 2]
             agg_soc = ops.Mstorage[:, n, 2]
@@ -149,7 +149,7 @@ def map_tensor_to_scalar(
     for node in solution.network.nodes.values():
         n = node.order
         node.deficits = ops.Mdeficit[:, n].copy()
-        node.spillage = ops.Mcurtail[:, n].copy()
+        node.spillage = -ops.Mcurtail[:, n].copy()
         node.imports_exports = ops.Mimport[:, n] + ops.Mexport[:, n]  # Mexport is negative
 
     solution.evaluated = solutionTensor.evaluated
