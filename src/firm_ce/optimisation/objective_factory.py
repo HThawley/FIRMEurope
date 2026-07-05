@@ -67,7 +67,7 @@ def build_objective(scenario, config) -> Tuple[Callable, Tuple[Any, ...]]:
             # TODO: new objective for details
             if save_details:
                 return mga_tensor_wrapper, _get_mga_details_args(scenario, config)
-            return mga_tensor_wrapper, _get_default_args(scenario, config)
+            return mga_tensor_wrapper, (scenario.staticTensor,)
 
         else:
             raise ValueError(f"Unknown backend '{backend}' for {opt_type}.")

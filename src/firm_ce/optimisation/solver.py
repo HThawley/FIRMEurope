@@ -36,11 +36,10 @@ class BaseSolver(ABC):
     def __init__(
         self,
         scenario,
-        config,
         initial_population: Union[NDArray[np.float64], None] = None,
     ):
         self.scenario = scenario
-        self.config = config
+        self.config = scenario.config
         self.decision_x0 = self.scenario.x0 if len(self.scenario.x0) > 0 else None
         self.initial_population = initial_population
         self.result = None
@@ -51,10 +50,6 @@ class BaseSolver(ABC):
     def evaluate(self) -> None:
         """Executes the specific optimization strategy. Must be implemented by subclasses."""
         pass
-
-
-class DeSolverBase(BaseSolver):
-    """ Handles standard Differential Evolution Optimisations """
 
     def initialise_callback(self) -> None:
         out_dir = self.scenario.solution_dir
@@ -70,6 +65,10 @@ class DeSolverBase(BaseSolver):
             for file in files:
                 with open(os.path.join(out_dir, f"{file}.csv"), "w", newline="") as csvfile:
                     csv.writer(csvfile)
+
+
+class DeSolverBase(BaseSolver):
+    """ Handles standard Differential Evolution Optimisations """
 
     def callback(self, intermediate_result: OptimizeResult) -> None:
         out_dir = self.scenario.solution_dir
@@ -538,9 +537,9 @@ class MhmgaSolver(MhmgaSolverBase):
                 writer_latest.writerows(combined_block)
 
             num_niches, pop_size, ndim = population.points.shape
-            details_flat = self.details[:num_niches, :pop_size].reshape(num_niches * pop_size, -1)
 
             if self.config.save_details:
+                details_flat = self.details[:num_niches, :pop_size].reshape(num_niches * pop_size, -1)
                 with open(os.path.join(out_dir, "details.csv"), "a", newline="") as f_all, \
                      open(os.path.join(out_dir, "latest_details.csv"), "w", newline="") as f_latest:
                     writer_all = csv.writer(f_all)
@@ -789,7 +788,6 @@ class MhmgaExtremaSolver(MhmgaSolverBase):
 
 def get_solver(
     scenario,
-    config,
     initial_population: Optional[np.ndarray] = None,
 ) -> BaseSolver:
     """Factory function to instantiate the correct solver strategy."""
@@ -802,15 +800,15 @@ def get_solver(
         "midpoint_explore": BroadOptimumSolver,
     }
 
-    solver_class = strategies.get(config.type)
+    solver_class = strategies.get(scenario.config.type)
 
     if not solver_class:
         raise ValueError(
-            f"Unsupported config.type: '{config.type}'. "
+            f"Unsupported config.type: '{scenario.config.type}'. "
             f"Must be one of {list(strategies.keys())}."
         )
 
-    return solver_class(scenario, config, initial_population)
+    return solver_class(scenario, initial_population)
 
 
 # TODO: dev

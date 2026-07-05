@@ -24,7 +24,6 @@ from firm_ce.constructors.traces_cons import (
     unload_data_from_network,
 )
 from firm_ce.system.tensor.static import StaticTensor
-from firm_ce.system.tensor.costs import CostTensor
 from firm_ce.fast_methods import static_m
 from firm_ce.io.file_manager import DataFile
 from firm_ce.io.data_model import ModelData
@@ -166,12 +165,11 @@ class Scenario:
 
         self.encode_nodes()
         self.staticTensor = StaticTensor(self.static, self.fleet, self.network, self.asset_node_map)
-        self.costTensor = CostTensor(self.staticTensor, self.fleet, self.network)
 
     def deconstruct_tensors(
         self,
     ):
-        del self.staticTensor, self.costTensor
+        del self.staticTensor
 
     def load_datafiles(
         self,

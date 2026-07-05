@@ -654,15 +654,16 @@ def check_type(param_name, param_dict, item):
             if item not in typer[1]:
                 continue
         elif typer[0] == bool:
-            if not item.lower() in ('false', 'none', 'true'):
+            if not str(item).lower() in ('false', 'none', 'true'):
                 continue
         else:  # numeric
-            item = coercive_type_cast(item, typer[0])
-            if not isinstance(item, typer[0]):
+            # Assign to cast_item to prevent overwriting the original string
+            cast_item = coercive_type_cast(item, typer[0])
+            if not isinstance(cast_item, typer[0]):
                 continue
-            if item < typer[1]:
+            if cast_item < typer[1]:
                 continue
-            if item > typer[2]:
+            if cast_item > typer[2]:
                 continue
         typepass = typer[0]
         break
@@ -695,7 +696,7 @@ expected_mga_hyperparameters = {
 
 
 def parse_and_validate_mga(config_dict, model_logger):
-    """Parses, broadcasts, and validates MHMGA parameters, writing them back to the config_dict."""
+    """Parses, broadcasts, validates, and explicitly casts MHMGA parameters."""
     flag = True
     config_by_name = {item["name"]: item for item in config_dict.values()}
     
@@ -709,21 +710,30 @@ def parse_and_validate_mga(config_dict, model_logger):
             model_logger.error("'mga_steps' must be an integer")
             flag = False
 
+    # Helper function to correctly cast resolved types
+    def cast_value(val, target_type):
+        if target_type is bool:
+            return str(val).lower() in ("true", "t", "1", "yes", "y")
+        return target_type(val)
+
     # 2. Parse and Broadcast all schema properties
     for param_name, param_dict in expected_mga_hyperparameters.items():
         string = config_by_name.get(param_name, {}).get("value", param_dict["default"])
         
         try:
             if param_dict["ditherable"]:
-                value = np.array(parse_ditherable_hyperparameter(str(string)))
+                value = np.array(parse_ditherable_hyperparameter(str(string)), dtype=object)
                 if value.shape[0] == 1:
                     value = np.stack((value[0],) * mga_steps)
                 elif value.shape[0] != mga_steps:
                     raise ValueError(f"{param_name} not broadcastable to mga_steps")
-                    
-                for item in value.flatten():
-                    check_type(param_name, param_dict, item)
-                final_value = value
+                
+                # Apply validation and casting across the dithered array
+                cast_arr = np.empty_like(value)
+                for idx, item in np.ndenumerate(value):
+                    valid_type = check_type(param_name, param_dict, item)
+                    cast_arr[idx] = cast_value(item, valid_type)
+                final_value = cast_arr
 
             elif param_dict["broadcastable"]:
                 value = parse_comma_separated(str(string))
@@ -732,20 +742,21 @@ def parse_and_validate_mga(config_dict, model_logger):
                 elif len(value) != mga_steps:
                     raise ValueError(f"{param_name} not broadcastable to mga_steps")
                     
+                # Apply validation and casting across the broadcasted list
                 for i, item in enumerate(value):
                     valid_type = check_type(param_name, param_dict, item)
-                    value[i] = True if str(item).lower() == 'true' else False if valid_type is bool else valid_type(item)
+                    value[i] = cast_value(item, valid_type)
                 final_value = value
 
             else:
+                # Apply validation and casting for standard scalars
                 valid_type = check_type(param_name, param_dict, string)
-                final_value = valid_type(string)
+                final_value = cast_value(string, valid_type)
 
-            # Write the clean Python object back into the raw config dictionary
+            # Write the cast Python object back into the raw config dictionary
             if param_name in config_by_name:
                 config_by_name[param_name]["value"] = final_value
             else:
-                # Add default values missing from the CSV so ModelConfig can access them
                 config_dict[f"auto_{param_name}"] = {"name": param_name, "value": final_value}
 
         except (ValueError, TypeError) as e:
@@ -753,4 +764,3 @@ def parse_and_validate_mga(config_dict, model_logger):
             flag = False
 
     return flag
-

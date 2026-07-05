@@ -66,19 +66,23 @@ class Model:
             data_directory=self.data_directory,
         )
 
-        self.config = ModelConfig(model_data.config)
-        self.config.update(kwargs)  # TODO: add method to allow updating as per dict .update method
-        if self.config.type == "mhmga" and not logging_flag:
-            print(f"WARNING: [MHMGA] Most results will be lost if logging is disabled ({logging_flag=})")
-
         # Initialise the logger
-        model_data.results_dir = init_results_directory(model_data.model_name, logging_flag, self.config.model_location)
+        model_data.results_dir = init_results_directory(
+            model_data.model_name,
+            logging_flag,
+            str(model_data.config_data.get("model_location", "new"))
+        )
         model_data.logger = init_model_logger(model_data.results_dir)
 
         if not model_data.validate():
             raise ValidationError(
                 "Model failed validation. Check the `log.txt` and modify the config and data files to resolve errors."
             )
+
+        self.config = ModelConfig(model_data.config)
+        self.config.update(kwargs)  # TODO: add method to allow updating as per dict .update method
+        if self.config.type == "mhmga" and not logging_flag:
+            print(f"WARNING: [MHMGA] Most results will be lost if logging is disabled ({logging_flag=})")
 
         self.datafile_filenames_dict = model_data.datafiles
         self.scenarios = {
@@ -99,7 +103,7 @@ class Model:
             f"({(datafile_loadtime - start_time).total_seconds():.4f} seconds)."
         )
 
-        de_result = scenario.solve(self.config)
+        de_result = scenario.solve()
 
         solve_time = datetime.now()
         solve_time_str = solve_time.strftime("%d/%m/%Y %H:%M:%S")
@@ -154,7 +158,7 @@ class Model:
             f"[MHMGA] Datafiles loaded at {datafile_loadtime_str} ({(datafile_loadtime - start_time).total_seconds():.4f} seconds)."
         )
 
-        result = scenario.solve(self.config)
+        result = scenario.solve()
 
         solve_time = datetime.now()
         solve_time_str = solve_time.strftime("%d/%m/%Y %H:%M:%S")

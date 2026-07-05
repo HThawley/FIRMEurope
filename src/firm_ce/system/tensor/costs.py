@@ -7,8 +7,6 @@ from firm_ce.common.constants import JIT_ENABLED
 from firm_ce.common.jit_overload import jitclass, njit
 from firm_ce.common.typing import nbfloat, npfloat
 
-from firm_ce.system.tensor.static import StaticTensorType
-
 
 @njit
 def get_generator_costs(gen, res, years_float):
@@ -85,15 +83,13 @@ else:
 class CostTensor:
     def __init__(
         self,
-        static: StaticTensorType,
+        res: float,
+        nodes: int,
+        nhvi: int,
+        years_float: float,
         fleet: Fleet_InstanceType,
         network: Network_InstanceType,
     ):
-        res = static.resolution
-        nodes = static.nodes
-        nhvi = static.nhvi
-        years_float = static.years_float
-
         # Initialize arrays based on static node dimensions
         self.Fpfix = np.zeros(nodes, dtype=npfloat)
         self.Fpsat = np.zeros(nodes, dtype=npfloat)

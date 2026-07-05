@@ -75,6 +75,7 @@ else:
     ScenarioParameters_InstanceType = ScenarioParameters
 
 
+# TODO: move into it's own module
 class ModelConfig:
     def __init__(self, config_dict: Dict[str, str]) -> None:
         # Values have already been parsed and validated in firm_ce.io.data_model
@@ -113,6 +114,7 @@ class ModelConfig:
             self.mga_steps = int(config.get("mga_steps", 1))  # default: 1
 
             for param_name in expected_mga_hyperparameters.keys():
+
                 setattr(self, param_name, config[param_name])
 
     def update(self, new_params: dict) -> None:

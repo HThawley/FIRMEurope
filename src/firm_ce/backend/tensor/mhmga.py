@@ -5,7 +5,7 @@ from firm_ce.common.constants import FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import njit, prange
 from firm_ce.common.typing import nbfloat, npfloat
 from firm_ce.system.tensor.static import StaticTensorType
-from firm_ce.analysis.tensor.solution import SolutionTensor, EvaluateTensor
+from firm_ce.backend.tensor.solution import SolutionTensor, EvaluateTensor
 
 # @njit(parallel=True, fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 # def mga_wrapper_with_details(

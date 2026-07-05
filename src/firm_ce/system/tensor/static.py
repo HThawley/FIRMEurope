@@ -28,6 +28,7 @@ if JIT_ENABLED:
         ("year_of_interval", nbintp[:]),
         ("energy", nbfloat),
         ("legacy_costs", nbfloat),
+        ("mean_annual_demand_mwh", nbfloat),
 
         # -- Object data --
         # (nstor,)
@@ -382,7 +383,14 @@ class StaticTensor:
         self.nnuke = self.Rnuke_mask.sum()
         self.nnlte = self.Rnlte_mask.sum()
 
-        self.costs = CostTensor(self, fleet, network)
+        self.costs = CostTensor(
+            self.resolution,
+            self.nodes,
+            self.nhvi,
+            self.years_float,
+            fleet,
+            network
+        )
 
 
 if JIT_ENABLED:
