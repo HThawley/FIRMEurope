@@ -34,7 +34,6 @@ def ForwardPassRenewables(solution):  # noqa: C901
                 solution.operations.Mcurtail[t],
                 solution.operations.Tnetflow[t],
                 solution.operations.Mimport[t],
-                solution.operations.Mexport[t]
             )
             UpdateUnbalancedt(solution, t)
         UpdateLocalCharge(solution, t)
@@ -50,7 +49,6 @@ def ForwardPassRenewables(solution):  # noqa: C901
                     working_buffer,
                     solution.operations.Tnetflow[t],
                     solution.operations.Mimport[t],
-                    solution.operations.Mexport[t]
                 )
                 UpdateUnbalancedt(solution, t)
                 UpdateLocalDischarge(solution, t)
@@ -65,7 +63,6 @@ def ForwardPassRenewables(solution):  # noqa: C901
                     working_buffer,
                     solution.operations.Tnetflow[t],
                     solution.operations.Mimport[t],
-                    solution.operations.Mexport[t]
                 )
                 UpdateUnbalancedt(solution, t)
                 UpdateLocalDischarge(solution, t)
@@ -82,7 +79,6 @@ def ForwardPassRenewables(solution):  # noqa: C901
                     solution.operations.Mcurtail[t],
                     solution.operations.Tnetflow[t],
                     solution.operations.Mimport[t],
-                    solution.operations.Mexport[t]
                 )
                 UpdateUnbalancedt(solution, t)
                 UpdateLocalCharge(solution, t)
@@ -160,7 +156,6 @@ def NetworkDispatchPeakTier(solution, t, k):
             working_buffer,
             solution.operations.Tnetflow[t],
             solution.operations.Mimport[t],
-            solution.operations.Mexport[t]
         )
         for n in range(nodes):
             dispatched = working_buffer_orig[n] - working_buffer[n]

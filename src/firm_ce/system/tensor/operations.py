@@ -20,7 +20,6 @@ if JIT_ENABLED:
         ("Mcurtail", nbfloat[:, :]),
         ("Munbalanced", nbfloat[:, :]),
         ("Mimport", nbfloat[:, :]),
-        ("Mexport", nbfloat[:, :]),
         ("Mphes_spill", nbfloat[:, :]),
 
         ("Mpfix", nbfloat[:, :]),
@@ -122,7 +121,6 @@ class OperationTensor:
         self.Mcurtail = -np.minimum(npfloat(0.0), self.Mnetload)
 
         self.Mimport = np.zeros((intervals, nodes), dtype=npfloat)
-        self.Mexport = np.zeros((intervals, nodes), dtype=npfloat)
         self.Tnetflow = np.zeros((intervals, nhvi), dtype=npfloat)
 
         self.Mdischarge = np.zeros((intervals, nodes, nstor), dtype=npfloat)

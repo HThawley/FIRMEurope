@@ -11,7 +11,6 @@ def Interconnection(
     Surplust,
     netflowt,
     Importt,
-    Exportt
 ) -> None:  # noqa: C901
     nodes = solution.static.nodes
     nhvi = solution.static.nhvi
@@ -164,7 +163,7 @@ def Interconnection(
                 edge_e = eff_fwd[line] if is_fwd else eff_rev[line]
 
                 # Update nodal boundary injections (Preserves UpdateUnbalancedt logic)
-                Exportt[sender] -= current_flow
+                Importt[sender] -= current_flow
                 Importt[receiver] += current_flow * edge_e
 
                 # Update line netflow state
@@ -197,5 +196,3 @@ def Interconnection(
                 current_flow *= edge_e
 
             Fillt[n] -= received
-
-    return Importt, Exportt

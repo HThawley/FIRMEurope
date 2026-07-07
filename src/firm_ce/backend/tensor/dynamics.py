@@ -27,8 +27,7 @@ def GetSurplust(solution, t, Msurplust):
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
 def UpdateUnbalancedt(solution, t):
     for n in range(solution.static.nodes):
-        _net_trans = solution.operations.Mimport[t, n] + solution.operations.Mexport[t, n]
-        solution.operations.Munbalanced[t, n] = solution.operations.Mnetload[t, n] - _net_trans
+        solution.operations.Munbalanced[t, n] = solution.operations.Mnetload[t, n] - solution.operations.Mimport[t, n]
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")

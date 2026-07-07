@@ -279,7 +279,6 @@ def TrickleStorageHydro(solution, t):  # noqa: C901
             surplus,
             solution.operations.Tnetflow[t],
             solution.operations.Mimport[t],
-            solution.operations.Mexport[t]
         )
 
         for n in range(nodes):
@@ -442,7 +441,6 @@ def NetworkTrickleTier(solution, t, k):
         surplus,
         solution.operations.Tnetflow[t],
         solution.operations.Mimport[t],
-        solution.operations.Mexport[t]
     )
 
     for n in range(nodes):
