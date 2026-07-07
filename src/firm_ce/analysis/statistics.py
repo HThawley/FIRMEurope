@@ -1,6 +1,5 @@
 # type: ignore
 import os
-import shutil
 import time
 
 from re import sub
@@ -11,50 +10,75 @@ import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from firm_ce.common.constants import SAVE_POPULATION
 from firm_ce.common.typing import npfloat
 from firm_ce.analysis.accessor import Accessor
 from firm_ce.io.file_manager import ResultFile
+from firm_ce.constructors.tensor_to_scalar import map_tensor_to_scalar
 from firm_ce.backend.scalar.solution import Solution, evaluate
-from firm_ce.system.scalar.components import Fleet_InstanceType
-from firm_ce.system.scalar.parameters import ScenarioParameters_InstanceType
-from firm_ce.system.scalar.topology import Network_InstanceType
+from firm_ce.backend.tensor.solution import SolutionTensor, EvaluateTensor
 
 
 class Statistics:
     def __init__(
         self,
-        solution_results_directory: str,
-        scenario_name: str,
-        x_candidate: NDArray[npfloat] = None,
-        parameters_static: ScenarioParameters_InstanceType = None,
-        fleet_static: Fleet_InstanceType = None,
-        network_static: Network_InstanceType = None,
-        balancing_type: str = None,
-        fixed_costs_threshold: float = None,
-        copy_callback: bool = True,
+        scenario,
         *,
+        # kwarg only arguments
+        x: NDArray[npfloat] = None,
         solution: Solution = None,
+        solutionTensor: SolutionTensor = None,
+        solution_results_directory: str = None,
     ):
-        self.scenario_name = scenario_name
-        self.balancing_type = balancing_type
+        self.scenario = scenario
 
-        if solution is not None:
+        x_is_None = x is None
+        sol_is_None = solution is None
+        solT_is_None = solutionTensor is None
+
+        # check that inputs are consistent
+        if (not x_is_None) and (not sol_is_None):
+            if not np.isclose(x, solution.x).all():
+                raise ValueError("'x' does not match 'solution.x'")
+        if (not sol_is_None) and (not solT_is_None):
+            if not np.isclose(solution.x, solutionTensor.x).all():
+                raise ValueError("'solution.x' does not match 'solutionTensor.x'")
+        if (not x_is_None) and (not solT_is_None):
+            if not np.isclose(x, solutionTensor.x).all():
+                raise ValueError("'x' does not match 'solutionTensor.x'")
+
+        if all((x_is_None, sol_is_None, solT_is_None)):
+            # If no x or solution provided, try grab from scenario
+            if getattr(scenario, "solution", None) is None:
+                raise ValueError("Initialise 'scenario.solution' or Provide 'x', 'solution', or 'solutionTensor'")
+            self.solution = scenario.solution
+            self.solutionTensor = scenario.solution
+        elif (not sol_is_None):
+            # first, if a 'solution' is provided, use it
             self.solution = solution
-            self.balancing_type = solution.balancing_type
+            self.solutionTensor = solutionTensor
+
             if not getattr(self.solution, "evaluated", False):
                 self._evaluate_solution()
+            # solutionTensor not directly used so does not need to be evaluated (indeed, may be None)
+
+        elif (not solT_is_None):
+            # next, if a 'solutionTensor' is provided, use it
+            self.solutionTensor = solutionTensor
+            if not getattr(self.solutionTensor, "evaluated", False):
+                self._evaluate_solutionTensor()
+            # solution will be "evaluated=True" because solutionTensor was evaluated
+            self.solution = map_tensor_to_scalar(self.scenario, self.solutionTensor)
         else:
-            self.solution = Solution(
-                x_candidate.astype(npfloat), parameters_static, fleet_static, network_static, balancing_type, fixed_costs_threshold
-            )
-            self._evaluate_solution()
+            # next, use x to construct a new solution/solutionTensor
+            self.solution, self.solutionTensor = scenario.build_and_evaluate(x, False)
+
+        if solution_results_directory is None:
+            solution_results_directory = self.scenario.results_dir
 
         self.statistics_dir = self.create_solution_directory(
             solution_results_directory,
-            f"{self.scenario_name}_{self.balancing_type}"
+            f"{self.scenario.name}_{self.scenario.config.balancing_type}"
         )
-        self.copy_temp_files(copy_callback)
         self.result_files = None
 
         self.intervals_count = self.solution.static.intervals_count
@@ -68,7 +92,14 @@ class Statistics:
         evaluate(self.solution)
         end_time = time.time()
         print(f"Statistics solution evaluation time: {end_time - start_time:.4f} seconds")
-        print(f"{self.scenario_name} LCOE: {self.solution.lcoe} [$/MWh], " f"Penalties: {self.solution.penalties}")
+        print(f"{self.scenario.name} LCOE: {self.solution.lcoe} [$/MWh], " f"Penalties: {self.solution.penalties}")
+
+    def _evaluate_solutionTensor(self):
+        start_time = time.time()
+        EvaluateTensor(self.solutionTensor)
+        end_time = time.time()
+        print(f"Statistics solution tensor evaluation time: {end_time - start_time:.4f} seconds")
+        print(f"{self.scenario.name} LCOE: {self.solution.lcoe} [$/MWh], " f"Penalties: {self.solution.penalties}")
 
     def _build_master_tables(self):
         accessor = Accessor(self.solution, "GW")
@@ -185,26 +216,6 @@ class Statistics:
         os.makedirs(solution_dir, exist_ok=True)
         return solution_dir
 
-    def copy_temp_files(self, copy_callback: bool) -> None:
-        if copy_callback:
-            temp_dir = os.path.join("results", "temp")
-            if os.path.exists(os.path.join(temp_dir, "callback.csv")):
-                shutil.copy(
-                    os.path.join(temp_dir, "callback.csv"),
-                    os.path.join(self.statistics_dir, "callback.csv")
-                )
-
-            if SAVE_POPULATION:
-                for file in ("latest_population.csv", "population.csv", "population_energies.csv",
-                             "details.csv", "latest_details.csv"):
-                    temp_path = os.path.join(temp_dir, file)
-                    if os.path.exists(temp_path):
-                        shutil.copy(
-                            temp_path,
-                            os.path.join(self.statistics_dir, file),
-                        )
-        return None
-
     def generate_result_files(self, file='all', write=True, delete=True) -> None:
         """
         Generates all result files using the high-level master DataFrames.
@@ -215,7 +226,8 @@ class Statistics:
                 self.df_static = self._build_master_tables()
 
         file_functions = {
-            "x": self.generate_x_file,
+            "x_abs": self.generate_x_abs_file,
+            "x_rel": self.generate_x_rel_file,
             "nodal_capacity_matrix": self._view_nodal_capacity_matrix,
             "summary_ASSETS": self._view_summary_assets,
             "summary_NODES": self._view_summary_nodes,
@@ -1060,8 +1072,24 @@ class Statistics:
 
         return ResultFile(file_name, self.statistics_dir, df.lazy(), decimals=3, write_kwargs={"multiindex_delimiter": "|"})
 
-    def generate_x_file(self) -> ResultFile:
+    def generate_x_abs_file(self) -> ResultFile:
+        if self.scenario.config.parameterisation == "relative":
+            x_abs = self.solution.x * self.scenario.abs_rel_scaler
+        else:
+            x_abs = self.solution.x
+
         result_file = ResultFile(
-            "x", self.statistics_dir, pd.DataFrame(self.solution.x).T, write_kwargs={"index": False}, decimals=3
+            "x_abs", self.statistics_dir, pd.DataFrame(x_abs).T, write_kwargs={"index": False, "mode": "w"}, decimals=3
+        )
+        return result_file
+
+    def generate_x_rel_file(self) -> ResultFile:
+        if self.scenario.config.parameterisation == "relative":
+            x_rel = self.solution.x
+        else:
+            x_rel = self.solution.x / self.scenario.abs_rel_scaler
+
+        result_file = ResultFile(
+            "x_rel", self.statistics_dir, pd.DataFrame(x_rel).T, write_kwargs={"index": False, "mode": "w"}, decimals=3
         )
         return result_file

@@ -85,6 +85,7 @@ def validate_model_config(config_dict, model_logger):
     flag = True
     validators = {
         "backend": lambda v: str(v).lower() in ("tensor", "scalar"),
+        "parameterisation": lambda v: str(v).lower() in ("relative", "absolute"),
         "mutation": lambda v: validate_range(v, 0, 2, inclusive=False),
         "iterations": validate_positive_int,
         "population": validate_positive_int,

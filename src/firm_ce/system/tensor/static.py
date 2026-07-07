@@ -1,5 +1,6 @@
 # type: ignore
 import numpy as np
+from numpy.typing import NDArray
 
 from firm_ce.system.scalar.parameters import ScenarioParameters_InstanceType
 from firm_ce.system.scalar.components import Fleet_InstanceType
@@ -95,6 +96,7 @@ if JIT_ENABLED:
         ("cache_0_donors", DictType(nbintp, nbintp[:, :])),
 
         # -- x-vector mapping --
+        ("abs_rel_scaler", nbfloat[:]),
         ("pfix_offset", nbintp),
         ("pfix_nodes", nbintp[:]),
         ("pfix_len", nbintp),
@@ -148,6 +150,7 @@ class StaticTensor:
         fleet: Fleet_InstanceType,
         network: Network_InstanceType,
         asset_node_map: TypedDict[unicode_type, nbintp[:]],
+        abs_rel_scaler: NDArray[float],
     ):
         self.resolution = scenario_parameters.resolution
         self.allowance = scenario_parameters.allowance
@@ -159,6 +162,7 @@ class StaticTensor:
         self.nhvi = network.major_line_count
         self.energy = scenario_parameters.demand_sum_mwh
         self.mean_annual_demand_mwh = (self.energy / self.years_float)
+        self.abs_rel_scaler = abs_rel_scaler.copy()
 
         self.legacy_costs = 0.0
         for gen in fleet.generators.values():
@@ -311,6 +315,7 @@ class StaticTensor:
         self.Rnuke_mask = np.zeros(self.nodes, np.bool_)
         self.Rnlte_mask = np.zeros(self.nodes, np.bool_)
 
+        self.Eror = np.zeros(self.nodes, npfloat)
         self.Mror = np.zeros((self.intervals, self.nodes), npfloat)
         self.TSpfix = np.zeros((self.intervals, self.nodes), npfloat)
         self.TSpsat = np.zeros((self.intervals, self.nodes), npfloat)
@@ -337,6 +342,7 @@ class StaticTensor:
                 self.TSonsw[:, n] += gen.data
                 counts[3, n] += 1
             elif gen.unit_type == "ror":
+                self.Eror[n] += gen.initial_capacity
                 self.Mror[:, n] += (gen.initial_capacity * gen.data)
             elif gen.unit_type == "nuclear":
                 self.Rnuke_mask[n] = True

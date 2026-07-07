@@ -77,7 +77,10 @@ def create_dynamic_copy(
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def build_capacity(line_instance: Line_InstanceType, new_build_power_capacity: nbfloat) -> None:
+def build_capacity(
+    line_instance: Line_InstanceType,
+    x_val_capacity: nbfloat
+) -> None:
     """
     Takes a new_build_power_capacity and adds it to the existing capacity and new_build attributes.
 
@@ -96,6 +99,9 @@ def build_capacity(line_instance: Line_InstanceType, new_build_power_capacity: n
     """
     if line_instance.static_instance:
         raise_static_modification_error()
+
+    new_build_power_capacity = x_val_capacity * line_instance.relative_scaler
+
     line_instance.capacity += new_build_power_capacity
     line_instance.new_build += new_build_power_capacity
     return None

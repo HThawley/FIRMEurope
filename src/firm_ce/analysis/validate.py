@@ -157,7 +157,7 @@ class Validation:
             flows = self.accessor.get_power_trace(asset)
 
             if np.any(np.abs(flows) > capacity + VALIDATION_TOL):
-                exceedance = np.maximum(np.max(np.abs(flows)) - capacity - VALIDATION_TOL, 0)
+                exceedance = np.maximum(np.abs(flows) - capacity - VALIDATION_TOL, 0)
                 max_violation, count, t1, t2 = get_exceedance_stats(exceedance)
                 self._log(
                     f"Transmission Violation: {asset.name} flow magnitude exceeds capacity by up to {max_violation:.4f}."
@@ -364,7 +364,7 @@ def get_exceedance_stats(exceedance: np.ndarray):
     return max_violation, count, t1, t2
 
 
-class TensorValidation:
+class ValidationTensor:
     def __init__(
         self,
         solution: SolutionTensorType,
@@ -447,9 +447,13 @@ class TensorValidation:
     def check_build_bounds(self) -> bool:
         """Check that tensor decision variables are strictly non-negative."""
         passed = True
+
         x = self.solution.x
-        lb = self.scenario.lower_bounds
-        ub = self.scenario.upper_bounds
+        if self.scenario.config.parameterisation == "relative":
+            x = self.scenario.convert_x_to_abs(x)
+
+        lb = self.scenario.lower_bounds_abs
+        ub = self.scenario.upper_bounds_abs
 
         lb_exceedance = np.maximum(lb - x - VALIDATION_TOL, 0)
         if np.any(lb_exceedance > 0):
@@ -565,11 +569,12 @@ class TensorValidation:
         for i in range(s.nhvi):
             start = s.network[i, 0]
             end = s.network[i, 1]
-            label = f"Line {nodel[start]}→{nodel[end]}"
             abs_flow = np.abs(o.Tnetflow[:, i])
             if np.any(abs_flow > a.Clines[i] + VALIDATION_TOL):
                 exc = np.maximum(abs_flow - a.Clines[i] - VALIDATION_TOL, 0)
                 max_v, count, t1, t2 = get_exceedance_stats(exc)
+                direction = "→" if o.Tnetflow[t2, i] > 0 else "←"
+                label = f"Line {nodel[start]} {direction} {nodel[end]}"
                 self._log(
                     f"{label} net flow exceeds capacity by up to {max_v:.4f}. "
                     f"Found: {count}. First at t={t1}. Largest at t={t2}."
@@ -579,64 +584,20 @@ class TensorValidation:
         return passed
 
     def check_energy_balance_and_flows(self) -> bool:
-        """Verify import/export accounting and nodal energy balance across all intervals.
-
-        The import/export reconstruction from Tnetflow is exact only when no counter-flow
-        occurred. Interconnection uses edge_e = 1/line_eff for counter-flow transfers, which
-        means Mimport/Mexport diverge from the simple f_pos*eff / f_neg*eff formula when a
-        prior flow is being unwound. Reconstruction mismatches on affected nodes are expected
-        in that case. The nodal balance check uses the stored arrays directly and is always
-        authoritative.
-        """
+        """Verify nodal energy balance across all intervals."""
         passed = True
         s = self.solution.static
         o = self.solution.operations
         nodel = self.scenario.Nodel
 
-        # Reconstruct Mimport/Mexport from net Tnetflow (exact for non-counter-flow intervals)
-        calculated_imports = np.zeros_like(s.Mload)
-        calculated_exports = np.zeros_like(s.Mload)
-
-        f_pos = np.maximum(o.Tnetflow, 0)
-        f_neg = np.maximum(-o.Tnetflow, 0)
-
-        for i in range(s.nhvi):
-            start = s.network[i, 0]
-            end = s.network[i, 1]
-            eff = s.line_efficiencies[i]
-            calculated_exports[:, start] += f_pos[:, i]
-            calculated_imports[:, start] += f_neg[:, i] * eff
-            calculated_imports[:, end] += f_pos[:, i] * eff
-            calculated_exports[:, end] += f_neg[:, i]
-
-        # Import/export reconstruction vs stored values, per node
-        for n in range(s.nodes):
-            imp_exc = np.maximum(np.abs(calculated_imports[:, n] - o.Mimport[:, n]) - VALIDATION_TOL, 0)
-            if np.any(imp_exc > 0):
-                max_v, count, t1, t2 = get_exceedance_stats(imp_exc)
-                self._log(
-                    f"Import mismatch at {nodel[n]} by up to {max_v:.4f}. "
-                    f"Found: {count}. Largest at t={t2}."
-                )
-                passed = False
-
-            exp_exc = np.maximum(np.abs(calculated_exports[:, n] - o.Mexport[:, n]) - VALIDATION_TOL, 0)
-            if np.any(exp_exc > 0):
-                max_v, count, t1, t2 = get_exceedance_stats(exp_exc)
-                self._log(
-                    f"Export mismatch at {nodel[n]} by up to {max_v:.4f}. "
-                    f"Found: {count}. Largest at t={t2}."
-                )
-                passed = False
-
-        # Nodal energy balance: Gen + Imports = Load + Exports + Curtailment - Deficit
+        # Nodal energy balance: Gen + NetImports = Load + Curtailment - Deficit
         total_gen = (o.Mpfix + o.Mpsat + o.Moffw + o.Monsw + o.Mnuke
                      + np.sum(o.Mpeak, axis=2) + np.sum(o.Mdischarge, axis=2)
                      + np.sum(o.Mhydro, axis=2) + s.Mror)
 
         total_load = s.Mload + np.sum(o.Mcharge, axis=2)
 
-        nodal_balance = total_gen + o.Mimport - total_load - o.Mexport
+        nodal_balance = total_gen + o.Mimport - total_load
         expected_balance = o.Mcurtail - o.Mdeficit
 
         for n in range(s.nodes):
@@ -645,7 +606,7 @@ class TensorValidation:
                 max_v, count, t1, t2 = get_exceedance_stats(exc)
                 self._log(
                     f"Energy balance at {nodel[n]} violated by up to {max_v:.4f}. "
-                    f"Found: {count}. Largest at t={t2}."
+                    f"Found: {count}. First at t={t1}. Largest at t={t2}."
                 )
                 passed = False
 

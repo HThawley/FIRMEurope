@@ -27,6 +27,7 @@ if JIT_ENABLED:
         ("order", nbintp),
         ("name", unicode_type),
         ("data_status", boolean),
+        ("mean_demand", nbfloat),
         ("data", nbfloat[:]),
         ("residual_load", nbfloat[:]),
         # Dynamic
@@ -136,6 +137,7 @@ class Node:
         self.name = name
         self.data_status = False
         self.data = np.empty((0,), dtype=npfloat)
+        self.mean_demand = 0.0
 
         self.residual_load = np.empty((0,), dtype=npfloat)
 
@@ -194,6 +196,7 @@ if JIT_ENABLED:
         ("group", unicode_type),
         ("cost", UnitCost_InstanceType),
         ("candidate_x_idx", nbintp),
+        ("relative_scaler", nbfloat),
         # Dynamic
         ("new_build", nbfloat),
         ("capacity", nbfloat),
@@ -315,6 +318,7 @@ class Line:
         self.cost = cost
 
         self.candidate_x_idx = -1
+        self.relative_scaler = 1.0
 
         # Dynamic
         self.new_build = 0.0  # GW

@@ -69,17 +69,18 @@ class Scenario:
             self.network.nodes,
         )
 
-        self.lower_bounds, self.upper_bounds = self.assign_indices_and_get_bounds()
-        self.x0 = self._get_x0(model_data.x0s)
+        self.lower_bounds_abs, self.upper_bounds_abs = self.assign_indices_and_get_abs_bounds()
+        self.x0_abs = self._get_x0(model_data.x0s)
 
-        if len(self.x0) > 0:
-            if (self.x0 - self.lower_bounds).min() < 0 or (self.x0 - self.upper_bounds).max() > 0:
+        if len(self.x0_abs) > 0:
+            if (self.x0_abs - self.lower_bounds_abs).min() < 0 or (self.x0_abs - self.upper_bounds_abs).max() > 0:
                 self.logger.info("Initial guess (x0) is out of bounds. Clipping to bounds.")
-                self.x0 = np.clip(self.x0, self.lower_bounds, self.upper_bounds)
+                self.x0_abs = np.clip(self.x0_abs, self.lower_bounds_abs, self.upper_bounds_abs)
 
         self.statistics = None
         self.assign_unit_type_idx()
         self.get_unit_type_projection_matrix()
+        self.relative_space_constructed = False
 
     def __repr__(self):
         return f"Scenario({self.id!r} {self.name!r})"
@@ -87,7 +88,7 @@ class Scenario:
     def create_solution_directory(self) -> None:
         os.makedirs(self.solution_dir, exist_ok=True)
 
-    def assign_indices_and_get_bounds(self) -> None:
+    def assign_indices_and_get_abs_bounds(self) -> None:
         lower, upper = [], []
         x_index = 0
 
@@ -153,22 +154,154 @@ class Scenario:
 
         return np.array(lower, npfloat), np.array(upper, npfloat)
 
+    def scale_index(self, idx, denominator) -> None:
+        self.lower_bounds_rel[idx] = self.lower_bounds_abs[idx] / denominator
+        self.upper_bounds_rel[idx] = self.upper_bounds_abs[idx] / denominator
+        self.abs_rel_scaler[idx] = denominator
+        if len(self.x0_abs) > 0:
+            self.x0_rel[idx] = self.x0_abs[idx] / denominator
+
+    def construct_relative_space(self) -> None:
+        if not self.data_status:
+            raise RuntimeError("Load datafiles before constructing relative space")
+
+        self.lower_bounds_rel = np.zeros_like(self.lower_bounds_abs)
+        self.upper_bounds_rel = np.zeros_like(self.upper_bounds_abs)
+        self.abs_rel_scaler = np.zeros_like(self.lower_bounds_abs)
+        self._storage_pe_indices = []
+        if len(self.x0_abs) > 0:
+            self.x0_rel = np.zeros_like(self.x0_abs)
+
+        processed_idx = []
+        for gen in self.fleet.generators.values():
+            idx = gen.candidate_x_idx
+            if idx != -1:
+                nodal_demand = gen.node.mean_demand
+                self.scale_index(idx, nodal_demand)
+                processed_idx.append(idx)
+
+        for sto in self.fleet.storages.values():
+            idx_p = sto.candidate_p_x_idx
+            if idx_p != -1:
+                nodal_demand = sto.node.mean_demand
+                self.scale_index(idx_p, nodal_demand)
+                processed_idx.append(idx_p)
+
+            idx_e = sto.candidate_e_x_idx
+            if idx_e != -1:
+                # new-build phes is the only unit type here
+                self.lower_bounds_rel[idx_e] = 8.0
+                self.upper_bounds_rel[idx_e] = 500.0
+                self.abs_rel_scaler[idx_e] = -1.0
+                if len(self.x0_abs) > 0:
+                    self.x0_rel[idx_e] = self.x0_abs[idx_e] / self.x0_abs[idx_p]
+                processed_idx.append(idx_e)
+
+            if idx_p != -1:
+                self._storage_pe_indices.append((idx_p, idx_e))
+
+        for line in self.network.major_lines.values():
+            idx = line.candidate_x_idx
+            if idx != -1:
+                nodal_demand = max(line.node_start.mean_demand, line.node_end.mean_demand)
+                self.scale_index(idx, nodal_demand)
+                processed_idx.append(idx)
+
+        assert (set(range(len(self.lower_bounds_abs))) == set(processed_idx)
+                ), "Not all indices were processed in relative space construction"
+
+        self.relative_space_constructed = True
+
+    def convert_x_to_rel(self, x_abs: NDArray[float]) -> NDArray[float]:
+        if not self.relative_space_constructed:
+            raise RuntimeError("Must have called `scenario.construct_relative_space` before running arbitrary conversion")
+
+        x_rel = x_abs / self.abs_rel_scaler
+
+        for idx_p, idx_e in self._storage_pe_indices:
+            if idx_p != -1 and idx_e != -1:
+                # axis "..." handles 2D of shape (nsolutions, ndim)
+                p_val = np.maximum(x_abs[..., idx_p], 1e-6)  # zero-safe
+                x_rel[..., idx_e] = x_abs[..., idx_e] / p_val
+
+        return x_rel
+
+    def convert_x_to_abs(self, x_rel: NDArray[float]) -> NDArray[float]:
+        if not self.relative_space_constructed:
+            raise RuntimeError("Must have called `scenario.construct_relative_space` before running arbitrary conversion")
+
+        x_abs = x_rel * self.abs_rel_scaler
+
+        for idx_p, idx_e in self._storage_pe_indices:
+            if idx_p != -1 and idx_e != -1:
+                # axis "..." handles 2D of shape (nsolutions, ndim)
+                x_abs[..., idx_e] = x_rel[..., idx_e] * x_abs[..., idx_p]
+
+        return x_abs
+
+    def set_relative_scalers(self) -> None:
+        if self.config.parameterisation == "relative":
+            for gen in self.fleet.generators.values():
+                idx = gen.candidate_x_idx
+                if idx != -1:
+                    gen.relative_scaler = self.abs_rel_scaler[idx]
+
+            for sto in self.fleet.storages.values():
+                idx_p = sto.candidate_p_x_idx
+                if idx_p != -1:
+                    sto.relative_scaler_p = self.abs_rel_scaler[idx_p]
+                idx_e = sto.candidate_e_x_idx
+                if idx_e != -1:
+                    sto.relative_energy = True
+                else:
+                    sto.relative_energy = False
+
+            for line in self.network.major_lines.values():
+                idx = line.candidate_x_idx
+                if idx != -1:
+                    line.relative_scaler = self.abs_rel_scaler[idx]
+
+        elif self.config.parameterisation == "absolute":
+            for gen in self.fleet.generators.values():
+                idx = gen.candidate_x_idx
+                if idx != -1:
+                    gen.relative_scaler = 1.0
+
+            for sto in self.fleet.storages.values():
+                idx_p = sto.candidate_p_x_idx
+                if idx_p != -1:
+                    sto.relative_scaler_p = 1.0
+                sto.relative_energy = False
+
+            for line in self.network.major_lines.values():
+                idx = line.candidate_x_idx
+                if idx != -1:
+                    line.relative_scaler = 1.0
+
+    def set_canonical_bounds_and_x0(self) -> None:
+        if self.config.parameterisation == "relative":
+            self.lower_bounds, self.upper_bounds, self.x0 = self.lower_bounds_rel, self.upper_bounds_rel, self.x0_rel
+        elif self.config.parameterisation == "absolute":
+            self.lower_bounds, self.upper_bounds, self.x0 = self.lower_bounds_abs, self.upper_bounds_abs, self.x0_abs
+        else:
+            raise ValueError(f"Unknown parameterisation type: {self.config.parameterisation}")
+
     def encode_nodes(self) -> None:
         self.Nodel = [node.name for node in self.network.nodes.values()]
         self.Nodel_int = np.arange(len(self.Nodel), dtype=npintp)
 
     def construct_tensors(
         self,
-    ):
+    ) -> None:
         if not self.data_status:
             raise RuntimeError("Load datafiles before constructing tensors")
 
         self.encode_nodes()
-        self.staticTensor = StaticTensor(self.static, self.fleet, self.network, self.asset_node_map)
+        self.staticTensor = StaticTensor(self.static, self.fleet, self.network, self.asset_node_map, self.abs_rel_scaler)
 
     def deconstruct_tensors(
         self,
-    ):
+    ) -> None:
         del self.staticTensor
 
     def load_datafiles(
@@ -218,11 +351,15 @@ class Scenario:
         static_m.set_year_energy_demand(self.static, self.network.nodes)
         self.data_status = True
 
+        if len(self.x0_abs) == 0:
+            self.x0_abs = self._approximate_feasible_solution()
+
+        self.construct_relative_space()
+        self.set_relative_scalers()
+        self.set_canonical_bounds_and_x0()
+
         if self.config.backend == "tensor":
             self.construct_tensors()
-
-        if len(self.x0) == 0:
-            self.x0 = self._approximate_feasible_solution()
 
         return None
 
@@ -277,64 +414,61 @@ class Scenario:
     def _approximate_feasible_solution(self) -> NDArray[npfloat]:
         """ If no initial guess is provided, create an approximate feasible solution."""
         if not self.data_status:
-            self.logger.warning("Datafiles not loaded. Node data is empty; heuristic may fail or return zeros.")
+            raise RuntimeError("Load datafiles before constructing approximate feasible solution")
 
         # Determine the size of the decision vector based on assigned indices
         num_vars = len(self.fleet.generators) + (2 * len(self.fleet.storages)) + len(self.network.major_lines)
         heuristic_x = np.zeros(num_vars, dtype=npfloat)
 
         # Pre-calculate node metrics to avoid redundant array operations
-        node_metrics = {}
-        for node in self.network.nodes.values():
-            node_metrics[node.id] = (
-                np.max(node.data),  # peak
-                np.mean(node.data),  # avg
-            )
+        nodal_demand = {node.id: node.mean_demand for node in self.network.nodes.values()}
 
         factors = {
             # 'name': <approx energy fraction> / <approx capacity factor>
-            "ccgt": 0.2 / 0.3,
-            "pv_fixed": 0.5 / 0.15,
+            "ccgt": 0.1 / 0.3,
+            "pv_fixed": 0.4 / 0.15,
             "pv_track": 0.2 / 0.15,
             "onsw": 0.4 / 0.4,
             "offw": 0.4 / 0.4,
             "biogas": 0.02 / 0.2,
             "biomass": 0.02 / 0.2,
+            "nuclear": 0.1 / 0.9,
         }
 
         for gen in self.fleet.generators.values():
-            peak, avg = node_metrics[gen.node.id]
+            avg = nodal_demand[gen.node.id]
 
             idx = gen.candidate_x_idx
             unit_type = gen.unit_type
             # assignment pattern is avg / <capacity factor> * < net energy contrib.>
-
+            if idx == -1:
+                continue
             if unit_type in factors:
                 heuristic_x[idx] = avg * factors[unit_type]
-
-            if unit_type == "nuclear":
-                if "LTE" in gen.name:
-                    heuristic_x[idx] = gen.max_build
-                else:
-                    heuristic_x[idx] = avg / 0.9 * 0.1
+            if unit_type == "nuclear_LTE":
+                heuristic_x[idx] = gen.max_build
 
         for sto in self.fleet.storages.values():
-            peak, avg = node_metrics[sto.node.id]
+            avg = nodal_demand[sto.node.id]
 
             idx_p = sto.candidate_p_x_idx
+            if idx_p != -1:
+                heuristic_x[idx_p] = avg * 0.33  # multiple types of storage -> at least 1x peak
+
             idx_e = sto.candidate_e_x_idx
-            heuristic_x[idx_p] = peak * 0.2  # multiple types of storage -> at least 1x peak
-            heuristic_x[idx_e] = avg / 0.25 * 24  # only applies to phes, will be clipped for fixed duration battery
+            if idx_e != -1:
+                # supply < 0.25 > of average load for < 48 > hours
+                heuristic_x[idx_e] = avg * 0.25 * 48  # only applies to phes
 
         for line in self.network.major_lines.values():
+            avg = nodal_demand[sto.node.id]
+
             idx = line.candidate_x_idx
-            peak_start, _ = node_metrics[line.node_start.id]
-            peak_end, _ = node_metrics[line.node_end.id]
-            max_connecting_peak = max(peak_start, peak_end)
+            max_connecting_peak = max(nodal_demand[line.node_end.id], nodal_demand[line.node_start.id])
 
             heuristic_x[idx] = max_connecting_peak * 0.25
 
-        return np.clip(heuristic_x, self.lower_bounds, self.upper_bounds)
+        return np.clip(heuristic_x, self.lower_bounds_abs, self.upper_bounds_abs)
 
     def assign_unit_type_idx(self) -> None:
         """
@@ -401,7 +535,7 @@ class Scenario:
             if line.candidate_x_idx != -1:
                 groups[line.unit_type].append(line.candidate_x_idx)
 
-        n_vars = len(self.lower_bounds)
+        n_vars = len(self.lower_bounds_abs)
         k_dims = len(groups)
 
         # Build the (N, K) matrix
@@ -429,6 +563,44 @@ class Scenario:
             evaluate_offspring,
             **hyperparameters,
         )
+
+    def build_and_evaluate_solution(self, x, retain=True):
+        if not self.data_status:
+            raise RuntimeError("Load data first.")
+        x = x.astype(npfloat)
+
+        if self.config.backend == "tensor":
+            from firm_ce.backend.tensor.solution import SolutionTensor, EvaluateTensor
+            from firm_ce.constructors.tensor_to_scalar import map_tensor_to_scalar
+
+            print(f"Building and evaluating tensor solution for scenario: '{self.name}'")
+            solutionTensor = SolutionTensor(x, self.staticTensor)
+            EvaluateTensor(solutionTensor)
+            solution = map_tensor_to_scalar(self, solutionTensor)
+            solutionTensor = solutionTensor
+            solution = solution
+
+        elif self.config.backend == "scalar":
+            from firm_ce.backend.scalar.solution import Solution, evaluate
+
+            print(f"Building and evaluating scalar solution for scenario: '{self.name}'")
+            solution = Solution(
+                x,
+                self.static,
+                self.fleet,
+                self.network,
+                self.config.balancing_type,
+                self.config.fixed_costs_threshold,
+            )
+            evaluate(solution)
+            solutionTensor = None
+            solution = solution
+        else:
+            raise ValueError(f"Unknown config.backend. Got: '{self.config.backend}'")
+        if retain:
+            self.solution = solution
+            self.solutionTensor = solutionTensor
+        return solution, solutionTensor
 
     @staticmethod
     def identify_tech(name: str) -> str:

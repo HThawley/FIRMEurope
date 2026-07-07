@@ -2,6 +2,7 @@
 import numpy as np
 
 from firm_ce.common.constants import TOLERANCE
+from firm_ce.common.typing import npfloat
 from firm_ce.system.scenario import Scenario
 from firm_ce.backend.scalar.solution import Solution, Solution_InstanceType
 from firm_ce.backend.tensor.solution import SolutionTensorType
@@ -23,10 +24,14 @@ def map_tensor_to_scalar(
     ops = solutionTensor.operations
     res = solutionTensor.static.resolution
     years_float = solutionTensor.static.years_float
-    x = solutionTensor.x
+
+    if scenario.config.parameterisation == "relative":
+        x_abs = scenario.convert_x_to_abs(solutionTensor.x)
+    else:
+        x_abs = solutionTensor.x
 
     solution = Solution(
-        x,
+        solutionTensor.x,
         scenario.static,
         scenario.fleet,
         scenario.network,
@@ -36,9 +41,10 @@ def map_tensor_to_scalar(
 
     for gen in solution.fleet.generators.values():
         n = gen.node.order
+        x_idx = gen.candidate_x_idx
 
-        gen.new_build = x[gen.candidate_x_idx] if gen.candidate_x_idx != -1 else 0.0
-        gen.capacity = gen.initial_capacity + gen.new_build
+        gen.new_build = x_abs[x_idx] if x_idx != -1 else 0.0
+        gen.capacity = npfloat(gen.initial_capacity) + npfloat(gen.new_build)
 
         if gen.unit_type == "pv_fixed":
             agg_cap, agg_dispatch = assets.Cpfix[n], ops.Mpfix[:, n]
@@ -58,10 +64,12 @@ def map_tensor_to_scalar(
             agg_cap, agg_dispatch = assets.Cnuke[n], ops.Mnuke[:, n]
         elif gen.unit_type == "nuclear_lte":
             agg_cap, agg_dispatch = assets.Cnuke[n], ops.Mnuke[:, n]
+        elif gen.unit_type == "ror":
+            agg_cap, agg_dispatch = solutionTensor.static.Eror[n], solutionTensor.static.Mror[:, n]
         else:
             continue
 
-        ratio = gen.capacity / agg_cap if agg_cap > TOLERANCE else 0.0
+        ratio = npfloat(gen.capacity) / agg_cap if agg_cap > TOLERANCE else 0.0
 
         if gen.is_flexible:
             generator_m.allocate_memory(gen, solution.static.intervals_count)
@@ -85,11 +93,13 @@ def map_tensor_to_scalar(
     # Update Storages
     for sto in solution.fleet.storages.values():
         n = sto.node.order
+        p_idx = sto.candidate_p_x_idx
+        e_idx = sto.candidate_e_x_idx
 
-        sto.new_build_p = x[sto.candidate_p_x_idx] if sto.candidate_p_x_idx != -1 else 0.0
+        sto.new_build_p = x_abs[p_idx] if p_idx != -1 else 0.0
         sto.power_capacity = sto.initial_power_capacity + sto.new_build_p
 
-        sto.new_build_e = x[sto.candidate_e_x_idx] if sto.candidate_e_x_idx != -1 else 0.0
+        sto.new_build_e = x_abs[e_idx] if e_idx != -1 else 0.0
         sto.energy_capacity = sto.initial_energy_capacity + sto.new_build_e
 
         # Apportionment mapping
@@ -135,7 +145,9 @@ def map_tensor_to_scalar(
     # Update Major Lines
     for line in solution.network.major_lines.values():
         idx = line.order
-        line.new_build = x[line.candidate_x_idx] if line.candidate_x_idx != -1 else 0.0
+        x_idx = line.candidate_x_idx
+
+        line.new_build = x_abs[x_idx] if x_idx != -1 else 0.0
         line.capacity = line.initial_capacity + line.new_build
         line.flows = ops.Tnetflow[:, idx].copy()
         line.lt_flows = np.sum(np.abs(line.flows)) * res
@@ -150,8 +162,8 @@ def map_tensor_to_scalar(
         n = node.order
         node.deficits = ops.Mdeficit[:, n].copy()
         node.spillage = -ops.Mcurtail[:, n].copy()
-        node.imports_exports = ops.Mimport[:, n] + ops.Mexport[:, n]  # Mexport is negative
+        node.imports_exports = ops.Mimport[:, n]  # Mexport is negative
 
     solution.evaluated = solutionTensor.evaluated
-
+    solution.penalties = solutionTensor.penalties
     return solution

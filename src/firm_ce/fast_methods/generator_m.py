@@ -54,11 +54,16 @@ def create_dynamic_copy(
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def build_capacity(
     generator_instance: Generator_InstanceType,
-    new_build_power_capacity: nbfloat,
+    new_build_x_val: nbfloat,
     resolution: nbfloat,
 ) -> None:
     if generator_instance.static_instance:
         raise_static_modification_error()
+
+    # if parameterisation == "relative", then new_build_x_val is a relative value and must be scaled
+    # otherwise, it is an absolute value and .relative_scaler == 1.0
+    new_build_power_capacity = new_build_x_val * generator_instance.relative_scaler
+
     generator_instance.capacity += new_build_power_capacity
     generator_instance.new_build += new_build_power_capacity
     generator_instance.heat_base_consumption = generator_instance.capacity * generator_instance.cost.heat_rate_base  # GWh/h

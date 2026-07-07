@@ -129,6 +129,7 @@ if JIT_ENABLED:
         ("data_status", boolean),
         ("data", nbfloat[:]),
         ("candidate_x_idx", nbintp),
+        ("relative_scaler", nbfloat),
         # Dynamic
         ("new_build", nbfloat),
         ("capacity", nbfloat),
@@ -250,6 +251,7 @@ class Generator:
         self.data = np.empty((0,), dtype=npfloat)
 
         self.candidate_x_idx = -1
+        self.relative_scaler = 1.0
 
         # Dynamic
         self.new_build = 0.0  # GW
@@ -299,6 +301,8 @@ if JIT_ENABLED:
         ("candidate_e_x_idx", nbintp),
         ("data_status", boolean),
         ("data", nbfloat[:]),
+        ("relative_scaler_p", nbfloat),
+        ("relative_energy", boolean),
         # Dynamic
         ("new_build_p", nbfloat),
         ("new_build_e", nbfloat),
@@ -379,6 +383,8 @@ class Storage:
 
         self.candidate_p_x_idx = -1
         self.candidate_e_x_idx = -1
+        self.relative_scaler_p = 1.0
+        self.relative_energy = False
         if self.inflows:
             self.data_status = False
             self.data = np.empty((0,), dtype=npfloat)

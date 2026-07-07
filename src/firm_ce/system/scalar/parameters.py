@@ -83,6 +83,7 @@ class ModelConfig:
 
         self.type = config["type"]
         self.backend = config.get("backend", "scalar")
+        self.parameterisation = config.get("parameterisation", "absolute")
         self.model_name = config["model_name"]
 
         self.restart_optimisation = parse_boolean(config.get("restart_from_temp", False))

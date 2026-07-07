@@ -40,7 +40,7 @@ class BaseSolver(ABC):
     ):
         self.scenario = scenario
         self.config = scenario.config
-        self.decision_x0 = self.scenario.x0 if len(self.scenario.x0) > 0 else None
+        self.x0 = self.scenario.x0 if len(self.scenario.x0) > 0 else None
         self.initial_population = initial_population
         self.result = None
 
@@ -93,7 +93,7 @@ class DeSolverBase(BaseSolver):
 
     def run_differential_evolution(self, objective_function, fargs) -> OptimizeResult:
         result = differential_evolution(
-            x0=self.decision_x0,
+            x0=self.x0,
             func=objective_function,
             bounds=list(zip(self.scenario.lower_bounds, self.scenario.upper_bounds)),
             args=fargs,
@@ -138,7 +138,7 @@ class BroadOptimumSolver(DeSolverBase):
     def get_band_lcoe_max(self) -> float:
         from firm_ce.backend.scalar.solution import Solution
 
-        solution = Solution(self.decision_x0, *self.fargs)
+        solution = Solution(self.x0, *self.fargs)
         # TODO: evaluation??
         if solution.penalties > 1:
             self.scenario.logger.warning(
@@ -452,12 +452,12 @@ class MhmgaSolver(MhmgaSolverBase):
             x0 = previous[0]
         else:
             previous = None
-            x0 = self.decision_x0
+            x0 = self.x0_rel
 
         problem = OptimizationProblem(
             objective=self.objective_function,
             fargs=self.fargs,
-            bounds=(self.scenario.lower_bounds, self.scenario.upper_bounds),
+            bounds=(self.scenario.lower_bounds_rel, self.scenario.upper_bounds_rel),
             maximize=False,
             vectorized=True,
             constraints=True,

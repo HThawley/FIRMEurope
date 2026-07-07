@@ -66,6 +66,8 @@ class Model:
             data_directory=self.data_directory,
         )
 
+        model_data.config_data.update(kwargs)
+
         # Initialise the logger
         model_data.results_dir = init_results_directory(
             model_data.model_name,
@@ -80,7 +82,8 @@ class Model:
             )
 
         self.config = ModelConfig(model_data.config)
-        self.config.update(kwargs)  # TODO: add method to allow updating as per dict .update method
+        # self.config.update(kwargs)
+
         if self.config.type == "mhmga" and not logging_flag:
             print(f"WARNING: [MHMGA] Most results will be lost if logging is disabled ({logging_flag=})")
 
@@ -112,17 +115,7 @@ class Model:
             f"({(solve_time - datafile_loadtime).total_seconds()/(60*60):.4f} hours)."
         )
 
-        scenario.statistics = Statistics(
-            scenario.results_dir,
-            scenario.name,
-            de_result.x,
-            scenario.static,
-            scenario.fleet,
-            scenario.network,
-            self.config.balancing_type,
-            self.config.fixed_costs_threshold,
-            True,
-        )
+        scenario.statistics = Statistics(scenario, x=de_result.x)
         scenario.statistics.generate_result_files()
         scenario.statistics.write_results()
 
@@ -167,17 +160,7 @@ class Model:
             f"({(solve_time - datafile_loadtime).total_seconds()/(60*60):.4f} hours)."
         )
 
-        scenario.statistics = Statistics(
-            scenario.results_dir,
-            scenario.name,
-            result,
-            scenario.static,
-            scenario.fleet,
-            scenario.network,
-            self.config.balancing_type,
-            self.config.fixed_costs_threshold,
-            True,
-        )
+        scenario.statistics = Statistics(scenario, x=result)
         scenario.statistics.generate_result_files()
         scenario.statistics.write_results()
 
