@@ -452,7 +452,7 @@ class MhmgaSolver(MhmgaSolverBase):
             x0 = previous[0]
         else:
             previous = None
-            x0 = self.x0_rel
+            x0 = self.scenario.x0_rel
 
         problem = OptimizationProblem(
             objective=self.objective_function,
