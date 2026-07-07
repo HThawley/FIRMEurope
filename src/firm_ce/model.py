@@ -7,7 +7,7 @@ from firm_ce.common.exceptions import ValidationError
 from firm_ce.common.logging import init_results_directory, init_model_logger
 from firm_ce.io.data_model import ModelData
 from firm_ce.analysis.statistics import Statistics
-from firm_ce.analysis.validate import Validation
+from firm_ce.analysis.validate import Validation, ValidationTensor
 from firm_ce.system.scalar.parameters import ModelConfig
 from firm_ce.system.scenario import Scenario
 
@@ -115,13 +115,22 @@ class Model:
             f"({(solve_time - datafile_loadtime).total_seconds()/(60*60):.4f} hours)."
         )
 
-        scenario.statistics = Statistics(scenario, x=de_result.x)
-        scenario.statistics.generate_result_files()
-        scenario.statistics.write_results()
+        scenario.build_and_evaluate_solution(de_result.x)
 
-        scenario.validation = Validation(scenario.statistics.solution, scenario.solution_dir)
-        scenario.validation.validate()
-        scenario.validation.dump_logs()
+        if self.config.backend == "tensor":
+            scenario.validation = ValidationTensor(scenario.solutionTensor, scenario.solution_dir, scenario)
+            scenario.validation.validate()
+            scenario.validation.dump_logs()
+
+            scenario.statistics = Statistics(scenario, solutionTensor=scenario.solutionTensor)
+            scenario.statistics.generate_result_files(write=True)
+        else:
+            scenario.validation = Validation(scenario.statistics.solution, scenario.solution_dir)
+            scenario.validation.validate()
+            scenario.validation.dump_logs()
+
+            scenario.statistics = Statistics(scenario, solution=scenario.solution)
+            scenario.statistics.generate_result_files()
 
         results_time = datetime.now()
         results_time_str = results_time.strftime("%d/%m/%Y %H:%M:%S")
@@ -160,13 +169,22 @@ class Model:
             f"({(solve_time - datafile_loadtime).total_seconds()/(60*60):.4f} hours)."
         )
 
-        scenario.statistics = Statistics(scenario, x=result)
-        scenario.statistics.generate_result_files()
-        scenario.statistics.write_results()
+        scenario.build_and_evaluate_solution(result)
 
-        scenario.validation = Validation(scenario.statistics.solution, scenario.solution_dir)
-        scenario.validation.validate()
-        scenario.validation.dump_logs()
+        if self.config.backend == "tensor":
+            scenario.validation = ValidationTensor(scenario.solutionTensor, scenario.solution_dir, scenario)
+            scenario.validation.validate()
+            scenario.validation.dump_logs()
+
+            scenario.statistics = Statistics(scenario, solutionTensor=scenario.solutionTensor)
+            scenario.statistics.generate_result_files(write=True)
+        else:
+            scenario.validation = Validation(scenario.statistics.solution, scenario.solution_dir)
+            scenario.validation.validate()
+            scenario.validation.dump_logs()
+
+            scenario.statistics = Statistics(scenario, solution=scenario.solution)
+            scenario.statistics.generate_result_files()
 
         results_time = datetime.now()
         results_time_str = results_time.strftime("%d/%m/%Y %H:%M:%S")
