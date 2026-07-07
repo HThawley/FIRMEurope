@@ -194,7 +194,7 @@ class Scenario:
                 self.upper_bounds_rel[idx_e] = 500.0
                 self.abs_rel_scaler[idx_e] = -1.0
                 if len(self.x0_abs) > 0:
-                    self.x0_rel[idx_e] = self.x0_abs[idx_e] / self.x0_abs[idx_p]
+                    self.x0_rel[idx_e] = self.x0_abs[idx_e] / self.x0_abs[idx_p] if self.x0_abs[idx_p] != 0 else 0
                 processed_idx.append(idx_e)
 
             if idx_p != -1:
@@ -542,7 +542,9 @@ class Scenario:
         projection_matrix = np.zeros((n_vars, k_dims), dtype=npfloat)
 
         for k, (_, indices) in enumerate(groups.items()):
-            projection_matrix[indices, k] = 1.0
+            # space is the mean of each unit type
+            # TODO: parameterise this choice
+            projection_matrix[indices, k] = 1.0/len(indices)
 
         self.projection_groups = groups
         self.projection_matrix = projection_matrix
