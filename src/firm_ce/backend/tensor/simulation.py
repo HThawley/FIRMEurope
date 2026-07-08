@@ -21,7 +21,7 @@ def Simulate(solution):
     ForwardPassPeak(solution)  # Dispatch Biomass, Biogas, Gas against the remaining deficits
     total_deficit = solution.operations.Mdeficit.sum()
 
-    if feasible_early_exit(solution, not total_deficit <= TOLERANCE):
+    if feasible_early_exit(solution, total_deficit <= TOLERANCE):
         return
 
     # remaining peak can only be used to precharge, not to directly meet load
