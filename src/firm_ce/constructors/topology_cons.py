@@ -36,7 +36,7 @@ def construct_Node_object(order: int, node_dict: dict) -> Node_InstanceType:
     -------
     Node_InstanceType: A static instance of the Node jitclass.
     """
-    return Node(True, node_dict["id"], order, node_dict["name"])
+    return Node(True, node_dict["id"], order, node_dict["name"], node_dict["internal_loss"])
 
 
 def construct_Line_object(
@@ -71,7 +71,7 @@ def construct_Line_object(
     capacity = float(line_dict["initial_capacity"])
     unit_type = str(line_dict["unit_type"])
     near_opt = str(line_dict["near_optimum"]).lower() in ("true", "1", "yes")
-    minor_node = construct_Node_object(-1, {"name": "MINOR_NODE", "id": -1})
+    minor_node = construct_Node_object(-1, {"name": "MINOR_NODE", "id": -1, "internal_loss": 0.0})
 
     raw_group = line_dict["range_group"]
     group = (
@@ -328,7 +328,6 @@ def construct_Network_object(
     -------
     Network_InstanceType: A static instance of the Network jitclass.
     """
-
     nodes = TypedDict.empty(key_type=nbintp, value_type=Node_InstanceType)
     for order, idx in enumerate(nodes_imported_dict):
         nodes[order] = construct_Node_object(order, nodes_imported_dict[idx])

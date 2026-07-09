@@ -86,6 +86,7 @@ if JIT_ENABLED:
         ("scenario_mask", boolean[:]),
         ("Rnuke_mask", boolean[:]),
         ("Rnlte_mask", boolean[:]),
+        ("internal_loss", nbfloat[:]),
         # (nnuke,)
         ("Rnuke_Rnlte_mask", boolean[:]),
         # (nhvi,)
@@ -188,8 +189,10 @@ class StaticTensor:
 
         self.Nodel_int = np.arange(self.nodes, dtype=npintp)
         self.Mload = np.zeros((self.intervals, self.nodes), npfloat)
+        self.internal_loss = np.zeros(self.nodes, dtype=npfloat)
         for node in network.nodes.values():
             self.Mload[:, node.order] += node.data
+            self.internal_loss[node.order] = node.internal_loss
             if node.order not in self.Nodel_int:
                 raise Exception
 
@@ -380,7 +383,7 @@ class StaticTensor:
                 self.EhydE[n, 1] += sto.initial_energy_capacity
 
         self.Mnetload_mror = np.zeros((self.intervals, self.nodes), npfloat)
-        self.Mnetload_mror = self.Mload - self.Mror
+        self.Mnetload_mror = (self.Mload / (1 - self.internal_loss)) - self.Mror
 
         self.network, self.network_mask, self.cache_0_donors = GenerateTensorNetwork(
             basic_network, self.Nodel_int

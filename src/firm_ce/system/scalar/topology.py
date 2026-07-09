@@ -28,6 +28,7 @@ if JIT_ENABLED:
         ("name", unicode_type),
         ("data_status", boolean),
         ("mean_demand", nbfloat),
+        ("internal_loss", nbfloat),
         ("data", nbfloat[:]),
         ("residual_load", nbfloat[:]),
         # Dynamic
@@ -118,7 +119,14 @@ class Node:
         at the node for a precharging action, units GW.
     """
 
-    def __init__(self, static_instance: boolean, idx: nbintp, order: nbintp, name: unicode_type) -> None:
+    def __init__(
+        self,
+        static_instance: boolean,
+        idx: nbintp,
+        order: nbintp,
+        name: unicode_type,
+        internal_loss: nbfloat,
+    ) -> None:
         """
         Initialise a Node instance.
 
@@ -138,6 +146,7 @@ class Node:
         self.data_status = False
         self.data = np.empty((0,), dtype=npfloat)
         self.mean_demand = 0.0
+        self.internal_loss = internal_loss
 
         self.residual_load = np.empty((0,), dtype=npfloat)
 

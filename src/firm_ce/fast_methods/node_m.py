@@ -14,7 +14,7 @@ from firm_ce.system.scalar.topology import Node, Node_InstanceType
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def create_dynamic_copy(node_instance: Node_InstanceType) -> Node_InstanceType:
-    node_copy = Node(False, node_instance.id, node_instance.order, node_instance.name)
+    node_copy = Node(False, node_instance.id, node_instance.order, node_instance.name, node_instance.internal_loss)
     node_copy.data_status = node_instance.data_status
     node_copy.data = node_instance.data  # This remains static
     node_copy.residual_load = node_instance.residual_load.copy()
