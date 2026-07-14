@@ -125,15 +125,6 @@ class OperationTensor:
         init_mnetload(self.Mnetload, self.Mnuke, static, assets)
         self.Mpeak = np.zeros((intervals, nodes, static.npeak), dtype=npfloat)
 
-        self.Mnetload = (
-            static.Mnetload_mror
-            - self.Mpfix
-            - self.Mpsat
-            - self.Moffw
-            - self.Monsw
-            - self.Mnuke
-        )
-
         self.Munbalanced = self.Mnetload.copy()
         self.Mdeficit = np.zeros((intervals, nodes), dtype=npfloat)
         self.Mcurtail = np.zeros((intervals, nodes), dtype=npfloat)
