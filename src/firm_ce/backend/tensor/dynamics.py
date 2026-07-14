@@ -4,27 +4,6 @@ from firm_ce.common.constants import FASTMATH, BOUNDSCHECK, TOLERANCE
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
-def GetSurplust(solution, t, Msurplust):
-    res = solution.static.resolution
-    for n in range(solution.static.nodes):
-        surplus = solution.operations.Mcurtail[t, n]
-        for s in range(solution.static.nstor):
-            prev_soc = solution.operations.Mstorage_init[n, s] if t == 0 else solution.operations.Mstorage[t - 1, n, s]
-            surplus += solution.operations.Mcharge[t, n, s]
-            surplus += min(solution.assets.CstorageP[n, s], (prev_soc * solution.static.storage_discha_eff[s]) / res)
-            surplus -= solution.operations.Mdischarge[t, n, s]
-
-        for h in range(solution.static.nhyd):
-            prev_soc = (
-                solution.operations.Mreservoir_init[n, h] if t == 0
-                else solution.operations.Mreservoir[t - 1, n, h]
-            )
-            surplus += min(solution.assets.ChydP[n, h], prev_soc / res) - solution.operations.Mhydro[t, n, h]
-
-        Msurplust[n] = max(0.0, surplus)
-
-
-@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
 def UpdateUnbalancedt(solution, t):
     for n in range(solution.static.nodes):
         solution.operations.Munbalanced[t, n] = solution.operations.Mnetload[t, n] - solution.operations.Mimport[t, n]

@@ -93,8 +93,11 @@ if JIT_ENABLED:
         ("network_mask", boolean[:]),
         # (nhvi, 2)
         ("network", nbintp[:, :]),
-        # dict
-        ("cache_0_donors", DictType(nbintp, nbintp[:, :])),
+
+        # -- Network Cache --
+        ("neigh_neighbors", nbintp[:]),
+        ("neigh_lines_arr", nbintp[:]),
+        ("neigh_offsets", nbintp[:]),
 
         # -- x-vector mapping --
         ("abs_rel_scaler", nbfloat[:]),
@@ -385,9 +388,12 @@ class StaticTensor:
         self.Mnetload_mror = np.zeros((self.intervals, self.nodes), npfloat)
         self.Mnetload_mror = (self.Mload / (1 - self.internal_loss)) - self.Mror
 
-        self.network, self.network_mask, self.cache_0_donors = GenerateTensorNetwork(
-            basic_network, self.Nodel_int
-        )
+        (self.network,
+         self.network_mask,
+         self.neigh_neighbors,
+         self.neigh_lines_arr,
+         self.neigh_offsets
+         ) = GenerateTensorNetwork(basic_network, self.Nodel_int)
 
         self.nnuke = self.Rnuke_mask.sum()
         self.nnlte = self.Rnlte_mask.sum()

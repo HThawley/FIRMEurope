@@ -50,8 +50,8 @@ def create_dynamic_copy(
         node_start_copy = nodes_typed_dict[line_instance.node_start.order]
         node_end_copy = nodes_typed_dict[line_instance.node_end.order]
     elif line_type == "minor":
-        node_start_copy = Node(False, -1, -1, "MINOR_NODE")
-        node_end_copy = Node(False, -1, -1, "MINOR_NODE")
+        node_start_copy = Node(False, -1, -1, "MINOR_NODE", 0.0)
+        node_end_copy = Node(False, -1, -1, "MINOR_NODE", 0.0)
 
     line_copy = Line(
         False,

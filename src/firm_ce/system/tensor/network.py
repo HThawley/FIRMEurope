@@ -8,7 +8,8 @@ from firm_ce.common.typing import TypedDict, nbintp, npintp
 @njit(boundscheck=True)
 def GenerateTensorNetwork(network, Nodel_int):  # noqa: C901
     networkdict = TypedDict.empty(nbintp, nbintp)
-    for k in range(len(Nodel_int)):
+    nodes = len(Nodel_int)
+    for k in range(nodes):
         networkdict[Nodel_int[k]] = k
 
     num_lines = network.shape[0]
@@ -34,32 +35,33 @@ def GenerateTensorNetwork(network, Nodel_int):  # noqa: C901
             idx += 1
 
     # Build cache
-    cache_0_donors = TypedDict.empty(nbintp, nbintp[:, :])
-    nodes = len(Nodel_int)
-
+    total_neighbours = 0
+    neigh_count = np.zeros(nodes, dtype=npintp)
     for n in range(nodes):
-        # count the number of connections to pre-allocate arrays
-        count = 0
         for line in range(valid_count):
             if valid_network[line, 0] == n or valid_network[line, 1] == n:
-                count += 1
+                neigh_count[n] += 1
+                total_neighbours += 1
 
-        # allocate and fill
-        if count > 0:
-            res_matrix = np.empty((2, count), dtype=npintp)
-            c = 0
-            for line in range(valid_count):
-                if valid_network[line, 0] == n:
-                    res_matrix[0, c] = valid_network[line, 1]
-                    res_matrix[1, c] = line
-                    c += 1
-                elif valid_network[line, 1] == n:
-                    res_matrix[0, c] = valid_network[line, 0]
-                    res_matrix[1, c] = line
-                    c += 1
+    neigh_offsets = np.zeros(nodes + 1, dtype=npintp)
+    neigh_neighbors = np.empty(total_neighbours, dtype=npintp)
+    neigh_lines_arr = np.empty(total_neighbours, dtype=npintp)
 
-            cache_0_donors[n] = res_matrix
-        else:
-            cache_0_donors[n] = np.empty((2, 0), dtype=npintp)
+    for n in range(nodes):
+        neigh_offsets[n + 1] = neigh_offsets[n] + neigh_count[n]
 
-    return valid_network, network_mask, cache_0_donors
+    fill_pos = neigh_offsets.copy()
+    for n in range(nodes):
+        for line in range(valid_count):
+            if valid_network[line, 0] == n:
+                p = fill_pos[n]
+                neigh_neighbors[p] = valid_network[line, 1]
+                neigh_lines_arr[p] = line
+                fill_pos[n] += 1
+            elif valid_network[line, 1] == n:
+                p = fill_pos[n]
+                neigh_neighbors[p] = valid_network[line, 0]
+                neigh_lines_arr[p] = line
+                fill_pos[n] += 1
+
+    return valid_network, network_mask, neigh_neighbors, neigh_lines_arr, neigh_offsets

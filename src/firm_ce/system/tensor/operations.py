@@ -117,8 +117,8 @@ class OperationTensor:
         )
 
         self.Munbalanced = self.Mnetload.copy()
-        self.Mdeficit = np.maximum(npfloat(0.0), self.Mnetload)
-        self.Mcurtail = -np.minimum(npfloat(0.0), self.Mnetload)
+        self.Mdeficit = np.zeros((intervals, nodes), dtype=npfloat)
+        self.Mcurtail = np.zeros((intervals, nodes), dtype=npfloat)
 
         self.Mimport = np.zeros((intervals, nodes), dtype=npfloat)
         self.Tnetflow = np.zeros((intervals, nhvi), dtype=npfloat)

@@ -1,4 +1,3 @@
-import numpy as np
 from numba import njit
 
 from firm_ce.common.constants import FASTMATH, BOUNDSCHECK, TOLERANCE
@@ -27,7 +26,6 @@ def Interconnection(
     path_lines = solution.operations.path_lines
 
     # Sort nodes descending by Fill
-    priority_order = np.argsort(Fillt)[::-1]
     total_surplus = Surplust.sum()
 
     # map out network
@@ -51,9 +49,17 @@ def Interconnection(
             cap_rev[line] = solution.assets.Clines[line] + netflowt[line]
             eff_rev[line] = line_eff
 
-    for n in priority_order:
-        if Fillt[n] < TOLERANCE:
-            break  # No more significant deficits
+    for _ in range(nodes):
+        # Find the highest-fill node not yet resolved
+        best_n = -1
+        best_v = TOLERANCE
+        for n in range(nodes):
+            if Fillt[n] > best_v:
+                best_v = Fillt[n]
+                best_n = n
+        if best_n == -1:
+            break  # no remaining deficit
+        n = best_n
 
         while Fillt[n] > TOLERANCE and total_surplus > TOLERANCE:
 
@@ -83,17 +89,16 @@ def Interconnection(
                     break
 
                 visited[curr] = True
-                pdonors_arr = solution.static.cache_0_donors[curr]
 
-                if pdonors_arr.shape[1] == 0:
+                start = solution.static.neigh_offsets[curr]
+                end = solution.static.neigh_offsets[curr + 1]
+
+                if start == end:
                     continue
 
-                neighbors = pdonors_arr[0]
-                lines = pdonors_arr[1]
-
-                for idx in range(len(neighbors)):
-                    nxt = neighbors[idx]
-                    line = lines[idx]
+                for idx in range(start, end):
+                    nxt = solution.static.neigh_neighbors[idx]
+                    line = solution.static.neigh_lines[idx]
 
                     if visited[nxt]:
                         continue
@@ -157,6 +162,7 @@ def Interconnection(
             for i in range(path_len):
                 sender = path_nodes[i]
                 line = path_lines[i]
+                line_eff = solution.static.line_efficiencies[line]
                 receiver = parent_node[sender]
 
                 is_fwd = (sender == solution.static.network[line, 0])
