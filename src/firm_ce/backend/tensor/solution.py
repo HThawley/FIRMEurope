@@ -3,7 +3,7 @@ import numpy as np
 
 from firm_ce.common.constants import JIT_ENABLED, NUM_THREADS, FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import jitclass, njit
-from firm_ce.common.typing import boolean, nbfloat, npfloat
+from firm_ce.common.typing import boolean, nbfloat, npfloat, TypedList
 from firm_ce.common.helpers import safe_divide_array
 from firm_ce.backend.tensor.simulation import Simulate
 
@@ -64,6 +64,46 @@ if JIT_ENABLED:
     SolutionTensorType = SolutionTensor.class_type.instance_type
 else:
     SolutionTensorType = SolutionTensor
+
+
+def ResetSolution(
+    solution: SolutionTensor,
+    x: np.ndarray[npfloat]
+) -> None:
+    solution.x = x
+    solution.assets = AssetTensor(x, solution.static)  # cheap enough to rebuild rather than reset
+    solution.operations.reset(solution.static, solution.assets)
+    solution.simulated = False
+    solution.evaluated = False
+    solution.feasible = True
+    solution.estimated_deficit = npfloat(-1.0)
+    solution.penalties = npfloat(-1.0)
+    solution.total_annual_cost = npfloat(-1.0)
+    solution.lcoe = npfloat(-1.0)
+
+
+def create_solution_pool(
+    dummy_x: np.ndarray,
+    static: StaticTensorType,
+) -> "TypedList[SolutionTensorType]":
+    """
+    Pre-allocates one SolutionTensor per Numba worker thread.
+    Call once before the optimisation loop and reuse across all batches.
+
+    dummy_x must be a valid x-vector (correct length and dtype).
+    Its values are irrelevant — they are overwritten before first use.
+    """
+    if JIT_ENABLED:
+        n_workers = NUM_THREADS
+        pool = TypedList.empty_list(SolutionTensorType)
+    else:
+        n_workers = 1
+        pool = []
+
+    for _ in range(n_workers):
+        pool.append(SolutionTensor(dummy_x, static))
+
+    return pool
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
@@ -141,3 +181,26 @@ def EvaluateTensor(
         solution.penalties = solution.estimated_deficit
         CalculateCost(solution)
     solution.evaluated = True
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
+def prep_solution_for_postprocessing(
+    solution: SolutionTensorType,
+) -> None:
+    """
+    Calculates some arrays which are required for downstream post-processing
+    but which are not calculated in EvaluateTensor for code performance
+    """
+    if not solution.evaluated:
+        raise Exception
+
+    o = solution.operations
+    s = solution.static
+    a = solution.assets
+
+    o.Mpfix = s.TSpfix * a.Cpfix
+    o.Mpsat = s.TSpsat * a.Cpsat
+    o.Moffw = s.TSoffw * a.Coffw
+    o.Monsw = s.TSonsw * a.Consw
+
+    return None

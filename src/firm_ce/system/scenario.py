@@ -572,14 +572,14 @@ class Scenario:
         x = x.astype(npfloat)
 
         if self.config.backend == "tensor":
-            from firm_ce.backend.tensor.solution import SolutionTensor, EvaluateTensor
+            from firm_ce.backend.tensor.solution import SolutionTensor, EvaluateTensor, prep_solution_for_postprocessing
             from firm_ce.constructors.tensor_to_scalar import map_tensor_to_scalar
 
             print(f"Building and evaluating tensor solution for scenario: '{self.name}'")
             solutionTensor = SolutionTensor(x, self.staticTensor)
             EvaluateTensor(solutionTensor)
+            prep_solution_for_postprocessing(solutionTensor)
             solution = map_tensor_to_scalar(self, solutionTensor)
-            solutionTensor = solutionTensor
             solution = solution
 
         elif self.config.backend == "scalar":

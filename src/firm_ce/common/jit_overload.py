@@ -6,8 +6,9 @@ allowing for debugging with the Python interpreter instead.
 from firm_ce.common.constants import JIT_ENABLED
 
 if JIT_ENABLED:
-    from numba import njit, prange
+    from numba import njit, prange, get_thread_id
     from numba.experimental import jitclass
+
 else:
 
     def jitclass(spec):
@@ -27,3 +28,6 @@ else:
 
     def prange(x):
         return range(x)
+
+    def get_thread_id() -> int:
+        return 0

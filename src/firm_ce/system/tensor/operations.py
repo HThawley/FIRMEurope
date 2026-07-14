@@ -1,12 +1,38 @@
 # type: ignore
 import numpy as np
 
-from firm_ce.common.constants import JIT_ENABLED
-from firm_ce.common.jit_overload import jitclass
+from firm_ce.common.constants import JIT_ENABLED, FASTMATH, BOUNDSCHECK
+from firm_ce.common.jit_overload import jitclass, njit
 from firm_ce.common.typing import boolean, nbfloat, npfloat, nbintp, npint, npintp, nbint
 
 from firm_ce.system.tensor.static import StaticTensorType
 from firm_ce.system.tensor.assets import AssetTensorType
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
+def init_mnetload(
+    Mnetload: nbfloat[:, :],
+    Mnuke: nbfloat[:, :],
+    static: StaticTensorType,
+    assets: AssetTensorType,
+) -> None:
+    """
+    Single TxN pass: computes Mnuke and Mnetload without any temporaries.
+    Inner loop is stride-1 along n for all arrays — auto-vectorises cleanly.
+    """
+    for t in range(static.intervals):
+        for n in range(static.nodes):
+            nuke = assets.Cnuke[n] * static.TSnuke[t, n]
+            Mnuke[t, n] = nuke
+            Mnetload[t, n] = (
+                static.Mnetload_mror[t, n]
+                - assets.Cpfix[n] * static.TSpfix[t, n]
+                - assets.Cpsat[n] * static.TSpsat[t, n]
+                - assets.Coffw[n] * static.TSoffw[t, n]
+                - assets.Consw[n] * static.TSonsw[t, n]
+                - nuke
+            )
+
 
 if JIT_ENABLED:
     operation_spec = [
@@ -26,9 +52,6 @@ if JIT_ENABLED:
         ("Mpsat", nbfloat[:, :]),
         ("Moffw", nbfloat[:, :]),
         ("Monsw", nbfloat[:, :]),
-        # ("Mbiog", nbfloat[:, :]),
-        # ("Mbiom", nbfloat[:, :]),
-        # ("Mgas", nbfloat[:, :]),
         ("Mnuke", nbfloat[:, :]),
         # (intervals, nhvi)
         ("Tnetflow", nbfloat[:, :]),
@@ -97,14 +120,9 @@ class OperationTensor:
         nhyd = static.nhyd
         nstor = static.nstor
 
-        self.Mpfix = assets.Cpfix * static.TSpfix
-        self.Mpsat = assets.Cpsat * static.TSpsat
-        self.Monsw = assets.Consw * static.TSonsw
-        self.Moffw = assets.Coffw * static.TSoffw
-        self.Mnuke = assets.Cnuke * static.TSnuke
-        # self.Mbiog = np.zeros((intervals, nodes), dtype=npfloat)
-        # self.Mbiom = np.zeros((intervals, nodes), dtype=npfloat)
-        # self.Mgas = np.zeros((intervals, nodes), dtype=npfloat)
+        self.Mnuke = np.empty((intervals, nodes), dtype=npfloat)
+        self.Mnetload = np.empty((intervals, nodes), dtype=npfloat)
+        init_mnetload(self.Mnetload, self.Mnuke, static, assets)
         self.Mpeak = np.zeros((intervals, nodes, static.npeak), dtype=npfloat)
 
         self.Mnetload = (
@@ -173,3 +191,50 @@ if JIT_ENABLED:
     OperationTensorType = OperationTensor.class_type.instance_type
 else:
     OperationTensorType = OperationTensor
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
+def reset_operations(
+    ops: OperationTensorType,
+    static: StaticTensorType,
+    assets: AssetTensorType,
+) -> None:
+    """
+    Reinitialises a pre-allocated OperationTensor for a new solution vector.
+    No heap allocation -- all writes go into existing arrays.
+    """
+    # --- Computed arrays ---
+    init_mnetload(ops.Mnetload, ops.Mnuke, static, assets)
+    ops.Munbalanced[:] = ops.Mnetload
+    ops.Mstorage_init[:] = npfloat(0.5) * assets.CstorageE  # (nodes, nstor)
+    ops.Mreservoir_init[:] = npfloat(0.5) * assets.ChydE  # (nodes, nhyd)
+
+    ops.Mdeficit.fill(npfloat(0.0))
+    ops.Mcurtail.fill(npfloat(0.0))
+    ops.Mimport.fill(npfloat(0.0))
+    ops.Tnetflow.fill(npfloat(0.0))
+    ops.Mdischarge.fill(npfloat(0.0))
+    ops.Mcharge.fill(npfloat(0.0))
+    ops.Mstorage.fill(npfloat(0.0))
+    ops.Mphes_spill.fill(npfloat(0.0))
+    ops.Mhydro.fill(npfloat(0.0))
+    ops.Mreservoir.fill(npfloat(0.0))
+    ops.Mhyd_spill.fill(npfloat(0.0))
+    ops.Mpeak.fill(npfloat(0.0))
+
+    # Reverse pass state
+    ops.charge_max_t.fill(npfloat(0.0))
+    ops.discharge_max_t.fill(npfloat(0.0))
+    ops.precharge_flag.fill(False)
+    ops.trickling_flag.fill(False)
+    ops.hydro_min_future.fill(npfloat(0.0))
+    ops.storage_min_future.fill(npfloat(0.0))
+    ops.storage_max_future.fill(npfloat(0.0))
+
+    # Scalar flags
+    ops.has_deficit_t = False
+    ops.has_curtail_t = False
+
+    # NOT reset here (handled elsewhere):
+    #   remaining_peak_budget  — reset by ResetAnnualBudgets at start of Simulate
+    #   cap_fwd/eff/visited/path_nodes/etc. — scratch buffers, overwritten before read
