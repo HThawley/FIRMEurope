@@ -96,7 +96,7 @@ if JIT_ENABLED:
 
         # -- Network Cache --
         ("neigh_neighbors", nbintp[:]),
-        ("neigh_lines_arr", nbintp[:]),
+        ("neigh_lines", nbintp[:]),
         ("neigh_offsets", nbintp[:]),
 
         # -- x-vector mapping --
@@ -391,7 +391,7 @@ class StaticTensor:
         (self.network,
          self.network_mask,
          self.neigh_neighbors,
-         self.neigh_lines_arr,
+         self.neigh_lines,
          self.neigh_offsets
          ) = GenerateTensorNetwork(basic_network, self.Nodel_int)
 
