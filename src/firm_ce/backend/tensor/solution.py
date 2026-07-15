@@ -3,7 +3,7 @@ import numpy as np
 
 from firm_ce.common.constants import JIT_ENABLED, NUM_THREADS, FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import jitclass, njit
-from firm_ce.common.typing import boolean, nbfloat, npfloat, TypedList
+from firm_ce.common.typing import boolean, nbfloat, npfloat
 from firm_ce.common.helpers import safe_divide_array
 from firm_ce.backend.tensor.simulation import Simulate
 
@@ -121,22 +121,20 @@ def CalculateCost(
         cost += (_Mnuke_ratio[n] * a.Cnlte[n]) * c.Vnlte[n]
         cost += _Mnphes_ratio[n] * a.CnphP[n] * c.Vph[n]
 
-    mpeak_by_node = o.Mpeak.sum(axis=0)   # stride-1 along T, good for SIMD
+    for t in range(solution.static.intervals):
+        for n in range(solution.static.nodes):
+            cost += o.Mpeak[t, n, 0] * c.Vbiom
+            cost += o.Mpeak[t, n, 1] * c.Vbiog
+            cost += o.Mpeak[t, n, 2] * c.Vgas
 
-    cost += np.dot(mpeak_by_node[:, 0], c.Vbiom)
-    cost += np.dot(mpeak_by_node[:, 1], c.Vbiog)
-    cost += np.dot(mpeak_by_node[:, 2], c.Vgas)
-
-    # # -- These all have 0.0 vom in current model --
-    # for t in range(solution.static.intervals):
-    #     for n in range(solution.static.nodes):
-    #         cost += o.Mpfix[t, n] * c.Vpfix[n]
-    #         cost += o.Mpsat[t, n] * c.Vpsat[n]
-    #         cost += o.Moffw[t, n] * c.Voffw[n]
-    #         cost += o.Monsw[t, n] * c.Vonsw[n]
-    #         cost += np.abs(o.Tnetflow[t, n]) * c.Vlines[n]
-    #         cost += o.Mdischarge[t, n, 1] * c.Vb4[n]
-    #         cost += o.Mdischarge[t, n, 2] * c.Vb2[n]
+            # -- These all have 0.0 vom in current model --
+            # cost += o.Mpfix[t, n] * c.Vpfix[n]
+            # cost += o.Mpsat[t, n] * c.Vpsat[n]
+            # cost += o.Moffw[t, n] * c.Voffw[n]
+            # cost += o.Monsw[t, n] * c.Vonsw[n]
+            # cost += np.abs(o.Tnetflow[t, n]) * c.Vlines[n]
+            # cost += o.Mdischarge[t, n, 1] * c.Vb4[n]
+            # cost += o.Mdischarge[t, n, 2] * c.Vb2[n]
 
     for n in range(solution.static.nhvi):
         cost += a.Clines[n] * c.Flines[n]
