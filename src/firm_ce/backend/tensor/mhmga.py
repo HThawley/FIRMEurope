@@ -1,11 +1,11 @@
 # type: ignore
 import numpy as np
 
-from firm_ce.common.constants import FASTMATH, BOUNDSCHECK
+from firm_ce.common.constants import FASTMATH, BOUNDSCHECK, NUM_THREADS
 from firm_ce.common.jit_overload import njit, prange, get_thread_id
 from firm_ce.common.typing import nbfloat, npfloat
 from firm_ce.system.tensor.static import StaticTensorType
-from firm_ce.backend.tensor.solution import EvaluateTensor, ResetSolution, create_solution_pool
+from firm_ce.backend.tensor.solution import EvaluateTensor, ResetSolution
 
 # @njit(parallel=True, fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 # def mga_wrapper_with_details(
@@ -44,19 +44,21 @@ from firm_ce.backend.tensor.solution import EvaluateTensor, ResetSolution, creat
 def mga_tensor_wrapper(
     xs: nbfloat[:, :],
     static: StaticTensorType,
-    solution_pool,  # TypedList[SolutionTensorType]
 ) -> tuple[nbfloat[:], nbfloat[:]]:
-
-    # This could be lifted out of loop, but I think not worth it
-    solution_pool = create_solution_pool(xs[0], static)
 
     xs = xs.astype(nbfloat)
     n_points = xs.shape[0]
     lcoe = np.zeros(n_points, dtype=npfloat)
     penalties = np.zeros(n_points, dtype=npfloat)
 
+
+    # This could be lifted out of loop, but I think not worth it
+    pool = TypedList()
+    for _ in range(NUM_THREADS):
+        pool.append(SolutionTensor(xs[0], static))
+
     for j in prange(n_points):
-        sol = solution_pool[get_thread_id()]   # each thread owns its slot
+        sol = pool[get_thread_id()]   # each thread owns its slot
         ResetSolution(sol, xs[j])
         EvaluateTensor(sol)
         lcoe[j] = sol.lcoe

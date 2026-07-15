@@ -8,7 +8,7 @@ from firm_ce.common.helpers import safe_divide_array
 from firm_ce.backend.tensor.simulation import Simulate
 
 from firm_ce.system.tensor.assets import AssetTensor, AssetTensorType
-from firm_ce.system.tensor.operations import OperationTensor, OperationTensorType
+from firm_ce.system.tensor.operations import OperationTensor, OperationTensorType, reset_operations
 from firm_ce.system.tensor.static import StaticTensorType
 
 if JIT_ENABLED:
@@ -66,13 +66,14 @@ else:
     SolutionTensorType = SolutionTensor
 
 
+@njit
 def ResetSolution(
     solution: SolutionTensor,
     x: np.ndarray[npfloat]
 ) -> None:
     solution.x = x
     solution.assets = AssetTensor(x, solution.static)  # cheap enough to rebuild rather than reset
-    solution.operations.reset(solution.static, solution.assets)
+    reset_operations(solution.operations, solution.static, solution.assets)
     solution.simulated = False
     solution.evaluated = False
     solution.feasible = True
@@ -80,30 +81,6 @@ def ResetSolution(
     solution.penalties = npfloat(-1.0)
     solution.total_annual_cost = npfloat(-1.0)
     solution.lcoe = npfloat(-1.0)
-
-
-def create_solution_pool(
-    dummy_x: np.ndarray,
-    static: StaticTensorType,
-) -> "TypedList[SolutionTensorType]":
-    """
-    Pre-allocates one SolutionTensor per Numba worker thread.
-    Call once before the optimisation loop and reuse across all batches.
-
-    dummy_x must be a valid x-vector (correct length and dtype).
-    Its values are irrelevant — they are overwritten before first use.
-    """
-    if JIT_ENABLED:
-        n_workers = NUM_THREADS
-        pool = TypedList.empty_list(SolutionTensorType)
-    else:
-        n_workers = 1
-        pool = []
-
-    for _ in range(n_workers):
-        pool.append(SolutionTensor(dummy_x, static))
-
-    return pool
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
