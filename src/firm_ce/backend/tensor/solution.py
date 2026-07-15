@@ -123,9 +123,9 @@ def CalculateCost(
 
     for t in range(solution.static.intervals):
         for n in range(solution.static.nodes):
-            cost += o.Mpeak[t, n, 0] * c.Vbiom
-            cost += o.Mpeak[t, n, 1] * c.Vbiog
-            cost += o.Mpeak[t, n, 2] * c.Vgas
+            cost += o.Mpeak[t, n, 0] * c.Vbiom[n]
+            cost += o.Mpeak[t, n, 1] * c.Vbiog[n]
+            cost += o.Mpeak[t, n, 2] * c.Vgas[n]
 
             # -- These all have 0.0 vom in current model --
             # cost += o.Mpfix[t, n] * c.Vpfix[n]
