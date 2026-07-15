@@ -2,10 +2,10 @@
 import numpy as np
 
 from firm_ce.common.constants import FASTMATH, BOUNDSCHECK, NUM_THREADS
-from firm_ce.common.jit_overload import njit, prange, get_thread_id
+from firm_ce.common.jit_overload import njit, prange, get_thread_id, TypedList
 from firm_ce.common.typing import nbfloat, npfloat
 from firm_ce.system.tensor.static import StaticTensorType
-from firm_ce.backend.tensor.solution import EvaluateTensor, ResetSolution
+from firm_ce.backend.tensor.solution import SolutionTensor, EvaluateTensor, ResetSolution
 
 # @njit(parallel=True, fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 # def mga_wrapper_with_details(
@@ -50,7 +50,6 @@ def mga_tensor_wrapper(
     n_points = xs.shape[0]
     lcoe = np.zeros(n_points, dtype=npfloat)
     penalties = np.zeros(n_points, dtype=npfloat)
-
 
     # This could be lifted out of loop, but I think not worth it
     pool = TypedList()
