@@ -2,8 +2,8 @@
 import numpy as np
 
 from firm_ce.common.constants import JIT_ENABLED, NUM_THREADS, FASTMATH, BOUNDSCHECK
-from firm_ce.common.jit_overload import jitclass, njit
-from firm_ce.common.typing import boolean, nbfloat, npfloat
+from firm_ce.common.jit_overload import jitclass, njit, prange
+from firm_ce.common.typing import boolean, nbfloat, npfloat, TypedDict, nbintp
 from firm_ce.common.helpers import safe_divide_array
 from firm_ce.backend.tensor.simulation import Simulate
 
@@ -179,3 +179,22 @@ def prep_solution_for_postprocessing(
     o.Monsw = s.TSonsw * a.Consw
 
     return None
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, parallel=True)
+def build_eval_and_return_solutions(
+    xs: nbfloat[:, :],
+    static: StaticTensorType,
+) -> TypedDict[nbintp, SolutionTensorType]:
+    """
+    Convenience for efficient post-processing - not to be used in optimisation loops
+    """
+    xs = xs.astype(nbfloat)
+    n_points = xs.shape[0]
+    solutions = TypedDict()
+
+    for j in prange(n_points):
+        solutions[j] = SolutionTensor(xs[j], static)
+        EvaluateTensor(solutions[j])
+
+    return solutions

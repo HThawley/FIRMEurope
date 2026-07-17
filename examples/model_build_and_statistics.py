@@ -19,49 +19,90 @@ from firm_ce.analysis.display import Display
 from firm_ce.common.typing import npfloat
 
 
-def try_read(filename):
+def try_read_x(scenario, filename):
     try:
         full_path = os.path.join(scenario.solution_dir, "statistics", f"{filename}.csv")
-        x = pd.read_csv(full_path, header=None).to_numpy().flatten()
+        x = pd.read_csv(full_path, header=None).to_numpy().flatten().astype(npfloat)
     except FileNotFoundError as e:
         return e
     return x
 
 
-def run_statistics(scenario, run_mode, x0_fallback=True):
+def try_read_noptima(scenario):
+    try:
+        full_path = os.path.join(scenario.solution_dir, "mga_logs", "mga-noptima.csv")
+        xs = pd.read_csv(full_path).iloc[:, 5:].to_numpy().astype(npfloat)
+        assert xs.size > 0
+    except FileNotFoundError as e:
+        return e
+    except AssertionError as e:
+        return e
+    return xs
+
+
+def try_read_evolution(scenario):
+    """mga-noptima.csv generated at end of optimisation. This extracts intermediate noptima"""
+    try:
+        full_path = os.path.join(scenario.solution_dir, "mga_logs", "mga-evolution.csv")
+        xs = pd.read_csv(full_path)
+        xs = xs[xs["iter"] == xs["iter"].max()]
+        xs = xs.iloc[:, 6:].to_numpy().astype(npfloat)
+    except FileNotFoundError as e:
+        return e
+    return xs
+
+
+def run_statistics(scenario, run_mode, x_loc=None, x0_fallback=True):
     scenario.load_datafiles()
 
-    if run_mode == "new":
-        if scenario.x0.size == 0:
-            print(f"skipping {scenario.name} as no initial guess provided")
-            scenario.unload_datafiles()
-            return
-        x = scenario.x0
-        scenario.create_solution_directory()
+    if scenario.config.type == "single_time":
+        if run_mode == "new":
+            if scenario.x0.size == 0:
+                print(f"skipping {scenario.name} as no initial guess provided")
+                scenario.unload_datafiles()
+                return
+            x = scenario.x0
+            scenario.create_solution_directory()
 
-    else:
-        x_rel = try_read("x_rel")
-        x_abs = try_read("x_abs")
-        x_rel_failure = isinstance(x_rel, FileNotFoundError)
-        x_abs_failure = isinstance(x_abs, FileNotFoundError)
+        elif x_loc == "latest_population.csv":
+            # TODO: more elegant
+            population = pd.read_csv(os.path.join(scenario.solution_dir, "latest_population.csv"), header=None, nrows=1).to_numpy()
+            x = population[0, 3:].astype(npfloat)
 
-        if x_rel_failure and x_abs_failure:
-            if x0_fallback:
-                x = scenario.x0
+        else:
+            x_rel = try_read_x(scenario, "x_rel")
+            x_abs = try_read_x(scenario, "x_abs")
+            x_rel_failure = isinstance(x_rel, FileNotFoundError)
+            x_abs_failure = isinstance(x_abs, FileNotFoundError)
+
+            if x_rel_failure and x_abs_failure:
+                if x0_fallback:
+                    x = scenario.x0
+                else:
+                    scenario.unload_datafiles()
+                    raise FileNotFoundError("Could not find x csv. Has the solution been run?")
+            elif scenario.config.parameterisation == "relative":
+                x = scenario.convert_x_to_rel(x_abs) if x_rel_failure else x_rel
+            elif scenario.config.parameterisation == "absolute":
+                x = scenario.convert_x_to_abs(x_rel) if x_abs_failure else x_abs
             else:
                 scenario.unload_datafiles()
-                raise FileNotFoundError("Could not find x csv. Has the solution been run?")
-        elif scenario.config.parameterisation == "relative":
-            x = scenario.convert_x_to_rel(x_abs) if x_rel_failure else x_rel
-        elif scenario.config.parameterisation == "absolute":
-            x = scenario.convert_x_to_abs(x_rel) if x_abs_failure else x_abs
-        else:
-            scenario.unload_datafiles()
-            raise ValueError(f"Unknown parameterisation type: {scenario.config.parameterisation}")
+                raise ValueError(f"Unknown parameterisation type: {scenario.config.parameterisation}")
 
-    x = x.astype(npfloat)
+        x = x.astype(npfloat)
+        scenario.build_and_evaluate_solution(x)
 
-    scenario.build_and_evaluate_solution(x)
+    elif scenario.config.type == "mhmga":
+        xs = try_read_noptima(scenario)
+        if isinstance(xs, FileNotFoundError):
+            xs = try_read_evolution(scenario)
+        elif isinstance(xs, AssertionError):
+            print("WARNING: noptima file found but empty. Trying evolution file")
+            xs = try_read_evolution(scenario)
+        if isinstance(xs, FileNotFoundError):
+            raise xs
+        # TODO: verify absolute/relative parameterisation -> fail noisily
+        scenario.build_and_evaluate_noptima(xs)
 
     print(f"Validating solution {scenario.name}")
     if scenario.solutionTensor is not None:
@@ -82,11 +123,18 @@ def run_statistics(scenario, run_mode, x0_fallback=True):
 
     # raise KeyboardInterrupt
 
-    print(f"Generating plots {scenario.name}")
-    scenario.display = Display(scenario, model.config, solution=scenario.statistics.solution)
+    if model.config.type == "single_time":
+        print(f"Generating single_time plots {scenario.name}")
+        scenario.display = Display(scenario, model.config, solution=scenario.solution)
+
+        # TODO: Energy mix based on consumption / generation
+        scenario.display.plot_energy_mix()
+        scenario.display.plot_power_capacity()
 
     if model.config.type == "mhmga":
-        scenario.display.plot_energy_mix(atlas=True, chart_type="pie", indices=[0, 1, 2, 3])
+        print(f"Generating mhmga plots {scenario.name}")
+        scenario.display = Display(scenario, model.config, noptima=scenario.noptima)
+
         scenario.display.plot_power_capacity(atlas=True, chart_type="pie", indices=[0, 1, 2, 3])
         scenario.display.plot_energy_mix(atlas=True, delta=True, chart_type="bar", indices=[0, 1, 2, 3])
         # scenario.display.plot_energy_mix(curtailment=False, alternative=2)
@@ -98,16 +146,6 @@ def run_statistics(scenario, run_mode, x0_fallback=True):
         scenario.noptima_summary = df
         print(df)
 
-    # TODO: Energy mix based on consumption / generation
-    scenario.display.plot_energy_mix()
-    scenario.display.plot_power_capacity()
-    # scenario.display.plot_power_capacity(build="existing")
-    # scenario.display.plot_power_capacity(build="new_build")
-
-    data = []
-
-    # raise KeyboardInterrupt
-
     # scenario.unload_datafiles()
     return None
 
@@ -115,7 +153,7 @@ def run_statistics(scenario, run_mode, x0_fallback=True):
 if __name__ == "__main__":
 
     # RUN_MODE = "latest"
-    RUN_MODE = "results/firmeur_tensor_20260703_211927"
+    RUN_MODE = "results/firmeur_tensor_20260716_142957"
 
     start_time = time.time()
     model = Model(model_location=RUN_MODE)
@@ -124,4 +162,4 @@ if __name__ == "__main__":
 
     for name in ("7percent",):
         scenario = model.scenarios[name]
-        run_statistics(scenario, RUN_MODE)
+        run_statistics(scenario, RUN_MODE, x_loc="latest_population.csv")

@@ -2,8 +2,8 @@
 import numpy as np
 
 from firm_ce.common.constants import JIT_ENABLED, NUM_THREADS, FASTMATH, BOUNDSCHECK
-from firm_ce.common.jit_overload import jitclass, njit
-from firm_ce.common.typing import boolean, nbfloat, unicode_type
+from firm_ce.common.jit_overload import jitclass, njit, prange
+from firm_ce.common.typing import boolean, nbfloat, unicode_type, TypedDict, nbintp
 from firm_ce.fast_methods import fleet_m, generator_m, line_m, network_m, static_m, storage_m, ltcosts_m
 from firm_ce.backend.scalar.balancing import balance_for_period
 from firm_ce.system.scalar.components import Fleet_InstanceType
@@ -516,3 +516,33 @@ def evaluate(solution: Solution_InstanceType) -> Solution_InstanceType:
     objective(solution)
     solution.evaluated = True
     return None
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, parallel=True)
+def build_eval_and_return_solutions(
+    xs: nbfloat[:, :],
+    static: ScenarioParameters_InstanceType,
+    fleet: Fleet_InstanceType,
+    network: Network_InstanceType,
+    balancing_type: unicode_type,
+    fixed_costs_threshold: nbfloat,
+) -> TypedDict[nbintp, Solution_InstanceType]:
+    """
+    Convenience for efficient post-processing - not to be used in optimisation loops
+    """
+    xs = xs.astype(nbfloat)
+    n_points = xs.shape[0]
+    solutions = TypedDict()
+
+    for j in prange(n_points):
+        solutions[j] = Solution(
+            xs[j],
+            static,
+            fleet,
+            network,
+            balancing_type,
+            fixed_costs_threshold,
+        )
+        evaluate(solutions[j])
+
+    return solutions

@@ -52,8 +52,9 @@ def mga_tensor_wrapper(
     penalties = np.zeros(n_points, dtype=npfloat)
 
     # This could be lifted out of loop, but I think not worth it
+    n_workers = min(NUM_THREADS, n_points)
     pool = TypedList()
-    for _ in range(NUM_THREADS):
+    for _ in range(n_workers):
         pool.append(SolutionTensor(xs[0], static))
 
     for j in prange(n_points):

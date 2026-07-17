@@ -28,8 +28,11 @@ class Statistics:
         solution: Solution = None,
         solutionTensor: SolutionTensor = None,
         solution_results_directory: str = None,
+        destination_folder_name: str = None,
     ):
         self.scenario = scenario
+
+        destination_folder_name = "statistics" if destination_folder_name is None else destination_folder_name
 
         x_is_None = x is None
         sol_is_None = solution is None
@@ -77,7 +80,8 @@ class Statistics:
 
         self.statistics_dir = self.create_solution_directory(
             solution_results_directory,
-            f"{self.scenario.name}_{self.scenario.config.balancing_type}"
+            f"{self.scenario.name}_{self.scenario.config.balancing_type}",
+            destination_folder_name,
         )
         self.result_files = None
 
@@ -210,9 +214,14 @@ class Statistics:
 
         return df_static
 
-    def create_solution_directory(self, result_directory: str, solution_name: str) -> str:
+    def create_solution_directory(
+        self,
+        result_directory: str,
+        solution_name: str,
+        folder: str = "statistics"
+    ) -> str:
         safe_name = sub(r"[^a-zA-Z0-9_\-]", "_", solution_name)
-        solution_dir = os.path.join(result_directory, safe_name, "statistics")
+        solution_dir = os.path.join(result_directory, safe_name, folder)
         os.makedirs(solution_dir, exist_ok=True)
         return solution_dir
 

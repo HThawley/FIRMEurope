@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import List
-
+import os
+import shutil
 import numpy as np
 
 from firm_ce.common.exceptions import ValidationError
@@ -73,6 +74,10 @@ class Model:
             model_data.model_name,
             logging_flag,
             str(model_data.config_data.get("model_location", "new"))
+        )
+        shutil.copy(
+            os.path.join(self.config_directory, "config.csv"),
+            os.path.join(model_data.results_dir, "config_archive.csv")
         )
         model_data.logger = init_model_logger(model_data.results_dir)
 

@@ -420,7 +420,7 @@ class Scenario:
 
         factors = {
             # 'name': <approx energy fraction> / <approx capacity factor>
-            "ccgt": 0.05 / 0.1,
+            "ccgt": 0.05 / 0.05,
             "pv_fixed": 0.3 / 0.15,
             "pv_track": 0.2 / 0.15,
             "onsw": 0.3 / 0.35,
@@ -428,6 +428,7 @@ class Scenario:
             "biogas": 0.02 / 0.2,
             "biomass": 0.02 / 0.2,
             "nuclear": 0.1 / 0.9,
+            "nuclear_LTE": np.inf,
         }
 
         for gen in self.fleet.generators.values():
@@ -436,10 +437,7 @@ class Scenario:
             # assignment pattern is avg / <capacity factor> * < net energy contrib.>
             if idx == -1:
                 continue
-            if unit_type in factors:
-                heuristic_x_rel[idx] = factors[unit_type]
-            if unit_type == "nuclear_LTE":
-                heuristic_x_rel[idx] = gen.max_build
+            heuristic_x_rel[idx] = factors[unit_type]
 
         for sto in self.fleet.storages.values():
             idx_p = sto.candidate_p_x_idx
