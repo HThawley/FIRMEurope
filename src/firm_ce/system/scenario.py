@@ -415,60 +415,56 @@ class Scenario:
         """ If no initial guess is provided, create an approximate feasible solution."""
         if not self.data_status:
             raise RuntimeError("Load datafiles before constructing approximate feasible solution")
+        if not self.relative_space_constructed:
+            raise RuntimeError(
+                "Must have called `scenario.construct_relative_space` before constructing approximate feasible solution"
+            )
 
         # Determine the size of the decision vector based on assigned indices
-        num_vars = len(self.fleet.generators) + (2 * len(self.fleet.storages)) + len(self.network.major_lines)
-        heuristic_x = np.zeros(num_vars, dtype=npfloat)
-
-        # Pre-calculate node metrics to avoid redundant array operations
-        nodal_demand = {node.id: node.mean_demand for node in self.network.nodes.values()}
+        heuristic_x_rel = np.zeros_like(self.lower_bounds_abs, dtype=npfloat)
 
         factors = {
             # 'name': <approx energy fraction> / <approx capacity factor>
-            "ccgt": 0.1 / 0.3,
-            "pv_fixed": 0.4 / 0.15,
+            "ccgt": 0.05 / 0.1,
+            "pv_fixed": 0.3 / 0.15,
             "pv_track": 0.2 / 0.15,
-            "onsw": 0.4 / 0.4,
-            "offw": 0.4 / 0.4,
+            "onsw": 0.3 / 0.35,
+            "offw": 0.3 / 0.5,
             "biogas": 0.02 / 0.2,
             "biomass": 0.02 / 0.2,
             "nuclear": 0.1 / 0.9,
         }
 
         for gen in self.fleet.generators.values():
-            avg = nodal_demand[gen.node.id]
-
             idx = gen.candidate_x_idx
             unit_type = gen.unit_type
             # assignment pattern is avg / <capacity factor> * < net energy contrib.>
             if idx == -1:
                 continue
             if unit_type in factors:
-                heuristic_x[idx] = avg * factors[unit_type]
+                heuristic_x_rel[idx] = factors[unit_type]
             if unit_type == "nuclear_LTE":
-                heuristic_x[idx] = gen.max_build
+                heuristic_x_rel[idx] = gen.max_build
 
         for sto in self.fleet.storages.values():
-            avg = nodal_demand[sto.node.id]
-
             idx_p = sto.candidate_p_x_idx
             if idx_p != -1:
-                heuristic_x[idx_p] = avg * 0.33  # multiple types of storage -> at least 1x peak
+                heuristic_x_rel[idx_p] = 0.33
 
             idx_e = sto.candidate_e_x_idx
             if idx_e != -1:
-                # supply < 0.25 > of average load for < 48 > hours
-                heuristic_x[idx_e] = avg * 0.25 * 48  # only applies to phes
+                # supply < 0.25 > of average load for < 64 > hours
+                heuristic_x_rel[idx_e] = 0.25 * 64  # only applies to phes
 
         for line in self.network.major_lines.values():
-            avg = nodal_demand[sto.node.id]
-
             idx = line.candidate_x_idx
-            max_connecting_peak = max(nodal_demand[line.node_end.id], nodal_demand[line.node_start.id])
 
-            heuristic_x[idx] = max_connecting_peak * 0.25
+            heuristic_x_rel[idx] = 0.2
 
-        return np.clip(heuristic_x, self.lower_bounds_abs, self.upper_bounds_abs)
+        heuristic_x_rel = np.clip(heuristic_x_rel, self.lower_bounds_rel, self.upper_bounds_rel)
+        heuristic_x_abs = self.convert_x_to_abs(heuristic_x_rel)
+
+        return heuristic_x_abs
 
     def assign_unit_type_idx(self) -> None:
         """
@@ -603,6 +599,48 @@ class Scenario:
             self.solution = solution
             self.solutionTensor = solutionTensor
         return solution, solutionTensor
+
+    def build_and_evaluate_noptima(self, xs, retain=True):
+        if not self.data_status:
+            raise RuntimeError("Load data first.")
+        xs = xs.astype(npfloat)
+
+        if self.config.backend == "tensor":
+            from firm_ce.backend.tensor.solution import build_eval_and_return_solutions, prep_solution_for_postprocessing
+            from firm_ce.constructors.tensor_to_scalar import map_tensor_to_scalar
+
+            print(f"Building and evaluating tensor noptima for scenario: '{self.name}'")
+            solutionTensors = build_eval_and_return_solutions(xs, self.staticTensor)  # dict
+            # dict -> list
+            solutionTensors = [solutionTensors[j] for j in range(len(xs))]
+            for sol in solutionTensors:
+                prep_solution_for_postprocessing(sol)
+            solutions = [map_tensor_to_scalar(self, sol) for sol in solutionTensors]
+
+        elif self.config.backend == "scalar":
+            from firm_ce.backend.scalar.solution import build_eval_and_return_solutions
+
+            print(f"Building and evaluating scalar noptima for scenario: '{self.name}'")
+            solutions = build_eval_and_return_solutions(
+                xs,
+                self.static,
+                self.fleet,
+                self.network,
+                self.config.balancing_type,
+                self.config.fixed_costs_threshold,
+            )  # dict
+            # dict -> list
+            solutions = [solutions[j] for j in range(len(xs))]
+            solutionTensors = None
+        else:
+            raise ValueError(f"Unknown config.backend. Got: '{self.config.backend}'")
+        if retain:
+            self.noptima = solutions
+            self.noptimaTensors = solutionTensors
+
+            self.solution = solutions[0]
+            self.solutionTensor = solutionTensors[0] if solutionTensors is not None else None
+        return solutions, solutionTensors
 
     @staticmethod
     def identify_tech(name: str) -> str:
