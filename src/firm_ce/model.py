@@ -75,6 +75,8 @@ class Model:
             logging_flag,
             str(model_data.config_data.get("model_location", "new"))
         )
+        if not os.path.isdir(model_data.results_dir):
+            os.mkdir(model_data.results_dir)
         shutil.copy(
             os.path.join(self.config_directory, "config.csv"),
             os.path.join(model_data.results_dir, "config_archive.csv")
