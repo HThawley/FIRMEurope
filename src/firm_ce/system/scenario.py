@@ -428,7 +428,7 @@ class Scenario:
             "biogas": 0.02 / 0.2,
             "biomass": 0.02 / 0.2,
             "nuclear": 0.1 / 0.9,
-            "nuclear_LTE": np.inf,
+            "nuclear_lte": np.inf,
         }
 
         for gen in self.fleet.generators.values():
