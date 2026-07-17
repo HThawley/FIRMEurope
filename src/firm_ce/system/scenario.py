@@ -158,8 +158,6 @@ class Scenario:
         self.lower_bounds_rel[idx] = self.lower_bounds_abs[idx] / denominator
         self.upper_bounds_rel[idx] = self.upper_bounds_abs[idx] / denominator
         self.abs_rel_scaler[idx] = denominator
-        if len(self.x0_abs) > 0:
-            self.x0_rel[idx] = self.x0_abs[idx] / denominator
 
     def construct_relative_space(self) -> None:
         if not self.data_status:
@@ -169,8 +167,6 @@ class Scenario:
         self.upper_bounds_rel = np.zeros_like(self.upper_bounds_abs)
         self.abs_rel_scaler = np.zeros_like(self.lower_bounds_abs)
         self._storage_pe_indices = []
-        if len(self.x0_abs) > 0:
-            self.x0_rel = np.zeros_like(self.x0_abs)
 
         processed_idx = []
         for gen in self.fleet.generators.values():
@@ -193,8 +189,6 @@ class Scenario:
                 self.lower_bounds_rel[idx_e] = 8.0
                 self.upper_bounds_rel[idx_e] = 500.0
                 self.abs_rel_scaler[idx_e] = -1.0
-                if len(self.x0_abs) > 0:
-                    self.x0_rel[idx_e] = self.x0_abs[idx_e] / self.x0_abs[idx_p] if self.x0_abs[idx_p] != 0 else 0
                 processed_idx.append(idx_e)
 
             if idx_p != -1:
@@ -351,11 +345,12 @@ class Scenario:
         static_m.set_year_energy_demand(self.static, self.network.nodes)
         self.data_status = True
 
-        if len(self.x0_abs) == 0:
-            self.x0_abs = self._approximate_feasible_solution()
-
         self.construct_relative_space()
         self.set_relative_scalers()
+
+        if self.x0_abs.size == 0:
+            self.x0_rel, self.x0_abs = self._approximate_feasible_solution()
+
         self.set_canonical_bounds_and_x0()
 
         if self.config.backend == "tensor":
@@ -464,7 +459,7 @@ class Scenario:
         heuristic_x_rel = np.clip(heuristic_x_rel, self.lower_bounds_rel, self.upper_bounds_rel)
         heuristic_x_abs = self.convert_x_to_abs(heuristic_x_rel)
 
-        return heuristic_x_abs
+        return heuristic_x_rel, heuristic_x_abs
 
     def assign_unit_type_idx(self) -> None:
         """
