@@ -281,7 +281,7 @@ class MhmgaSolverBase(BaseSolver):
                 else:
                     mhmga_config[key] = value
 
-        mhmga_config["parameterisation"] = self.config["parameterisation"]
+        mhmga_config["parameterisation"] = self.config.parameterisation
 
         # Inject structural data possibly relevant for loading populations later
         mhmga_config["ndim"] = len(self.scenario.lower_bounds)
