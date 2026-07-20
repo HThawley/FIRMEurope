@@ -80,7 +80,10 @@ def build_capacity(
 
     if capacity_type == "energy" and storage_instance.duration == 0:
         if storage_instance.relative_energy:  # storage in duration
+            # clip larger/smaller than feasible duration
             new_build_capacity = x_val_capacity * storage_instance.new_build_p
+            new_build_capacity = min(new_build_capacity, storage_instance.max_build_e)
+            new_build_capacity = max(new_build_capacity, storage_instance.min_build_e)
         else:
             new_build_capacity = x_val_capacity  # storage in GWh
 

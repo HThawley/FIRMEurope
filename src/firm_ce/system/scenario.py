@@ -291,7 +291,14 @@ class Scenario:
             raise RuntimeError("Load datafiles before constructing tensors")
 
         self.encode_nodes()
-        self.staticTensor = StaticTensor(self.static, self.fleet, self.network, self.asset_node_map, self.abs_rel_scaler)
+        self.staticTensor = StaticTensor(
+            self.static,
+            self.fleet,
+            self.network,
+            self.asset_node_map,
+            self.abs_rel_scaler,
+            self.config.parameterisation == "relative",
+        )
 
     def deconstruct_tensors(
         self,
@@ -350,6 +357,10 @@ class Scenario:
 
         if self.x0_abs.size == 0:
             self.x0_rel, self.x0_abs = self._approximate_feasible_solution()
+        elif getattr(self, "x0_rel", np.array([])).size == 0:
+            self.x0_rel = self.convert_x_to_rel(self.x0_abs)
+        elif getattr(self, "x0_abs", np.array([])).size == 0:
+            self.x0_abs = self.convert_x_to_abs(self.x0_rel)
 
         self.set_canonical_bounds_and_x0()
 
