@@ -18,6 +18,7 @@ if JIT_ENABLED:
     static_spec = [
         # -- Config --
         ("resolution", nbfloat),
+        ("allowance_frac", nbfloat),
         ("allowance", nbfloat),
         ("intervals", nbintp),
         ("asset_node_map", DictType(unicode_type, nbintp[:])),
@@ -160,7 +161,7 @@ class StaticTensor:
     ):
         self.relative_param = relative_param
         self.resolution = scenario_parameters.resolution
-        self.allowance = scenario_parameters.allowance
+        self.allowance_frac = scenario_parameters.allowance
         self.years = scenario_parameters.year_count
         self.years_float = scenario_parameters.year_float
         self.intervals = scenario_parameters.intervals_count
@@ -170,6 +171,8 @@ class StaticTensor:
         self.energy = scenario_parameters.demand_sum_mwh
         self.mean_annual_demand_mwh = (self.energy / self.years_float)
         self.abs_rel_scaler = abs_rel_scaler.copy()
+
+        self.allowance = self.allowance_frac * 0.001 * self.energy  # GWh
 
         self.legacy_costs = 0.0
         for gen in fleet.generators.values():
