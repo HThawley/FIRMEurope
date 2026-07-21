@@ -102,8 +102,6 @@ if JIT_ENABLED:
 
         # -- x-vector mapping --
         ("abs_rel_scaler", nbfloat[:]),
-        ("phe_max_e", nbfloat[:]),
-        ("phe_min_e", nbfloat[:]),
         ("pfix_offset", nbintp),
         ("pfix_nodes", nbintp[:]),
         ("pfix_len", nbintp),
@@ -374,8 +372,6 @@ class StaticTensor:
         safe_divide_2d_1d(self.TSnuke, counts[4], self.TSnuke)
         safe_divide_2d_1d(self.TSnlte, counts[5], self.TSnlte)
 
-        self.phe_max_e = np.zeros(self.nodes, npfloat)
-        self.phe_min_e = np.zeros(self.nodes, npfloat)
         for sto in fleet.storages.values():
             n = sto.node.order
             if "phes" in sto.unit_type:
@@ -391,11 +387,6 @@ class StaticTensor:
                 self.TShyd_inflow[:, n, 1] += sto.data
                 self.EhydP[n, 1] += sto.initial_power_capacity
                 self.EhydE[n, 1] += sto.initial_energy_capacity
-
-            if sto.unit_type == "nphes":
-                idx = sto.node.order
-                self.phe_max_e[idx] = sto.max_build_e
-                self.phe_min_e[idx] = sto.min_build_e
 
         self.Mnetload_mror = np.zeros((self.intervals, self.nodes), npfloat)
         self.Mnetload_mror = (self.Mload / (1 - self.internal_loss)) - self.Mror

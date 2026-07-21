@@ -132,13 +132,7 @@ class AssetTensor:
         for i in range(static.phe_len):
             x_idx = static.phe_offset + i
             node_idx = static.phe_nodes[i]
-            if static.relative_param:
-                _cap = x[x_idx] * self.CnphP[node_idx]
-                # enforce absolute energy bounds that aren't handled by relative parameterisation
-                _cap = min(static.phe_max_e[node_idx], _cap)
-                _cap = max(static.phe_min_e[node_idx], _cap)
-            else:
-                _cap = x[x_idx]
+            _cap = x[x_idx] * static.abs_rel_scaler[x_idx]
             self.CnphE[node_idx] += _cap
             self.CstorageE[node_idx, 0] += _cap
 

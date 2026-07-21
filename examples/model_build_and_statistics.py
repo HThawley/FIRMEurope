@@ -153,7 +153,7 @@ def run_statistics(scenario, run_mode, x_loc=None, x0_fallback=True):
 if __name__ == "__main__":
 
     # RUN_MODE = "latest"
-    RUN_MODE = "results/firmeur_tensor_20260716_142957"
+    RUN_MODE = "results/firmeur_derlab_new"
 
     start_time = time.time()
     model = Model(model_location=RUN_MODE)
@@ -162,4 +162,5 @@ if __name__ == "__main__":
 
     for name in ("7percent",):
         scenario = model.scenarios[name]
+        model.config.type = 'single_time'
         run_statistics(scenario, RUN_MODE, x_loc="latest_population.csv")

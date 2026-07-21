@@ -28,10 +28,10 @@ def map_tensor_to_scalar(
     if scenario.config.parameterisation == "relative":
         x_abs = scenario.convert_x_to_abs(solutionTensor.x)
     else:
-        x_abs = solutionTensor.x
+        x_abs = solutionTensor.x.copy()
 
     solution = Solution(
-        solutionTensor.x,
+        solutionTensor.x.copy(),
         scenario.static,
         scenario.fleet,
         scenario.network,

@@ -67,7 +67,7 @@ def build_capacity(
     if storage_instance.static_instance:
         raise_static_modification_error()
     if capacity_type == "power":
-        new_build_capacity = x_val_capacity * storage_instance.relative_scaler_p
+        new_build_capacity = x_val_capacity * storage_instance.relative_scaler
 
         storage_instance.power_capacity += new_build_capacity
         storage_instance.new_build_p += new_build_capacity
@@ -79,14 +79,7 @@ def build_capacity(
             storage_instance.new_build_e += new_build_capacity * storage_instance.duration
 
     if capacity_type == "energy" and storage_instance.duration == 0:
-        if storage_instance.relative_energy:  # storage in duration
-            # clip larger/smaller than feasible duration
-            new_build_capacity = x_val_capacity * storage_instance.new_build_p
-            new_build_capacity = min(new_build_capacity, storage_instance.max_build_e)
-            new_build_capacity = max(new_build_capacity, storage_instance.min_build_e)
-        else:
-            new_build_capacity = x_val_capacity  # storage in GWh
-
+        new_build_capacity = x_val_capacity * storage_instance.relative_scaler
         storage_instance.energy_capacity += new_build_capacity
         storage_instance.new_build_e += new_build_capacity
     return None

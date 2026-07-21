@@ -166,7 +166,6 @@ class Scenario:
         self.lower_bounds_rel = np.zeros_like(self.lower_bounds_abs)
         self.upper_bounds_rel = np.zeros_like(self.upper_bounds_abs)
         self.abs_rel_scaler = np.zeros_like(self.lower_bounds_abs)
-        self._storage_pe_indices = []
 
         processed_idx = []
         for gen in self.fleet.generators.values():
@@ -186,13 +185,8 @@ class Scenario:
             idx_e = sto.candidate_e_x_idx
             if idx_e != -1:
                 # new-build phes is the only unit type here
-                self.lower_bounds_rel[idx_e] = 8.0
-                self.upper_bounds_rel[idx_e] = 500.0
-                self.abs_rel_scaler[idx_e] = -1.0
+                self.scale_index(idx_e, nodal_demand)
                 processed_idx.append(idx_e)
-
-            if idx_p != -1:
-                self._storage_pe_indices.append((idx_p, idx_e))
 
         for line in self.network.major_lines.values():
             idx = line.candidate_x_idx
@@ -212,12 +206,6 @@ class Scenario:
 
         x_rel = x_abs / self.abs_rel_scaler
 
-        for idx_p, idx_e in self._storage_pe_indices:
-            if idx_p != -1 and idx_e != -1:
-                # axis "..." handles 2D of shape (nsolutions, ndim)
-                p_val = np.maximum(x_abs[..., idx_p], 1e-6)  # zero-safe
-                x_rel[..., idx_e] = x_abs[..., idx_e] / p_val
-
         return x_rel
 
     def convert_x_to_abs(self, x_rel: NDArray[float]) -> NDArray[float]:
@@ -225,11 +213,6 @@ class Scenario:
             raise RuntimeError("Must have called `scenario.construct_relative_space` before running arbitrary conversion")
 
         x_abs = x_rel * self.abs_rel_scaler
-
-        for idx_p, idx_e in self._storage_pe_indices:
-            if idx_p != -1 and idx_e != -1:
-                # axis "..." handles 2D of shape (nsolutions, ndim)
-                x_abs[..., idx_e] = x_rel[..., idx_e] * x_abs[..., idx_p]
 
         return x_abs
 
@@ -243,12 +226,8 @@ class Scenario:
             for sto in self.fleet.storages.values():
                 idx_p = sto.candidate_p_x_idx
                 if idx_p != -1:
-                    sto.relative_scaler_p = self.abs_rel_scaler[idx_p]
-                idx_e = sto.candidate_e_x_idx
-                if idx_e != -1:
-                    sto.relative_energy = True
-                else:
-                    sto.relative_energy = False
+                    sto.relative_scaler = self.abs_rel_scaler[idx_p]
+                # energy uses the same scaler
 
             for line in self.network.major_lines.values():
                 idx = line.candidate_x_idx

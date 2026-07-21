@@ -301,8 +301,7 @@ if JIT_ENABLED:
         ("candidate_e_x_idx", nbintp),
         ("data_status", boolean),
         ("data", nbfloat[:]),
-        ("relative_scaler_p", nbfloat),
-        ("relative_energy", boolean),
+        ("relative_scaler", nbfloat),
         # Dynamic
         ("new_build_p", nbfloat),
         ("new_build_e", nbfloat),
@@ -383,8 +382,7 @@ class Storage:
 
         self.candidate_p_x_idx = -1
         self.candidate_e_x_idx = -1
-        self.relative_scaler_p = 1.0
-        self.relative_energy = False
+        self.relative_scaler = 1.0
         if self.inflows:
             self.data_status = False
             self.data = np.empty((0,), dtype=npfloat)
