@@ -78,6 +78,10 @@ class DeSolverBase(BaseSolver):
             writer = csv.writer(f)
             writer.writerow([intermediate_result.fun, *intermediate_result.x])
 
+        with open(os.path.join(out_dir, "current_optimum.csv"), "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([intermediate_result.fun, "", *intermediate_result.x])
+
         if SAVE_POPULATION:
             combined_block = np.column_stack((intermediate_result.population,
                                               intermediate_result.population_energies))
@@ -516,6 +520,14 @@ class MhmgaSolver(MhmgaSolverBase):
                 *population.optima_points[0]
             ]
             writer.writerow(best_row)
+
+        with open(os.path.join(out_dir, "current_optimum.csv"), "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                population.optima_raw_objectives[0],
+                population.optima_violations[0],
+                *population.optima_points[0]
+            ])
 
         if SAVE_POPULATION:
             # Vectorized flattening: reshape(-1) turns (num_niches, pop_size) into (total_pop,)

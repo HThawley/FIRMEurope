@@ -75,6 +75,7 @@ class Statistics:
             # next, use x to construct a new solution/solutionTensor
             self.solution, self.solutionTensor = scenario.build_and_evaluate(x, False)
 
+        self.accessor = Accessor(self.solution, "GW")
         if solution_results_directory is None:
             solution_results_directory = self.scenario.results_dir
 
@@ -103,12 +104,10 @@ class Statistics:
         EvaluateTensor(self.solutionTensor)
         end_time = time.time()
         print(f"Statistics solution tensor evaluation time: {end_time - start_time:.4f} seconds")
-        print(f"{self.scenario.name} LCOE: {self.solution.lcoe} [$/MWh], " f"Penalties: {self.solution.penalties}")
+        print(f"{self.scenario.name} LCOE: {self.solutionTensor.lcoe} [$/MWh], " f"Penalties: {self.solutionTensor.penalties}")
 
-    def _build_master_tables(self):
-        accessor = Accessor(self.solution, "GW")
-        static_data = []
-
+    def _write_temporal_parquet(self) -> None:
+        """Writes temporal trace data directly to Parquet via PyArrow."""
         self.temporal_file_path = os.path.join(self.statistics_dir, "temporal_data.parquet")
         if os.path.exists(self.temporal_file_path):
             os.remove(self.temporal_file_path)
@@ -120,99 +119,130 @@ class Statistics:
             ('Unit Type', pa.string()),
             ('Node', pa.string()),
             ('Variable', pa.string()),
-            ('Value', pa.float32())  # Downcast to float32
+            ('Value', pa.float32())
         ])
         writer = pq.ParquetWriter(self.temporal_file_path, schema)
         time_steps = np.arange(self.intervals_count, dtype=np.int32)
         n_steps = len(time_steps)
 
         def write_trace(meta, variable_name, trace_array):
-            # Convert to pyarrow arrays to bypass Pandas overhead
             table = pa.Table.from_arrays([
                 time_steps,
-                pa.array([meta[1]] * n_steps),  # Name
-                pa.array([meta[2]] * n_steps),  # Type
-                pa.array([meta[4]] * n_steps),  # Unit Type
-                pa.array([meta[5]] * n_steps),  # Node
+                pa.array([meta[1]] * n_steps),
+                pa.array([meta[2]] * n_steps),
+                pa.array([meta[4]] * n_steps),
+                pa.array([meta[5]] * n_steps),
                 pa.array([variable_name] * n_steps),
                 pa.array(trace_array.astype(np.float32))
             ], schema=schema)
             writer.write_table(table)
 
-        asset_classes = ["nodes", "generators", "storages", "major_lines"]  # , "minor_lines"]
+        asset_classes = ["nodes", "generators", "storages", "major_lines"]
+        for asset_class in asset_classes:
+            is_node = asset_class == "nodes"
+            assets = self.accessor.get_assets(asset_class)
+            for asset in assets.values():
+                meta_data = (
+                    asset.id,
+                    asset.name,
+                    self.accessor.get_display_name(asset_class),
+                    asset_class,
+                    getattr(asset, "unit_type", "node" if is_node else None),
+                    asset.node.name if hasattr(asset, "node") else (asset.name if is_node else None),
+                )
+
+                if is_node:
+                    write_trace(meta_data, "Demand", self.accessor.get_power_trace(asset))
+                    write_trace(meta_data, "Spillage", self.accessor.get_spillage_trace(asset))
+                    write_trace(meta_data, "Deficit", self.accessor.get_deficit_trace(asset))
+                elif self.accessor.is_line(asset):
+                    write_trace(meta_data, "Flow", self.accessor.get_transmission_trace(asset))
+                else:
+                    write_trace(meta_data, "Dispatch", self.accessor.get_power_trace(asset))
+                    if self.accessor.is_storage(asset):
+                        write_trace(meta_data, "Stored_Energy", self.accessor.get_storage_level_trace(asset))
+                        write_trace(meta_data, "Charge", self.accessor.get_charge_trace(asset))
+                        write_trace(meta_data, "Discharge", self.accessor.get_discharge_trace(asset))
+                    if self.accessor.has_inflows(asset):
+                        write_trace(meta_data, "Inflows", self.accessor.get_inflow_trace(asset))
+
+        for asset in self.accessor.get_assets("fuels").values():
+            meta_data = (asset.id, asset.name, self.accessor.get_display_name("fuels"), "fuels", "fuel", "network")
+            write_trace(meta_data, "Fuel_Remaining", self.accessor.get_remaining_energy_trace(asset))
+
+        writer.close()
+
+    def _build_static_df(self) -> pl.DataFrame:
+        """Constructs static asset and nodal metadata directly as a Polars DataFrame."""
+        static_data = []
+        asset_classes = ["nodes", "generators", "storages", "major_lines"]
         meta_data_names = ("Asset ID", "Asset Name", "Asset Type", "Asset Class", "Unit Type", "Node")
         power_build_types = ("Existing Power", "New Build Power", "Min Build Power", "Max Build Power")
         energy_build_types = ("Existing Energy", "New Build Energy", "Min Build Energy", "Max Build Energy")
 
         for asset_class in asset_classes:
             is_node = asset_class == "nodes"
-            assets = accessor.get_assets(asset_class)
+            assets = self.accessor.get_assets(asset_class)
             for asset in assets.values():
                 meta_data = (
-                    asset.id, asset.name, accessor.get_display_name(asset_class), asset_class,
+                    asset.id,
+                    asset.name,
+                    self.accessor.get_display_name(asset_class),
+                    asset_class,
                     getattr(asset, "unit_type", "node" if is_node else None),
                     asset.node.name if hasattr(asset, "node") else (asset.name if is_node else None),
                 )
                 row = dict(zip(meta_data_names, meta_data))
-
-                row.update(accessor.get_all_costs(asset, errors="coerce"))
-
-                row["Power Capacity"] = accessor.get_power_capacity(asset, errors="coerce")
-                row["Energy Capacity"] = accessor.get_energy_capacity(asset, errors="coerce")
-                row.update(dict(zip(power_build_types, accessor.get_build_power(asset, errors="coerce"))))
-                row.update(dict(zip(energy_build_types, accessor.get_build_energy(asset, errors="coerce"))))
+                row.update(self.accessor.get_all_costs(asset, errors="coerce"))
+                row["Power Capacity"] = self.accessor.get_power_capacity(asset, errors="coerce")
+                row["Energy Capacity"] = self.accessor.get_energy_capacity(asset, errors="coerce")
+                row.update(dict(zip(power_build_types, self.accessor.get_build_power(asset, errors="coerce"))))
+                row.update(dict(zip(energy_build_types, self.accessor.get_build_energy(asset, errors="coerce"))))
                 static_data.append(row)
 
-                if is_node:
-                    write_trace(meta_data, "Demand", accessor.get_power_trace(asset))
-                    write_trace(meta_data, "Spillage", accessor.get_spillage_trace(asset))
-                    write_trace(meta_data, "Deficit", accessor.get_deficit_trace(asset))
+        df_static = pl.DataFrame(static_data)
 
-                # elif accessor.is_major_line(asset):
-                elif accessor.is_line(asset):
-                    write_trace(meta_data, "Flow", accessor.get_transmission_trace(asset))
-
-                else:
-                    # For Generators, and Storage
-                    write_trace(meta_data, "Dispatch", accessor.get_power_trace(asset))
-
-                    # Batteries / Storage
-                    if accessor.is_storage(asset):
-                        write_trace(meta_data, "Stored_Energy", accessor.get_storage_level_trace(asset))
-                        write_trace(meta_data, "Charge", accessor.get_charge_trace(asset))
-                        write_trace(meta_data, "Discharge", accessor.get_discharge_trace(asset))
-
-                    if accessor.has_inflows(asset):
-                        write_trace(meta_data, "Inflows", accessor.get_inflow_trace(asset))
-
-        for asset in accessor.get_assets("fuels").values():
-            meta_data = (asset.id, asset.name, accessor.get_display_name("fuels"), "fuels", "fuel", "network")
-            row = dict(zip(meta_data_names, meta_data))
-            write_trace(meta_data, "Fuel_Remaining", accessor.get_remaining_energy_trace(asset))
-
-        writer.close()
-
-        df_static = pd.DataFrame(static_data)
-        if not df_static.empty:
-            node_mask = df_static["Asset Class"] == "nodes"
-            for column in (
-                "Power Capacity", "Energy Capacity", "Existing Power", "Existing Energy", "New Build Power",
-                "Min Build Power", "Max Build Power", "New Build Energy", "Min Build Energy", "Max Build Energy",
+        if not df_static.is_empty():
+            sum_cols = [
+                "Power Capacity", "Energy Capacity", "Existing Power", "Existing Energy",
+                "New Build Power", "Min Build Power", "Max Build Power",
+                "New Build Energy", "Min Build Energy", "Max Build Energy",
                 "Annualised Build", "Fixed O&M", "Variable O&M", "Fuel Cost"
-            ):
-                nodal_values = df_static[
-                    df_static["Asset Type"].isin(("Generator", "Storage"))
-                ].fillna(0.0).groupby("Node")[column].sum()
+            ]
 
-                df_static.loc[node_mask, column] = df_static.loc[node_mask, "Asset Name"].map(nodal_values)
+            # Compute nodal sums for generation and storage
+            nodal_sums = (
+                df_static.filter(pl.col("Asset Type").is_in(["Generator", "Storage"]))
+                .group_by("Node")
+                .agg([pl.col(c).fill_null(0.0).sum().alias(f"{c}_nodal") for c in sum_cols])
+            )
 
-            df_static.set_index("Asset ID", inplace=True)
-            # Fill NaNs for assets that missed certain optional fields (like costs for nodes)
-            # df_static.fillna(0.0, inplace=True)
+            # Join nodal aggregates back to Node rows
+            df_static = df_static.join(
+                nodal_sums,
+                left_on="Asset Name",
+                right_on="Node",
+                how="left"
+            )
 
-        self.master_tables_built = True
+            override_exprs = [
+                pl.when(pl.col("Asset Class") == "nodes")
+                  .then(pl.col(f"{c}_nodal").fill_null(0.0))
+                  .otherwise(pl.col(c))
+                  .alias(c)
+                for c in sum_cols
+            ]
+
+            df_static = df_static.with_columns(override_exprs).drop([f"{c}_nodal" for c in sum_cols])
 
         return df_static
+
+    def _ensure_master_tables(self) -> None:
+        """Ensures temporal Parquet side effects are written and static data is built."""
+        if not self.master_tables_built:
+            self._write_temporal_parquet()
+            self.df_static = self._build_static_df()
+            self.master_tables_built = True
 
     def create_solution_directory(
         self,
@@ -229,10 +259,7 @@ class Statistics:
         """
         Generates all result files using the high-level master DataFrames.
         """
-        if not self.master_tables_built:
-            # Ensure master tables are built if not already done
-            if not hasattr(self, "df_static"):
-                self.df_static = self._build_master_tables()
+        self._ensure_master_tables()
 
         file_functions = {
             "x_abs": self.generate_x_abs_file,
@@ -249,16 +276,16 @@ class Statistics:
             "levelised_cost_NODES": self._view_levelised_cost_nodes,
             "energy_balance_NETWORK": self._view_energy_balance_network,
             "energy_balance_NODES": self._view_energy_balance_nodes,
-            "energy_balance_ASSETS": self._view_energy_balance_assets,
+            # "energy_balance_ASSETS": self._view_energy_balance_assets,
         }
 
         for name, func in file_functions.items():
             if name in file or file == 'all':
                 self.result_files[name] = func()
-            if write:
-                self.result_files[name].write()
-            if delete:
-                del self.result_files[name]
+                if write:
+                    self.result_files[name].write()
+                if delete:
+                    del self.result_files[name]
 
         self.statistics_generated = True
         return None
@@ -478,7 +505,7 @@ class Statistics:
 
     def _view_component_costs(self, aggregation) -> ResultFile:
         cost_cols = ["Annualised Build", "Fixed O&M", "Variable O&M", "Fuel Cost"]
-        df_assets = pl.from_pandas(self.df_static.reset_index())
+        df_assets = self.df_static
 
         for c in cost_cols:
             if c not in df_assets.columns:
@@ -491,13 +518,12 @@ class Statistics:
             ).select(["Node", "Asset Type", "Power Capacity"] + cost_cols).fill_null(0.0)
 
             # 2. Extract and apportion Lines 50/50
-            accessor = Accessor(self.solution, "GW")
             line_rows = []
-            for line in accessor.get_assets("major_lines").values():
-                cap = accessor.get_power_capacity(line, errors="coerce")
+            for line in self.accessor.get_assets("major_lines").values():
+                cap = self.accessor.get_power_capacity(line, errors="coerce")
                 if pd.isna(cap): cap = 0.0
 
-                costs = accessor.get_all_costs(line, errors="coerce")
+                costs = self.accessor.get_all_costs(line, errors="coerce")
 
                 row_base = {"Asset Type": "Line", "Power Capacity": cap / 2.0}
                 for c in cost_cols:
@@ -601,16 +627,14 @@ class Statistics:
         lf_base = lf_all.filter(~pl.col("Variable").is_in(["Flow", "Fuel_Remaining"]))
         lf_fuel = lf_all.filter(pl.col("Variable") == "Fuel_Remaining")
 
-        accessor = Accessor(self.solution, "GW")
-        lines = accessor.get_assets('major_lines')
+        lines = self.accessor.get_assets('major_lines')
         line_data = []
         for a in lines.values():
-            parts = str(a.name).split("-")
             line_data.append({
                 "Asset Name": a.name,
                 "Unit Type": a.unit_type,
-                "Node_A": parts[0] if len(parts) > 0 else "Unknown",
-                "Node_B": parts[1] if len(parts) > 1 else "Unknown",
+                "Node_A": a.node_start.name,
+                "Node_B": a.node_end.name,
                 "Eff": getattr(a, 'efficiency', 1.0)
             })
         lf_lines = pl.LazyFrame(line_data, schema_overrides={"Eff": pl.Float32})
@@ -823,7 +847,8 @@ class Statistics:
             (pl.col("Inflows") / resolution).alias("Inflows")
         )
 
-        df_costs = pl.from_pandas(self.df_static.reset_index())
+        # Native Polars dataframe integration
+        df_costs = self.df_static
         for c in cost_cols:
             if c not in df_costs.columns:
                 df_costs = df_costs.with_columns(pl.lit(0.0).alias(c))
@@ -832,6 +857,7 @@ class Statistics:
             (pl.col(c) / 1e6).alias(f"{c} [M$/yr]") for c in cost_cols
         ]).select(string_cols + [f"{c} [M$/yr]" for c in cost_cols])
 
+        # Missing initialization restored here:
         df_merged = df_costs.join(df_totals, on=["Asset Name", "Unit Type"], how="left").fill_null(0.0)
 
         # Ensure required temporal columns exist before mapping
@@ -964,14 +990,12 @@ class Statistics:
 
     def _get_base_capacity_df(self, index_cols: list[str], numeric_cols: list[str]) -> pl.DataFrame:
         """Extracts Generator and Storage assets for capacity aggregations."""
-        df_assets = pl.from_pandas(self.df_static.reset_index())
-        df_base = df_assets.filter(pl.col("Asset Type").is_in(["Generator", "Storage"]))
+        df_base = self.df_static.filter(pl.col("Asset Type").is_in(["Generator", "Storage"]))
 
         if "Node" in index_cols:
             df_base = df_base.filter(pl.col("Node").is_not_null())
 
         df_base = df_base.select(index_cols + numeric_cols).fill_null(0.0)
-        # Cast to Float64 for safe concatenation later
         return df_base.with_columns([pl.col(c).cast(pl.Float64) for c in numeric_cols])
 
     def _get_lines_capacity_df(
@@ -981,11 +1005,10 @@ class Statistics:
         gwh_cols: list[str]
     ) -> pl.DataFrame:
         """Extracts transmission lines and formats them for single or double-counted capacity aggregation."""
-        accessor = Accessor(self.solution, "GW")
         line_rows = []
-        for line in accessor.get_assets("major_lines").values():
-            base_p = accessor.get_power_capacity(line, errors="coerce")
-            b_limits = accessor.get_build_power(line, errors="coerce")
+        for line in self.accessor.get_assets("major_lines").values():
+            base_p = self.accessor.get_power_capacity(line, errors="coerce")
+            b_limits = self.accessor.get_build_power(line, errors="coerce")
             vals = [0.0 if pd.isna(x) else x for x in [base_p] + list(b_limits)]
 
             row = {"Asset Type": "Line", "Unit Type": getattr(line, "unit_type", "transmission")}
@@ -1014,15 +1037,13 @@ class Statistics:
 
     def _get_lines_flow_lf(self) -> pl.LazyFrame:
         """Extracts metadata for transmission lines to join with temporal flow traces."""
-        accessor = Accessor(self.solution, "GW")
         line_data = []
-        for a in accessor.get_assets('major_lines').values():
-            parts = str(a.name).split("-")
+        for a in self.accessor.get_assets('major_lines').values():
             line_data.append({
                 "Asset Name": a.name,
                 "Unit Type": getattr(a, 'unit_type', 'transmission'),
-                "Node_A": parts[0] if len(parts) > 0 else "Unknown",
-                "Node_B": parts[1] if len(parts) > 1 else "Unknown",
+                "Node_A": a.node_start.name,
+                "Node_B": a.node_end.name,
                 "Eff": getattr(a, 'efficiency', 1.0)
             })
         return pl.LazyFrame(line_data, schema_overrides={"Eff": pl.Float32})
