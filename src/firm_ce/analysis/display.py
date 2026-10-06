@@ -121,6 +121,219 @@ class Display:
         """
         return self._dispatch_plot(data_type="capacity", atlas=atlas, delta=delta, **kwargs)
 
+    def plot_fleet_summary(self, energy_type="both", save_path=None):
+        """
+        Plots a 3x3 grid of pie charts summarizing the fleet:
+        Row 1: Power Capacities (Generation, Transmission, Storage)
+        Row 2: Energy Capacities (Hydro, Storage) & Storage Charging Sources
+        Row 3: Energy Flow (Generation, Transmission, Storage)
+        """
+        import seaborn as sns
+        import numpy as np
+        
+        if energy_type == "consumption":
+            raise NotImplementedError("Methods for attributing curtailment are not yet defined.")
+        elif energy_type not in ["generation", "both"]:
+            raise ValueError("energy_type must be 'consumption', 'generation', or 'both'")
+
+        accessor = Accessor(self.solution, "GW")
+        year_count = self.solution.static.year_count
+        
+        # Organize data by layout rows
+        row1 = {"Generation (Power)": {}, "Transmission (Power)": {}, "Rechargeable Storage (Power)": {}}
+        row2 = {"Hydro (Energy Cap)": {}, "Rechargeable Storage (Energy Cap)": {}, "Rechargeable Storage (Sources)": {}}
+        row3 = {"Generation (Energy Mix)": {}, "Transmission (Flows)": {}, "Rechargeable Storage (Discharge)": {}}
+
+        # Set up aesthetics
+        tx_palette = sns.color_palette("mako", 4)
+        src_palette = sns.color_palette("Set2", 8)
+        
+        custom_colors = {
+            "AC OHL": tx_palette[0],
+            "AC OHL (Mountain)": tx_palette[1],
+            "DC Subsea": tx_palette[2],
+            "DC Underground": tx_palette[3],
+            "Losses": (0.7, 0.7, 0.7),
+            "Curtailment": (0.7, 0.7, 0.7),
+            "Spillage": (0.6, 0.8, 0.9),
+            "Bioenergy": (0.4, 0.7, 0.3),
+            "New PHES": sns.color_palette("Paired")[1],
+            "Legacy PHES": sns.color_palette("Paired")[0],
+            "Battery": sns.color_palette("Paired")[10],
+            "New PHES (Electrical)": src_palette[0],
+            "Legacy PHES (Electrical)": src_palette[1],
+            "Legacy PHES (Inflows)": src_palette[2],
+            "Battery (Electrical)": src_palette[3],
+        }
+
+        def get_chart_color(label):
+            if label in custom_colors:
+                return custom_colors[label]
+            if hasattr(self, '_get_color'):
+                color = self._get_color(label)
+                if color != (0.5, 0.5, 0.5) or label == "Fossil Gas":
+                    return color
+            return (0.5, 0.5, 0.5)
+
+        def process_tech_label(asset):
+            tech = self.scenario.identify_tech(asset.name)
+            if tech in ["Biomass", "Biogas"]:
+                return "Bioenergy"
+            return tech
+
+        def process_storage_label(asset):
+            raw_type = str(getattr(asset, 'unit_type', '')).lower()
+            if raw_type == 'nphes':
+                return 'New PHES'
+            elif raw_type in ['clphes', 'olphes']:
+                return 'Legacy PHES'
+            elif 'bess' in raw_type or raw_type == 'battery':
+                return 'Battery'
+            return process_tech_label(asset)
+
+        # 1. Generators 
+        for asset in accessor.get_assets("generators").values():
+            label = process_tech_label(asset)
+            
+            row1["Generation (Power)"][label] = row1["Generation (Power)"].get(label, 0) + accessor.get_power_capacity(asset)
+            
+            energy_yr = (accessor.get_discharge_net(asset) / year_count) / 1000
+            row3["Generation (Energy Mix)"][label] = row3["Generation (Energy Mix)"].get(label, 0) + energy_yr
+            
+            if energy_type == "both":
+                curtail_yr = (accessor.get_nominal_curtailment_net(asset) / year_count) / 1000
+                row3["Generation (Energy Mix)"]["Curtailment"] = row3["Generation (Energy Mix)"].get("Curtailment", 0) + curtail_yr
+
+        # 2. Storages (Routing Hydro to Generation, extracting BESS/PHES to Storage)
+        for asset in accessor.get_assets("storages").values():
+            base_tech = process_tech_label(asset)
+            raw_type = str(getattr(asset, 'unit_type', '')).lower()
+            
+            # Hydro leaks into storage charts if the raw_type doesn't perfectly match "hydro" (e.g., "pond" or "ror"). 
+            # Checking base_tech isolates it cleanly.
+            if base_tech in ["Hydro", "Run of River"] or raw_type in ["hydro", "pond", "ror"]:
+                label = base_tech
+                
+                # Power and Discharge route to Generation
+                row1["Generation (Power)"][label] = row1["Generation (Power)"].get(label, 0) + accessor.get_power_capacity(asset)
+                energy_yr = (accessor.get_discharge_net(asset) / year_count) / 1000
+                row3["Generation (Energy Mix)"][label] = row3["Generation (Energy Mix)"].get(label, 0) + energy_yr
+                
+                if energy_type == "both":
+                    curtail_yr = (accessor.get_nominal_curtailment_net(asset) / year_count) / 1000
+                    row3["Generation (Energy Mix)"]["Curtailment"] = row3["Generation (Energy Mix)"].get("Curtailment", 0) + curtail_yr
+                
+                # Hydro Energy Capacity populates the isolated pie in Row 2
+                row2["Hydro (Energy Cap)"][label] = row2["Hydro (Energy Cap)"].get(label, 0) + accessor.get_energy_capacity(asset)
+
+            else:
+                # Rechargeable Storage Processing
+                label = process_storage_label(asset)
+                
+                row1["Rechargeable Storage (Power)"][label] = row1["Rechargeable Storage (Power)"].get(label, 0) + accessor.get_power_capacity(asset)
+                row2["Rechargeable Storage (Energy Cap)"][label] = row2["Rechargeable Storage (Energy Cap)"].get(label, 0) + accessor.get_energy_capacity(asset)
+                
+                energy_yr = (accessor.get_discharge_net(asset) / year_count) / 1000
+                row3["Rechargeable Storage (Discharge)"][label] = row3["Rechargeable Storage (Discharge)"].get(label, 0) + energy_yr
+                
+                if energy_type == "both":
+                    losses_yr = (accessor.get_storage_losses(asset) / year_count) / 1000
+                    spillage_yr = (accessor.get_storage_spillage_net(asset) / year_count) / 1000
+                    
+                    row3["Rechargeable Storage (Discharge)"]["Losses"] = row3["Rechargeable Storage (Discharge)"].get("Losses", 0) + losses_yr
+                    row3["Rechargeable Storage (Discharge)"]["Spillage"] = row3["Rechargeable Storage (Discharge)"].get("Spillage", 0) + spillage_yr
+
+                # Rechargeable Storage Sources (Row 2, Col 3)
+                if raw_type in ["clphes", "olphes", "nphes", "bess2h", "bess4h"]:
+                    prefix = label # Inherit the clean 'Legacy PHES', 'New PHES', 'Battery' label mapped above
+                    
+                    elec_label = f"{prefix} (Electrical)"
+                    elec_val = (abs(accessor.get_charge_net(asset)) / year_count) / 1000
+                    row2["Rechargeable Storage (Sources)"][elec_label] = row2["Rechargeable Storage (Sources)"].get(elec_label, 0) + elec_val
+                    
+                    if accessor.has_inflows(asset):
+                        inflow_label = f"{prefix} (Inflows)"
+                        inflow_val = ((np.sum(accessor.get_inflow_trace(asset)) * accessor.resolution) / year_count) / 1000
+                        row2["Rechargeable Storage (Sources)"][inflow_label] = row2["Rechargeable Storage (Sources)"].get(inflow_label, 0) + inflow_val
+
+        # 3. Transmission (Major Lines only)
+        transmission_labels = {
+            "ac_ohl_transmission": "AC OHL",
+            "ac_ohl_mountain_transmission": "AC OHL (Mountain)",
+            "dc_subsea_transmission": "DC Subsea",
+            "dc_underground_transmission": "DC Underground"
+        }
+        
+        for asset in accessor.get_assets("major_lines").values():
+            raw_u_type = getattr(asset, 'unit_type', 'transmission')
+            label = transmission_labels.get(raw_u_type, raw_u_type)
+            
+            row1["Transmission (Power)"][label] = row1["Transmission (Power)"].get(label, 0) + accessor.get_power_capacity(asset)
+            
+            energy_yr = (accessor.get_line_use_net(asset) / year_count) / 1000
+            row3["Transmission (Flows)"][label] = row3["Transmission (Flows)"].get(label, 0) + energy_yr
+            
+            if energy_type == "both":
+                losses_yr = (accessor.get_line_losses(asset) / year_count) / 1000
+                row3["Transmission (Flows)"]["Losses"] = row3["Transmission (Flows)"].get("Losses", 0) + losses_yr
+
+        # Plotting Setup
+        fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(20, 18))
+        fig.subplots_adjust(hspace=0.4, wspace=0.6)
+
+        def draw_row(data_dict, row_axes, units):
+            # Calculate max total dynamically per unit type so GWh doesn't distort TWh scales
+            unit_maxes = {}
+            for mix, unit in zip(data_dict.values(), units):
+                total = sum(v for v in mix.values() if v > 0)
+                unit_maxes[unit] = max(unit_maxes.get(unit, 1), total)
+
+            items = list(data_dict.items())
+            
+            for i, ax in enumerate(row_axes):
+                if i >= len(items):
+                    ax.axis('off')
+                    continue
+                    
+                category, mix = items[i]
+                unit = units[i]
+                clean_mix = {k: v for k, v in mix.items() if v > 1e-6}
+                total = sum(clean_mix.values())
+                
+                if total <= 0:
+                    ax.axis('off')
+                    continue
+                
+                radius = np.sqrt(total / unit_maxes[unit])
+                labels = list(clean_mix.keys())
+                values = list(clean_mix.values())
+                colors = [get_chart_color(label) for label in labels]
+
+                wedges, _ = ax.pie(
+                    values, radius=radius, colors=colors, 
+                    wedgeprops={'linewidth': 0.5, 'edgecolor': 'black'}
+                )
+                
+                ax.set_title(f"{category}\nTotal: {total:,.1f} {unit}", pad=10)
+                ax.set_aspect('equal')
+                
+                ax.legend(
+                    wedges, labels, 
+                    loc="center left", 
+                    bbox_to_anchor=(1, 0.5), 
+                    frameon=False, 
+                    fontsize=9
+                )
+
+        # Execute Grid Renders
+        draw_row(row1, axes[0], ["GW", "GW", "GW"])
+        draw_row(row2, axes[1], ["GWh", "GWh", "TWh/yr"])
+        draw_row(row3, axes[2], ["TWh/yr", "TWh/yr", "TWh/yr"])
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.show()
+
     def _dispatch_plot(
             self,
             data_type: str,

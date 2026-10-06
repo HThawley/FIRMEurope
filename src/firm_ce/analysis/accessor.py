@@ -588,22 +588,66 @@ class Accessor:
         """
         return np.sum(np.abs(self.get_transmission_trace(asset))) * self.resolution
 
+    def get_storage_losses_trace(self, asset: Any) -> NDArray[npfloat]:
+        """
+        Returns thermodynamic conversion losses time series (MW).
+        Calculated strictly from charge/discharge efficiencies.
+        """
+        charge = np.abs(self.get_charge_trace(asset))
+        discharge = self.get_discharge_trace(asset)
+        
+        # Safely default to 1.0 (100% efficient) if asset lacks the parameter
+        eta_c = getattr(asset, "charge_efficiency", 1.0)
+        eta_d = getattr(asset, "discharge_efficiency", 1.0)
+        
+        # Loss = Energy lost during charging + Energy lost during discharging
+        losses = charge * (1.0 - eta_c) + discharge * ((1.0 / eta_d) - 1.0)
+        return losses
+
     def get_storage_losses(self, asset: Any) -> float:
         """
-        Returns the total storage losses (MWh) for storage assets over the simulation period.
+        Returns the total thermodynamic storage losses (MWh) over the simulation.
         """
+        return np.sum(self.get_storage_losses_trace(asset)) * self.resolution
+
+    def get_storage_spillage_net(self, asset: Any) -> float:
+        """
+        Returns the total spilled inflows (MWh) over the simulation.
+        Calculated via mass balance: Total Energy In - Total Energy Out - Delta Storage - Thermo Losses.
+        """
+        inflows = np.sum(self.get_inflow_trace(asset)) * self.resolution if self.has_inflows(asset) else 0.0
+        charge = np.abs(self.get_charge_net(asset))
+        discharge = self.get_discharge_net(asset)
+        
         stored_energy = self.get_storage_level_trace(asset)
-        return (-(np.sum(self.get_charge_trace(asset)) + np.sum(self.get_discharge_trace(asset)))
-                * self.resolution
-                - (stored_energy[-1] - stored_energy[0])
-                )
+        delta_e = stored_energy[-1] - stored_energy[0]
+        
+        # 1. Calculate Black-Box apparent loss
+        total_missing_energy = (charge + inflows) - discharge - delta_e
+        
+        # 2. Subtract known thermodynamic losses
+        thermo_loss = self.get_storage_losses(asset)
+        
+        # 3. The remainder is spillage (clamped to 0 to eliminate negative floating-point noise)
+        spillage = max(0.0, total_missing_energy - thermo_loss)
+        return spillage
+
+    def get_line_losses_trace(self, asset: Any) -> NDArray[npfloat]:
+        """
+        Returns the transmission losses time series (MW).
+        """
+        if not self.is_line(asset):
+            raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Line and therefore has no transmission losses.")
+        
+        flows = self.get_transmission_trace(asset)
+        efficiency = self.get_transm_efficiency(asset)
+        return np.abs(flows) * (1.0 - efficiency)
 
     def get_line_losses(self, asset: Any) -> float:
         """
         Returns the total line losses (MWh) for line assets over the simulation period.
         """
-        # TODO: line losses
-        return self.get_zero()
+        return np.sum(self.get_line_losses_trace(asset)) * self.resolution
 
     def get_nominal_curtailment_net(self, asset: Any) -> NDArray[npfloat]:
         """
