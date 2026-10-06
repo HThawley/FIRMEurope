@@ -140,30 +140,18 @@ class Accessor:
             case "storage":
                 return asset.power_capacity
             case _:
-                if errors == 'raise':
-                    raise ValueError(f"Unknown asset type for capacity retrieval: {asset.name} ({asset.object_class})")
-                elif errors == 'coerce':
-                    return np.nan
-                raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+                return _handle_errors(errors, f"Unknown asset type for capacity retrieval: {asset.name} ({asset.object_class})")
 
     @staticmethod
     def get_energy_capacity(asset: Any, errors: str = 'raise') -> float:
         """Safe retrieval of installed capacity in GW."""
         match asset.object_class:
             case "generator" | "line":
-                if errors == 'raise':
-                    raise ValueError(f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity.")
-                elif errors == 'coerce':
-                    return np.nan
-                raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+                return _handle_errors(errors, f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity.")
             case "storage":
                 return asset.energy_capacity
             case _:
-                if errors == 'raise':
-                    raise ValueError(f"Unknown asset type for capacity retrieval: {asset.name} ({asset.object_class})")
-                elif errors == 'coerce':
-                    return np.nan
-                raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+                return _handle_errors(errors, f"Unknown asset type for capacity retrieval: {asset.name} ({asset.object_class})")
 
     def get_capacity(self, asset: Any, attribute: str, errors: str = 'raise') -> float:
         """Safe retrieval of installed capacity in GW."""
@@ -184,30 +172,22 @@ class Accessor:
             case "storage":
                 return asset.new_build_p
             case _:
-                if errors == 'raise':
-                    raise ValueError(f"Unknown asset type for new_build (power) retrieval: {asset.name} ({asset.object_class})")
-                elif errors == 'coerce':
-                    return np.nan
-                raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+                return _handle_errors(
+                    errors, f"Unknown asset type for new_build (power) retrieval: {asset.name} ({asset.object_class})"
+                )
 
     @staticmethod
     def get_new_build_energy(asset: Any, errors: str = 'raise') -> float:
         """Safe retrieval of new build capacity in GW."""
         match asset.object_class:
             case "generator" | "line":
-                if errors == 'raise':
-                    raise ValueError(f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity.")
-                elif errors == 'coerce':
-                    return np.nan
-                raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+                return _handle_errors(errors, f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity.")
             case "storage":
                 return asset.new_build_e
             case _:
-                if errors == 'raise':
-                    raise ValueError(f"Unknown asset type for new_build (energy) retrieval: {asset.name} ({asset.object_class})")
-                elif errors == 'coerce':
-                    return np.nan
-                raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+                return _handle_errors(
+                    errors, f"Unknown asset type for new_build (energy) retrieval: {asset.name} ({asset.object_class})"
+                )
 
     def get_new_build_capacity(self, asset: Any, attribute: str, errors: str = 'raise') -> float:
         """Safe retrieval of new build capacity in GW."""
@@ -227,31 +207,21 @@ class Accessor:
             case "storage":
                 return asset.initial_power_capacity
             case _:
-                if errors == 'raise':
-                    raise ValueError("Unknown asset type for existing capacity (power) retrieval:"
-                                     f"{asset.name} ({asset.object_class})")
-                elif errors == 'coerce':
-                    return np.nan
-                raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+                return _handle_errors(
+                    errors, f"Unknown asset type for existing capacity (power) retrieval: {asset.name} ({asset.object_class})"
+                )
 
     @staticmethod
     def get_existing_energy_capacity(asset: Any, errors: str = 'raise') -> float:
         match asset.object_class:
             case "generator" | "line":
-                if errors == 'raise':
-                    raise ValueError(f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity.")
-                elif errors == 'coerce':
-                    return np.nan
-                raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+                return _handle_errors(errors, f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity.")
             case "storage":
-                return asset.initial_power_capacity
+                return asset.initial_energy_capacity
             case _:
-                if errors == 'raise':
-                    raise ValueError("Unknown asset type for existing capacity (energy) retrieval:"
-                                     f"{asset.name} ({asset.object_class})")
-                elif errors == 'coerce':
-                    return np.nan
-                raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+                return _handle_errors(
+                    errors, f"Unknown asset type for existing capacity (energy) retrieval: {asset.name} ({asset.object_class})"
+                )
 
     def get_existing_capacity(self, asset: Any, attribute: str, errors: str = 'raise') -> float:
         match attribute.lower():
@@ -271,11 +241,10 @@ class Accessor:
             case "storage":
                 return asset.initial_power_capacity, asset.new_build_p, asset.min_build_p, asset.max_build_p
             case _:
-                if errors == 'raise':
-                    raise ValueError(f"Unknown asset type for build limits (power) retrieval: {asset.name} ({asset.object_class})")
-                elif errors == 'coerce':
-                    return (np.nan, np.nan, np.nan, np.nan)
-                raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+                return _handle_errors(
+                    errors, f"Unknown asset type for build limits (power) retrieval: {asset.name} ({asset.object_class})",
+                    (np.nan, np.nan, np.nan, np.nan),
+                )
 
     @staticmethod
     def get_build_energy(asset: Any, errors: str = 'raise') -> tuple[float, float, float]:
@@ -284,17 +253,17 @@ class Accessor:
             case "storage":
                 return asset.initial_energy_capacity, asset.new_build_e, asset.min_build_e, asset.max_build_e
             case "generator" | "line":
-                if errors == 'raise':
-                    raise ValueError(f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity.")
-                elif errors == 'coerce':
-                    return (np.nan, np.nan, np.nan, np.nan)
-                raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+                return _handle_errors(
+                    errors,
+                    f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity.",
+                    (np.nan, np.nan, np.nan, np.nan),
+                )
             case _:
-                if errors == 'raise':
-                    raise ValueError(f"Unknown asset type for build limits (energy) retrieval: {asset.name} ({asset.object_class})")
-                elif errors == 'coerce':
-                    return (np.nan, np.nan, np.nan, np.nan)
-                raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+                return _handle_errors(
+                    errors,
+                    f"Unknown asset type for build limits (energy) retrieval: {asset.name} ({asset.object_class})",
+                    (np.nan, np.nan, np.nan, np.nan),
+                )
 
     def get_build(self, asset: Any, attribute: str, errors: str = 'raise') -> tuple[float, float, float]:
         """Returns the build limits for capacity (existing, new_build, min_build, max_build)."""
@@ -314,11 +283,7 @@ class Accessor:
             e_cost = getattr(asset.lt_costs, "annualised_build_e", 0.0)
             return p_cost + e_cost
 
-        if errors == 'raise':
-            raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
-        elif errors == 'coerce':
-            return np.nan
-        raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+        return _handle_errors(errors, f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
 
     @staticmethod
     def get_fixed_om_cost(asset: Any, errors: str = 'raise') -> float:
@@ -326,11 +291,7 @@ class Accessor:
         if hasattr(asset, "lt_costs"):
             return getattr(asset.lt_costs, "fom", 0.0)
 
-        if errors == 'raise':
-            raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
-        elif errors == 'coerce':
-            return np.nan
-        raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+        return _handle_errors(errors, f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
 
     @staticmethod
     def get_variable_om_cost(asset: Any, errors: str = 'raise') -> float:
@@ -338,11 +299,7 @@ class Accessor:
         if hasattr(asset, "lt_costs"):
             return getattr(asset.lt_costs, "vom", 0.0)
 
-        if errors == 'raise':
-            raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
-        elif errors == 'coerce':
-            return np.nan
-        raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+        return _handle_errors(errors, f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
 
     @staticmethod
     def get_fuel_cost(asset: Any, errors: str = 'raise') -> float:
@@ -350,11 +307,7 @@ class Accessor:
         if hasattr(asset, "lt_costs"):
             return getattr(asset.lt_costs, "fuel", 0.0)
 
-        if errors == 'raise':
-            raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
-        elif errors == 'coerce':
-            return np.nan
-        raise ValueError(f"Unknown error handling method: {errors}. Expected 'raise' or 'coerce'.")
+        return _handle_errors(errors, f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
 
     def get_all_costs(self, asset: Any, errors: str = 'raise') -> dict[str, float]:
         """Returns a dictionary containing all standard long-term costs for an asset."""
@@ -385,6 +338,17 @@ class Accessor:
         raise ValueError(f"Unknown asset type for discharge efficiency retrival: {asset.name} ({asset.object_class})")
 
     @staticmethod
+    def get_round_efficiency(asset: Any) -> float:
+        """
+        Returns the discharge efficiency for a storage asset.
+        """
+        if not hasattr(asset, "discharge_efficiency"):
+            raise ValueError(f"Asset does not have 'discharge_efficiency' attribute: {asset.name} ({asset.object_class})")
+        if not hasattr(asset, "charge_efficiency"):
+            raise ValueError(f"Asset does not have 'charge_efficiency' attribute: {asset.name} ({asset.object_class})")
+        return asset.discharge_efficiency * asset.charge_efficiency
+
+    @staticmethod
     def get_transm_efficiency(asset: Any) -> float:
         """
         Returns the efficiency of a transmission line or route
@@ -405,9 +369,13 @@ class Accessor:
                     return self.get_charge_efficiency(asset)
                 elif attribute == "discharge":
                     return self.get_discharge_efficiency(asset)
+                elif attribute == "round":
+                    return self.get_charge_efficiency(asset) * self.get_discharge_efficiency(asset)
                 else:
-                    ValueError("Cannot retreive efficiency of storage object. Supply 'attribute'='charge' or 'discharge' or use"
-                               "dedicated functions 'get_charge_efficiency' and 'get_discharge_efficiency'")
+                    raise ValueError(
+                        "Cannot retreive efficiency of storage object. Supply attribute (charge, discharge, round) kwarg or use"
+                        "dedicated functions 'get_charge_efficiency' and 'get_discharge_efficiency'"
+                    )
         raise ValueError(f"Unknown asset type for efficiency retrival: {asset.name} ({asset.object_class})")
 
     # -- Traces --
@@ -601,15 +569,15 @@ class Accessor:
     def get_discharge_net(self, asset: Any) -> float:
         """
         Returns the total dispatched energy (MWh) for storage assets over the simulation period.
-        Only counts positive discharge energy.
+        Only counts positive dispatch energy.
         """
         power_trace = self.get_discharge_trace(asset)
         return np.sum(power_trace) * self.resolution
 
     def get_charge_net(self, asset: Any) -> float:
         """
-        Returns the total dispatched energy (MWh) for storage assets over the simulation period.
-        Only counts positive discharge energy.
+        Returns the total storged energy (MWh) for storage assets over the simulation period.
+        Only counts negative dispatch energy.
         """
         power_trace = self.get_charge_trace(asset)
         return np.sum(power_trace) * self.resolution
@@ -654,6 +622,7 @@ class Accessor:
         Curtailment merit order:
             1. Storage and flexibles (in theory, they should not be dispathcing anyway, but included for robustness)
             2. solar, wind, ror
+            3. reserved for future dev
             4. Others
         """
         if self.is_storage(asset) or self.is_flexible(asset):
@@ -762,3 +731,12 @@ class Accessor:
         Returns the total imported energy (MWh) for a node over the simulation.
         """
         return np.sum(self.get_gross_import_trace(node)) * self.resolution
+
+
+# -- General Utility Helpers --
+def _handle_errors(errors: str, message: str, coerce_value=np.nan):
+    if errors == 'raise':
+        raise ValueError(message)
+    elif errors == 'coerce':
+        return coerce_value
+    raise ValueError(f"Unknown error handling method. Expected 'raise' or 'coerce'. Got: {errors}")
