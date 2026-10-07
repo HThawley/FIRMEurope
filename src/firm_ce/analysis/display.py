@@ -60,6 +60,11 @@ class Display:
         self._load_map_data("./inputs/map/europe.geojson")
         self._init_colors()
 
+        self.set_dpi(300)
+        self.set_base_fontsize(12)
+        self.set_large_fontsize(14)
+        self.set_small_fontsize(10)
+
     def plot(
         self,
         data_type: str = "energy",
@@ -121,7 +126,7 @@ class Display:
         """
         return self._dispatch_plot(data_type="capacity", atlas=atlas, delta=delta, **kwargs)
 
-    def plot_fleet_summary(self, energy_type="both", alternative=0, save_path=None):
+    def plot_fleet_summary(self, energy_type="both", alternative=0, rows="all", save_path=None):
         """
         Plots a 3x3 grid of pie charts summarizing the fleet for a target solution.
         """
@@ -130,20 +135,51 @@ class Display:
         elif energy_type not in ["generation", "both"]:
             raise ValueError("energy_type must be 'consumption', 'generation', or 'both'")
 
+        if isinstance(rows, str):
+            if rows.lower() != "all":
+                raise ValueError(f"Argument 'rows' expected 'all' or a list with elements in {{0, 1, 2}}. Got '{rows}'")
+            rows = [0, 1, 2]
+        elif isinstance(rows, (list, tuple)):
+            if not all([x in (0, 1, 2) for x in rows]):
+                raise ValueError(f"Argument 'rows' expected 'all' or a list with elements in {{0, 1, 2}}. Got {rows}")
+        else:
+            raise TypeError(f"Argument 'rows' expected a string, list or tuple. Got: {type(rows)}")
+        nrows = len(rows)
+        if nrows == 1:
+            hspace, wspace = 0.1, 0.6
+            figsize = (16, 8)
+        elif nrows == 2:
+            hspace, wspace = 0.1, 0.5
+            figsize = (18, 12)
+        else:
+            hspace, wspace = 0.4, 0.5
+            figsize = (18, 14)
+
         # Mimic _dispatch_plot logic for selecting solution
         target_sol = self.noptima[alternative] if self.mhmga and self.noptima else self.solution
 
-        row1, row2, row3 = self._aggregate_fleet_summary_data(target_sol, energy_type)
+        row0, row1, row2 = self._aggregate_fleet_summary_data(target_sol, energy_type)
 
-        fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(20, 18))
-        fig.subplots_adjust(hspace=0.4, wspace=0.6)
+        fig, axes = plt.subplots(nrows=nrows, ncols=3, figsize=figsize)
+        fig.subplots_adjust(hspace=hspace, wspace=wspace)
 
-        self._draw_summary_pie_row(row1, axes[0], ["GW", "GW", "GW"])
-        self._draw_summary_pie_row(row2, axes[1], ["GWh", "GWh", "TWh/yr"])
-        self._draw_summary_pie_row(row3, axes[2], ["TWh/yr", "TWh/yr", "TWh/yr"])
+        ax_iter = iter(np.atleast_2d(axes))
+
+        if 0 in rows:
+            ax = next(ax_iter)
+            self._draw_summary_pie_row(row0, ax, ["GW", "GW", "GW"])
+        if 1 in rows:
+            ax = next(ax_iter)
+            self._draw_summary_pie_row(row1, ax, ["GWh", "GWh", "TWh/yr"])
+        if 2 in rows:
+            ax = next(ax_iter)
+            self._draw_summary_pie_row(row2, ax, ["TWh/yr", "TWh/yr", "TWh/yr"])
+
+        if nrows==3:
+            fig.suptitle("Network Overview", fontsize=self.large_fontsize)
 
         if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches="tight")
+            plt.savefig(save_path, dpi=self.dpi, bbox_inches="tight")
 
         return fig
 
@@ -233,16 +269,16 @@ class Display:
                 delta_dict = self._calculate_delta_dict(ref_data, comp_data)
 
                 self._draw_delta_on_axis(ax, delta_dict, global_max_delta, **kwargs)
-                ax.set_title(f"Delta: Alt {target_idx} - Alt {ref_idx}", fontsize=10)
+                ax.set_title(f"Delta: Alt {target_idx} - Alt {ref_idx}")
             else:
                 self._draw_solution_on_axis(ax, target_sol, data_type, **kwargs)
-                ax.set_title(f"Absolute: Alt {target_idx}", fontsize=10)
+                ax.set_title(f"Absolute: Alt {target_idx}")
 
         build_info = f" - Capacity: {kwargs.get('build', 'all')}" if data_type == "capacity" else ""
-        fig.suptitle(f"{data_type.capitalize()} Mix{build_info}", fontsize=14)
+        fig.suptitle(f"{data_type.capitalize()} Mix{build_info}", fontsize=self.large_fontsize)
 
         if kwargs.get("save_path"):
-            plt.savefig(kwargs.get("save_path"), dpi=300, bbox_inches="tight")
+            plt.savefig(kwargs.get("save_path"), dpi=self.dpi, bbox_inches="tight")
 
         return axes if atlas else axes[0]
 
@@ -467,7 +503,7 @@ class Display:
         if figsize is None:
             figsize = (8 * ncols, 8 * nrows)
 
-        fig, axes = plt.subplots(nrows, ncols, figsize=figsize, dpi=150, squeeze=False)
+        fig, axes = plt.subplots(nrows, ncols, figsize=figsize, dpi=self.dpi, squeeze=False)
         axes_flat = axes.flatten()
 
         for ax in axes_flat:
@@ -635,6 +671,9 @@ class Display:
         """Extracts and formats the 3x3 datasets for a specific solution."""
         accessor = Accessor(solution, "GW")
         year_count = self.scenario.static.year_count
+        total_demand_yr = self.scenario.static.demand_sum_mwh / 1000 / 1000 / year_count # TWh / year
+        total_generation_yr = 0.0
+        total_non_curt_loss_yr = 0.0
 
         row1 = {"Generation (Power)": {}, "Transmission (Power)": {}, "Rechargeable Storage (Power)": {}}
         row2 = {"Hydro (Energy Cap)": {}, "Rechargeable Storage (Energy Cap)": {}, "Rechargeable Storage (Sources)": {}}
@@ -643,91 +682,85 @@ class Display:
         # 1. Generators
         for asset in accessor.get_assets("generators").values():
             label = self._get_display_label(asset)
-            row1["Generation (Power)"][label] = row1["Generation (Power)"].get(label, 0) + accessor.get_power_capacity(
-                asset
-            )
+            dictsafe_check(row1["Generation (Power)"], label)
+            row1["Generation (Power)"][label] += accessor.get_power_capacity(asset)
 
-            energy_yr = (accessor.get_discharge_net(asset) / year_count) / 1000
-            row3["Generation (Energy Mix)"][label] = row3["Generation (Energy Mix)"].get(label, 0) + energy_yr
-
-            if energy_type == "both":
-                curtail_yr = (accessor.get_nominal_curtailment_net(asset) / year_count) / 1000
-                row3["Generation (Energy Mix)"]["Curtailment"] = (
-                    row3["Generation (Energy Mix)"].get("Curtailment", 0) + curtail_yr
-                )
+            dictsafe_check(row3["Generation (Energy Mix)"], label)
+            energy_yr = accessor.get_energy_net(asset) / year_count / 1000  # TWh/yr
+            total_generation_yr += energy_yr
+            row3["Generation (Energy Mix)"][label] += energy_yr
 
         # 2. Storages
         for asset in accessor.get_assets("storages").values():
             base_tech = self.scenario.identify_tech(asset.name)
             raw_type = str(getattr(asset, "unit_type", "")).lower()
 
-            if base_tech in ["Hydro", "Run of River"] or raw_type in ["hydro", "pond", "ror"]:
+            if base_tech in ["Hydro", "Pondage", "Run of River"] or raw_type in ["hydro", "pond", "ror"]:
                 label = base_tech
-                row1["Generation (Power)"][label] = row1["Generation (Power)"].get(
-                    label, 0
-                ) + accessor.get_power_capacity(asset)
-                row2["Hydro (Energy Cap)"][label] = row2["Hydro (Energy Cap)"].get(
-                    label, 0
-                ) + accessor.get_energy_capacity(asset)
+                dictsafe_check(row1["Generation (Power)"], label)
+                dictsafe_check(row2["Hydro (Energy Cap)"], label)
+                row1["Generation (Power)"][label] += accessor.get_power_capacity(asset)
+                row2["Hydro (Energy Cap)"][label] += accessor.get_energy_capacity(asset)
 
-                energy_yr = (accessor.get_discharge_net(asset) / year_count) / 1000
-                row3["Generation (Energy Mix)"][label] = row3["Generation (Energy Mix)"].get(label, 0) + energy_yr
-                if energy_type == "both":
-                    curtail_yr = (accessor.get_nominal_curtailment_net(asset) / year_count) / 1000
-                    row3["Generation (Energy Mix)"]["Curtailment"] = (
-                        row3["Generation (Energy Mix)"].get("Curtailment", 0) + curtail_yr
-                    )
+                dictsafe_check(row3["Generation (Energy Mix)"], label)
+                energy_yr = accessor.get_energy_net(asset) / year_count / 1000  # TWh/yr
+                total_generation_yr += energy_yr
+                row3["Generation (Energy Mix)"][label] += energy_yr
+
             else:
                 label = self._get_display_label(asset)
-                row1["Rechargeable Storage (Power)"][label] = row1["Rechargeable Storage (Power)"].get(
-                    label, 0
-                ) + accessor.get_power_capacity(asset)
-                row2["Rechargeable Storage (Energy Cap)"][label] = row2["Rechargeable Storage (Energy Cap)"].get(
-                    label, 0
-                ) + accessor.get_energy_capacity(asset)
+                dictsafe_check(row1["Rechargeable Storage (Power)"], label)
+                dictsafe_check(row2["Rechargeable Storage (Energy Cap)"], label)
+                row1["Rechargeable Storage (Power)"][label] += accessor.get_power_capacity(asset)
+                row2["Rechargeable Storage (Energy Cap)"][label] += accessor.get_energy_capacity(asset)
 
-                energy_yr = (accessor.get_discharge_net(asset) / year_count) / 1000
-                row3["Rechargeable Storage (Discharge)"][label] = (
-                    row3["Rechargeable Storage (Discharge)"].get(label, 0) + energy_yr
-                )
+                dictsafe_check(row3["Rechargeable Storage (Discharge)"], label)
+                energy_yr = accessor.get_discharge_net(asset) / year_count / 1000  # TWh/yr
+                total_generation_yr += energy_yr
+                row3["Rechargeable Storage (Discharge)"][label] += energy_yr
+
                 if energy_type == "both":
-                    losses_yr = (accessor.get_storage_losses(asset) / year_count) / 1000
-                    spillage_yr = (accessor.get_storage_spillage_net(asset) / year_count) / 1000
-                    row3["Rechargeable Storage (Discharge)"]["Losses"] = (
-                        row3["Rechargeable Storage (Discharge)"].get("Losses", 0) + losses_yr
-                    )
-                    row3["Rechargeable Storage (Discharge)"]["Spillage"] = (
-                        row3["Rechargeable Storage (Discharge)"].get("Spillage", 0) + spillage_yr
-                    )
+                    dictsafe_check(row3["Rechargeable Storage (Discharge)"], "Losses")
+                    dictsafe_check(row3["Rechargeable Storage (Discharge)"], "Spillage")
+                    losses_yr = accessor.get_storage_loss_net(asset) / year_count / 1000
+                    total_non_curt_loss_yr += losses_yr
+                    # spillage is not fed by generation so should not be in total_non_curt_loss
+                    spillage_yr = accessor.get_storage_spillage_net(asset) / year_count / 1000
+                    row3["Rechargeable Storage (Discharge)"]["Losses"] += losses_yr
+                    row3["Rechargeable Storage (Discharge)"]["Spillage"] += spillage_yr
 
                 if raw_type in ["clphes", "olphes", "nphes", "bess2h", "bess4h"]:
                     elec_label = f"{label} (Electrical)"
                     elec_val = (abs(accessor.get_charge_net(asset)) / year_count) / 1000
-                    row2["Rechargeable Storage (Sources)"][elec_label] = (
-                        row2["Rechargeable Storage (Sources)"].get(elec_label, 0) + elec_val
-                    )
+                    dictsafe_check(row2["Rechargeable Storage (Sources)"], elec_label)
+                    row2["Rechargeable Storage (Sources)"][elec_label] += elec_val
 
                     if accessor.has_inflows(asset):
                         inflow_label = f"{label} (Inflows)"
-                        inflow_val = (
-                            (np.sum(accessor.get_inflow_trace(asset)) * accessor.resolution) / year_count
-                        ) / 1000
-                        row2["Rechargeable Storage (Sources)"][inflow_label] = (
-                            row2["Rechargeable Storage (Sources)"].get(inflow_label, 0) + inflow_val
-                        )
+                        dictsafe_check(row2["Rechargeable Storage (Sources)"], inflow_label)
+                        inflow_yr = np.sum(accessor.get_inflow_net(asset)) / year_count / 1000
+                        row2["Rechargeable Storage (Sources)"][inflow_label] += inflow_yr
 
         # 3. Transmission
         for asset in accessor.get_assets("major_lines").values():
             label = self._get_display_label(asset)
-            row1["Transmission (Power)"][label] = row1["Transmission (Power)"].get(
-                label, 0
-            ) + accessor.get_power_capacity(asset)
+            dictsafe_check(row1["Transmission (Power)"], label)
+            row1["Transmission (Power)"][label] += accessor.get_power_capacity(asset)
 
-            energy_yr = (accessor.get_line_use_net(asset) / year_count) / 1000
-            row3["Transmission (Flows)"][label] = row3["Transmission (Flows)"].get(label, 0) + energy_yr
+            energy_yr = accessor.get_line_use_net(asset) / year_count / 1000  # TWh/yr
+            dictsafe_check(row3["Transmission (Flows)"], label)
+            row3["Transmission (Flows)"][label] += energy_yr
             if energy_type == "both":
-                losses_yr = (accessor.get_line_losses(asset) / year_count) / 1000
-                row3["Transmission (Flows)"]["Losses"] = row3["Transmission (Flows)"].get("Losses", 0) + losses_yr
+                dictsafe_check(row3["Transmission (Flows)"], "Losses")
+                losses_yr = accessor.get_line_losses(asset) / year_count / 1000  # TWh/yr
+                total_non_curt_loss_yr += losses_yr
+                row3["Transmission (Flows)"]["Losses"] += losses_yr
+
+        if energy_type == "both":
+            row3["Generation (Energy Mix)"]["Curtailment"] = 0.0
+            for node in accessor.get_assets("nodes").values():
+                curtail_yr = accessor.get_spillage_net(node) /year_count / 1000
+                row3["Generation (Energy Mix)"]["Curtailment"] += curtail_yr
 
         return row1, row2, row3
 
@@ -765,7 +798,7 @@ class Display:
 
             ax.set_title(f"{category}\nTotal: {total:,.1f} {unit}", pad=10)
             ax.set_aspect("equal")
-            ax.legend(wedges, labels, loc="center left", bbox_to_anchor=(1, 0.5), frameon=False, fontsize=9)
+            ax.legend(wedges, labels, loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
 
     def _init_colors(self):
         self.colors = sns.color_palette("Paired")
@@ -827,3 +860,28 @@ class Display:
             title="Technology",
             frameon=False,
         )
+
+    def set_dpi(self, dpi: int):
+        self.dpi = dpi
+
+    def set_base_fontsize(self, size: int):
+        self.base_fontsize = size
+
+        # Apply globally to all matplotlib plots generated by this instance
+        plt.rcParams.update({'font.size': self.base_fontsize})
+
+    def set_large_fontsize(self, size: int):
+        self.large_fontsize = size
+
+    def set_small_fontsize(self, size: int):
+        self.small_fontsize = size
+        plt.rcParams.update({
+            'legend.fontsize': self.small_fontsize,
+            'legend.title_fontsize': self.small_fontsize,
+            'axes.titlesize': self.small_fontsize  # Applies to subplot titles
+        })
+
+def dictsafe_check(d, key, val=0.0):
+    """ Check whether a label is present and add it if not """
+    if key not in d:
+        d[key] = val

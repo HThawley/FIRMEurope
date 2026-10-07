@@ -602,39 +602,53 @@ class Accessor:
 
     def get_charge_net(self, asset: Any) -> float:
         """
-        Returns the total storged energy (MWh) for storage assets over the simulation period.
+        Returns the total stored energy (MWh) for storage assets over the simulation period.
         Only counts negative dispatch energy.
         """
         power_trace = self.get_charge_trace(asset)
         return np.sum(power_trace) * self.resolution
+
+    def get_charge_loss_net(self, asset: Any) -> float:
+        """
+        Returns the total energy (MWh) lost to thermodynamic efficiency while charging
+        """
+        eff = self.get_charge_efficiency(asset)
+        trace = (1 - eff) * self.get_charge_trace(asset)
+        return np.sum(trace) * self.resolution
+
+    def get_discharge_loss_net(self, asset: Any) -> float:
+        """
+        Returns the total energy (MWh) lost to thermodynamic efficiency while charging
+        """
+        eff = self.get_discharge_efficiency(asset)
+        trace = (1 - eff) * self.get_discharge_trace(asset)
+        return np.sum(trace) * self.resolution
+
+    def get_storage_loss_net(self, asset: Any) -> float:
+        """
+        Returns the total thermodynamic storage losses (MWh) lost to thermodynamic efficiency
+        """
+        return self.get_discharge_loss_net(asset) + self.get_charge_loss_net(asset)
+
+    def get_inflow_net(self, asset: Any) -> float:
+        """
+        Returns the total energy inflowing (MWh) into an asset
+        """
+        # inflow is in MWh not MW
+        return np.sum(self.get_inflow_trace(asset))
+
+    def get_spillage_net(self, asset: Any) -> float:
+        """
+        Return total curtailment
+        """
+        trace = self.get_spillage_trace(asset)
+        return np.sum(trace) * self.resolution
 
     def get_line_use_net(self, asset: Any) -> float:
         """
         Returns the total line use (MWh) for line assets over the simulation period.
         """
         return np.sum(np.abs(self.get_transmission_trace(asset))) * self.resolution
-
-    def get_storage_losses_trace(self, asset: Any) -> NDArray[npfloat]:
-        """
-        Returns thermodynamic conversion losses time series (MW).
-        Calculated strictly from charge/discharge efficiencies.
-        """
-        charge = np.abs(self.get_charge_trace(asset))
-        discharge = self.get_discharge_trace(asset)
-
-        # Safely default to 1.0 (100% efficient) if asset lacks the parameter
-        eta_c = getattr(asset, "charge_efficiency", 1.0)
-        eta_d = getattr(asset, "discharge_efficiency", 1.0)
-
-        # Loss = Energy lost during charging + Energy lost during discharging
-        losses = charge * (1.0 - eta_c) + discharge * ((1.0 / eta_d) - 1.0)
-        return losses
-
-    def get_storage_losses(self, asset: Any) -> float:
-        """
-        Returns the total thermodynamic storage losses (MWh) over the simulation.
-        """
-        return np.sum(self.get_storage_losses_trace(asset)) * self.resolution
 
     def get_storage_spillage_net(self, asset: Any) -> float:
         """
@@ -652,9 +666,8 @@ class Accessor:
         total_missing_energy = (charge + inflows) - discharge - delta_e
 
         # 2. Subtract known thermodynamic losses
-        thermo_loss = self.get_storage_losses(asset)
+        thermo_loss = self.get_storage_loss_net(asset)
 
-        # 3. The remainder is spillage (clamped to 0 to eliminate negative floating-point noise)
         spillage = max(0.0, total_missing_energy - thermo_loss)
         return spillage
 
@@ -805,6 +818,41 @@ class Accessor:
         Returns the total imported energy (MWh) for a node over the simulation.
         """
         return np.sum(self.get_gross_import_trace(node)) * self.resolution
+
+    def get_gross_demand(self) -> NDArray[npfloat]:
+        """Returns the system-wide gross demand time series."""
+        total = np.zeros(self.solution.static.intervals_count, dtype=npfloat)
+        for asset in self.get_assets("nodes").values():
+            total += self.get_power_trace(asset)
+        return total
+
+    def get_gross_deficit(self) -> NDArray[npfloat]:
+        """Returns the system-wide gross deficit time series."""
+        total = np.zeros(self.solution.static.intervals_count, dtype=npfloat)
+        for asset in self.get_assets("nodes").values():
+            total += self.get_deficit_trace(asset)
+        return total
+
+    def get_gross_generation(self) -> NDArray[npfloat]:
+        """Returns the system-wide gross generation time series."""
+        total = np.zeros(self.solution.static.intervals_count, dtype=npfloat)
+        for asset in self.get_assets("generators").values():
+            total += np.maximum(0, self.get_power_trace(asset))
+        return total
+
+    def get_gross_storage_discharge(self) -> NDArray[npfloat]:
+        """Returns the system-wide gross storage dispatch time series."""
+        total = np.zeros(self.solution.static.intervals_count, dtype=npfloat)
+        for asset in self.get_assets("storages").values():
+            total += self.get_discharge_trace(asset)
+        return total
+
+    def get_gross_storage_charge(self) -> NDArray[npfloat]:
+        """Returns the system-wide gross storage dispatch time series."""
+        total = np.zeros(self.solution.static.intervals_count, dtype=npfloat)
+        for asset in self.get_assets("storages").values():
+            total += self.get_charge_trace(asset)
+        return total
 
 
 # -- General Utility Helpers --
