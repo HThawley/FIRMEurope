@@ -131,7 +131,7 @@ def allocate_memory(
 
     Side-effects:
     -------
-    Attributes modified for the Node instance: imports_exports, deficits, spillage, flexible_power,
+    Attributes modified for the Node instance: imports_exports, deficits, curtail, flexible_power,
         storage_power.
 
     Raises:
@@ -142,7 +142,7 @@ def allocate_memory(
         raise_static_modification_error()
     node_instance.imports_exports = np.zeros(intervals_count, dtype=npfloat)
     node_instance.deficits = np.zeros(intervals_count, dtype=npfloat)
-    node_instance.spillage = np.zeros(intervals_count, dtype=npfloat)
+    node_instance.curtail = np.zeros(intervals_count, dtype=npfloat)
 
     node_instance.flexible_power = np.zeros(intervals_count, dtype=npfloat)
     node_instance.storage_power = np.zeros(intervals_count, dtype=npfloat)
@@ -338,7 +338,7 @@ def check_remaining_netload(
     check_case: unicode_type,
 ) -> boolean:
     """
-    Checks whether there is any remaining unbalanced 'deficit', 'spillage', or 'both' at the Node
+    Checks whether there is any remaining unbalanced 'deficit', 'curtail', or 'both' at the Node
     by evaluating its netloads. If the Node has unbalanced netload for the check case, function returns
     a value of True.
 
@@ -346,7 +346,7 @@ def check_remaining_netload(
     -------
     node_instance (Node_InstanceType): A dynamic instance of the Node jitclass.
     interval (nbintp): Index for the time interval.
-    check_case (unicode_type): Either 'deficit' (netload greater than 0), 'spillage' (netload less than 0),
+    check_case (unicode_type): Either 'deficit' (netload greater than 0), 'curtail' (netload less than 0),
         or 'both' (netload equals 0).
 
     Returns:
@@ -360,7 +360,7 @@ def check_remaining_netload(
     )
     if check_case == "deficit":
         return _imbalance > TOLERANCE
-    elif check_case == "spillage":
+    elif check_case == "curtail":
         return _imbalance < -TOLERANCE
     elif check_case == "both":
         return abs(_imbalance) > TOLERANCE

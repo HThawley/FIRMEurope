@@ -163,7 +163,7 @@ def allocate_memory(
 
     Side-effects:
     -------
-    Attributes modified for each Node instance in Network.nodes: imports_exports, spillage, deficits, flexible_power,
+    Attributes modified for each Node instance in Network.nodes: imports_exports, curtail, deficits, flexible_power,
         storage_power.
     Attributes modified for each Line instance in Network.major_lines: flows.
 
@@ -626,7 +626,7 @@ def set_node_fills_and_surpluses(
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def calculate_spillage_and_deficit(
+def calculate_curtail_and_deficit(
     network_instance: Network_InstanceType,
     interval: nbintp,
 ) -> None:
@@ -645,7 +645,7 @@ def calculate_spillage_and_deficit(
 
     Side-effects:
     -------
-    Attributes modified for each Node in Network.nodes: deficits, spillage.
+    Attributes modified for each Node in Network.nodes: deficits, curtail.
     """
     for node in network_instance.nodes.values():
         _imbalance = (
@@ -654,7 +654,7 @@ def calculate_spillage_and_deficit(
             - node.flexible_power[interval]
         )
         node.deficits[interval] = max(_imbalance, 0)
-        node.spillage[interval] = min(_imbalance, 0)
+        node.curtail[interval] = min(_imbalance, 0)
     return None
 
 

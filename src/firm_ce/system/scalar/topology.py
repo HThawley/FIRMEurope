@@ -44,7 +44,7 @@ if JIT_ENABLED:
         ("available_imports", nbfloat),
         ("imports_exports", nbfloat[:]),
         ("deficits", nbfloat[:]),
-        ("spillage", nbfloat[:]),
+        ("curtail", nbfloat[:]),
         ("flexible_power", nbfloat[:]),
         ("storage_power", nbfloat[:]),
         # Precharging
@@ -102,7 +102,7 @@ class Node:
     available_imports (nbfloat): Upper bound on imports available from surplus nodes on the current transmission leg, units GW.
     imports_exports (nbfloat[:]): Endogenous time-series defining interval imports (+) and exports (-) at the node, units GW.
     deficits (nbfloat[:]): Endogenous time-series defining interval power deficits after all balancing at the node, units GW.
-    spillage (nbfloat[:]): Endogenous time-series defining interval spillage/curtailment at the node, units GW.
+    curtail (nbfloat[:]): Endogenous time-series defining interval curtailment at the node, units GW.
     flexible_power (nbfloat[:]): Endogenous time-series defining interval net dispatch of flexible Generators connected to
         this node, units GW.
     storage_power (nbfloat[:]): Endogenous time-series defining interval net storage power (discharge +, charge -) of Storages
@@ -165,7 +165,7 @@ class Node:
 
         self.imports_exports = np.empty((0,), dtype=npfloat)
         self.deficits = np.empty((0,), dtype=npfloat)
-        self.spillage = np.empty((0,), dtype=npfloat)
+        self.curtail = np.empty((0,), dtype=npfloat)
 
         self.flexible_power = np.empty((0,), dtype=npfloat)
         self.storage_power = np.empty((0,), dtype=npfloat)

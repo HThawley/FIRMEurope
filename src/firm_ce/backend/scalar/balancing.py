@@ -266,7 +266,7 @@ def energy_balance_for_interval(
         balance_with_flexible(interval, solution.network, solution.fleet, solution.static.resolution, forward_time_flag)
 
     # check suurpluses
-    if network_m.check_remaining_netloads(solution.network, interval, "spillage"):
+    if network_m.check_remaining_netloads(solution.network, interval, "curtail"):
         # export surpluses to neighbours who can use it
         balance_with_transmission(interval, solution.network, "storage_charge", False)
         balance_with_storage(interval, solution.network, solution.fleet)  # Charge neighbouring storage
@@ -304,7 +304,7 @@ def balance_for_period(
     -------
     Attributes modified for the Nodes referenced in Solution.network.nodes: netload_t, discharge_max_t,
         charge_max_t, flexible_max_t, fill, surplus, available_imports, imports_exports, temp_surplus,
-        deficits, spillage, imports_exports_update, imports_exports_temp, storage_power, flexible_power.
+        deficits, curtail, imports_exports_update, imports_exports_temp, storage_power, flexible_power.
     Attributes modified for the flexible Generators referenced in Solution.fleet.generators: flexible_max_t, node,
         dispatch_power, remaining_energy, remaining_energy_temp_reverse.
     Attributes modified for the Storage systems referenced in Solution.fleet.storages: discharge_max_t, charge_max_t,
@@ -318,7 +318,7 @@ def balance_for_period(
     perform_precharge = False
     for t in range(start_t, end_t):
         energy_balance_for_interval(solution, t, True)
-        network_m.calculate_spillage_and_deficit(solution.network, t)
+        network_m.calculate_curtail_and_deficit(solution.network, t)
         fleet_m.update_stored_energies(solution.fleet, t, solution.static.resolution, True)
         # This is now handled as a side-effect of generator_m.dispatch
         # fleet_m.update_remaining_flexible_energies(
@@ -1080,7 +1080,7 @@ def resolve_energy_discontinuities(
     Side-effects:
     -------
     Attributes modified for the Nodes referenced in Solution.network.nodes: storage_power, flexible_power, fill, surplus, netload_t,
-        deficits, spillage, discharge_max_t, charge_max_t, flexible_max_t, imports_exports, available_imports, temp_surplus,
+        deficits, curtail, discharge_max_t, charge_max_t, flexible_max_t, imports_exports, available_imports, temp_surplus,
         imports_exports_update, imports_exports_temp.
     Attributes modified for the Storage systems referenced in Solution.fleet.storages: dispatch_power, remaining_discharge_max_t,
         remaining_charge_max_t, stored_energy, discharge_max_t, charge_max_t, node.
@@ -1134,7 +1134,7 @@ def resolve_energy_discontinuities(
                             generator.dispatch_power[interval] * solution.static.resolution
                         )
 
-        network_m.calculate_spillage_and_deficit(solution.network, interval)
+        network_m.calculate_curtail_and_deficit(solution.network, interval)
 
         fleet_m.update_stored_energies(solution.fleet, interval, solution.static.resolution, True)
     return None

@@ -161,7 +161,7 @@ def map_tensor_to_scalar(
     for node in solution.network.nodes.values():
         n = node.order
         node.deficits = ops.Mdeficit[:, n].copy()
-        node.spillage = -ops.Mcurtail[:, n].copy()
+        node.curtail = -ops.Mcurtail[:, n].copy()
         node.imports_exports = ops.Mimport[:, n]  # Mexport is negative
 
     solution.evaluated = solutionTensor.evaluated
