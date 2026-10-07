@@ -50,7 +50,7 @@ class Display:
         else:
             if solution is not None:
                 self.solution = solution
-            elif hasattr(scenario, 'statistics'):
+            elif hasattr(scenario, "statistics"):
                 self.solution = scenario.statistics.solution
             else:
                 self._read_and_evaluate_optimum()
@@ -121,226 +121,33 @@ class Display:
         """
         return self._dispatch_plot(data_type="capacity", atlas=atlas, delta=delta, **kwargs)
 
-    def plot_fleet_summary(self, energy_type="both", save_path=None):
+    def plot_fleet_summary(self, energy_type="both", alternative=0, save_path=None):
         """
-        Plots a 3x3 grid of pie charts summarizing the fleet:
-        Row 1: Power Capacities (Generation, Transmission, Storage)
-        Row 2: Energy Capacities (Hydro, Storage) & Storage Charging Sources
-        Row 3: Energy Flow (Generation, Transmission, Storage)
+        Plots a 3x3 grid of pie charts summarizing the fleet for a target solution.
         """
-        import seaborn as sns
-        import numpy as np
-        
         if energy_type == "consumption":
             raise NotImplementedError("Methods for attributing curtailment are not yet defined.")
         elif energy_type not in ["generation", "both"]:
             raise ValueError("energy_type must be 'consumption', 'generation', or 'both'")
 
-        accessor = Accessor(self.solution, "GW")
-        year_count = self.solution.static.year_count
-        
-        # Organize data by layout rows
-        row1 = {"Generation (Power)": {}, "Transmission (Power)": {}, "Rechargeable Storage (Power)": {}}
-        row2 = {"Hydro (Energy Cap)": {}, "Rechargeable Storage (Energy Cap)": {}, "Rechargeable Storage (Sources)": {}}
-        row3 = {"Generation (Energy Mix)": {}, "Transmission (Flows)": {}, "Rechargeable Storage (Discharge)": {}}
+        # Mimic _dispatch_plot logic for selecting solution
+        target_sol = self.noptima[alternative] if self.mhmga and self.noptima else self.solution
 
-        # Set up aesthetics
-        tx_palette = sns.color_palette("mako", 4)
-        src_palette = sns.color_palette("Set2", 8)
-        
-        custom_colors = {
-            "AC OHL": tx_palette[0],
-            "AC OHL (Mountain)": tx_palette[1],
-            "DC Subsea": tx_palette[2],
-            "DC Underground": tx_palette[3],
-            "Losses": (0.7, 0.7, 0.7),
-            "Curtailment": (0.7, 0.7, 0.7),
-            "Spillage": (0.6, 0.8, 0.9),
-            "Bioenergy": (0.4, 0.7, 0.3),
-            "New PHES": sns.color_palette("Paired")[1],
-            "Legacy PHES": sns.color_palette("Paired")[0],
-            "Battery": sns.color_palette("Paired")[10],
-            "New PHES (Electrical)": src_palette[0],
-            "Legacy PHES (Electrical)": src_palette[1],
-            "Legacy PHES (Inflows)": src_palette[2],
-            "Battery (Electrical)": src_palette[3],
-        }
+        row1, row2, row3 = self._aggregate_fleet_summary_data(target_sol, energy_type)
 
-        def get_chart_color(label):
-            if label in custom_colors:
-                return custom_colors[label]
-            if hasattr(self, '_get_color'):
-                color = self._get_color(label)
-                if color != (0.5, 0.5, 0.5) or label == "Fossil Gas":
-                    return color
-            return (0.5, 0.5, 0.5)
-
-        def process_tech_label(asset):
-            tech = self.scenario.identify_tech(asset.name)
-            if tech in ["Biomass", "Biogas"]:
-                return "Bioenergy"
-            return tech
-
-        def process_storage_label(asset):
-            raw_type = str(getattr(asset, 'unit_type', '')).lower()
-            if raw_type == 'nphes':
-                return 'New PHES'
-            elif raw_type in ['clphes', 'olphes']:
-                return 'Legacy PHES'
-            elif 'bess' in raw_type or raw_type == 'battery':
-                return 'Battery'
-            return process_tech_label(asset)
-
-        # 1. Generators 
-        for asset in accessor.get_assets("generators").values():
-            label = process_tech_label(asset)
-            
-            row1["Generation (Power)"][label] = row1["Generation (Power)"].get(label, 0) + accessor.get_power_capacity(asset)
-            
-            energy_yr = (accessor.get_discharge_net(asset) / year_count) / 1000
-            row3["Generation (Energy Mix)"][label] = row3["Generation (Energy Mix)"].get(label, 0) + energy_yr
-            
-            if energy_type == "both":
-                curtail_yr = (accessor.get_nominal_curtailment_net(asset) / year_count) / 1000
-                row3["Generation (Energy Mix)"]["Curtailment"] = row3["Generation (Energy Mix)"].get("Curtailment", 0) + curtail_yr
-
-        # 2. Storages (Routing Hydro to Generation, extracting BESS/PHES to Storage)
-        for asset in accessor.get_assets("storages").values():
-            base_tech = process_tech_label(asset)
-            raw_type = str(getattr(asset, 'unit_type', '')).lower()
-            
-            # Hydro leaks into storage charts if the raw_type doesn't perfectly match "hydro" (e.g., "pond" or "ror"). 
-            # Checking base_tech isolates it cleanly.
-            if base_tech in ["Hydro", "Run of River"] or raw_type in ["hydro", "pond", "ror"]:
-                label = base_tech
-                
-                # Power and Discharge route to Generation
-                row1["Generation (Power)"][label] = row1["Generation (Power)"].get(label, 0) + accessor.get_power_capacity(asset)
-                energy_yr = (accessor.get_discharge_net(asset) / year_count) / 1000
-                row3["Generation (Energy Mix)"][label] = row3["Generation (Energy Mix)"].get(label, 0) + energy_yr
-                
-                if energy_type == "both":
-                    curtail_yr = (accessor.get_nominal_curtailment_net(asset) / year_count) / 1000
-                    row3["Generation (Energy Mix)"]["Curtailment"] = row3["Generation (Energy Mix)"].get("Curtailment", 0) + curtail_yr
-                
-                # Hydro Energy Capacity populates the isolated pie in Row 2
-                row2["Hydro (Energy Cap)"][label] = row2["Hydro (Energy Cap)"].get(label, 0) + accessor.get_energy_capacity(asset)
-
-            else:
-                # Rechargeable Storage Processing
-                label = process_storage_label(asset)
-                
-                row1["Rechargeable Storage (Power)"][label] = row1["Rechargeable Storage (Power)"].get(label, 0) + accessor.get_power_capacity(asset)
-                row2["Rechargeable Storage (Energy Cap)"][label] = row2["Rechargeable Storage (Energy Cap)"].get(label, 0) + accessor.get_energy_capacity(asset)
-                
-                energy_yr = (accessor.get_discharge_net(asset) / year_count) / 1000
-                row3["Rechargeable Storage (Discharge)"][label] = row3["Rechargeable Storage (Discharge)"].get(label, 0) + energy_yr
-                
-                if energy_type == "both":
-                    losses_yr = (accessor.get_storage_losses(asset) / year_count) / 1000
-                    spillage_yr = (accessor.get_storage_spillage_net(asset) / year_count) / 1000
-                    
-                    row3["Rechargeable Storage (Discharge)"]["Losses"] = row3["Rechargeable Storage (Discharge)"].get("Losses", 0) + losses_yr
-                    row3["Rechargeable Storage (Discharge)"]["Spillage"] = row3["Rechargeable Storage (Discharge)"].get("Spillage", 0) + spillage_yr
-
-                # Rechargeable Storage Sources (Row 2, Col 3)
-                if raw_type in ["clphes", "olphes", "nphes", "bess2h", "bess4h"]:
-                    prefix = label # Inherit the clean 'Legacy PHES', 'New PHES', 'Battery' label mapped above
-                    
-                    elec_label = f"{prefix} (Electrical)"
-                    elec_val = (abs(accessor.get_charge_net(asset)) / year_count) / 1000
-                    row2["Rechargeable Storage (Sources)"][elec_label] = row2["Rechargeable Storage (Sources)"].get(elec_label, 0) + elec_val
-                    
-                    if accessor.has_inflows(asset):
-                        inflow_label = f"{prefix} (Inflows)"
-                        inflow_val = ((np.sum(accessor.get_inflow_trace(asset)) * accessor.resolution) / year_count) / 1000
-                        row2["Rechargeable Storage (Sources)"][inflow_label] = row2["Rechargeable Storage (Sources)"].get(inflow_label, 0) + inflow_val
-
-        # 3. Transmission (Major Lines only)
-        transmission_labels = {
-            "ac_ohl_transmission": "AC OHL",
-            "ac_ohl_mountain_transmission": "AC OHL (Mountain)",
-            "dc_subsea_transmission": "DC Subsea",
-            "dc_underground_transmission": "DC Underground"
-        }
-        
-        for asset in accessor.get_assets("major_lines").values():
-            raw_u_type = getattr(asset, 'unit_type', 'transmission')
-            label = transmission_labels.get(raw_u_type, raw_u_type)
-            
-            row1["Transmission (Power)"][label] = row1["Transmission (Power)"].get(label, 0) + accessor.get_power_capacity(asset)
-            
-            energy_yr = (accessor.get_line_use_net(asset) / year_count) / 1000
-            row3["Transmission (Flows)"][label] = row3["Transmission (Flows)"].get(label, 0) + energy_yr
-            
-            if energy_type == "both":
-                losses_yr = (accessor.get_line_losses(asset) / year_count) / 1000
-                row3["Transmission (Flows)"]["Losses"] = row3["Transmission (Flows)"].get("Losses", 0) + losses_yr
-
-        # Plotting Setup
         fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(20, 18))
         fig.subplots_adjust(hspace=0.4, wspace=0.6)
 
-        def draw_row(data_dict, row_axes, units):
-            # Calculate max total dynamically per unit type so GWh doesn't distort TWh scales
-            unit_maxes = {}
-            for mix, unit in zip(data_dict.values(), units):
-                total = sum(v for v in mix.values() if v > 0)
-                unit_maxes[unit] = max(unit_maxes.get(unit, 1), total)
-
-            items = list(data_dict.items())
-            
-            for i, ax in enumerate(row_axes):
-                if i >= len(items):
-                    ax.axis('off')
-                    continue
-                    
-                category, mix = items[i]
-                unit = units[i]
-                clean_mix = {k: v for k, v in mix.items() if v > 1e-6}
-                total = sum(clean_mix.values())
-                
-                if total <= 0:
-                    ax.axis('off')
-                    continue
-                
-                radius = np.sqrt(total / unit_maxes[unit])
-                labels = list(clean_mix.keys())
-                values = list(clean_mix.values())
-                colors = [get_chart_color(label) for label in labels]
-
-                wedges, _ = ax.pie(
-                    values, radius=radius, colors=colors, 
-                    wedgeprops={'linewidth': 0.5, 'edgecolor': 'black'}
-                )
-                
-                ax.set_title(f"{category}\nTotal: {total:,.1f} {unit}", pad=10)
-                ax.set_aspect('equal')
-                
-                ax.legend(
-                    wedges, labels, 
-                    loc="center left", 
-                    bbox_to_anchor=(1, 0.5), 
-                    frameon=False, 
-                    fontsize=9
-                )
-
-        # Execute Grid Renders
-        draw_row(row1, axes[0], ["GW", "GW", "GW"])
-        draw_row(row2, axes[1], ["GWh", "GWh", "TWh/yr"])
-        draw_row(row3, axes[2], ["TWh/yr", "TWh/yr", "TWh/yr"])
+        self._draw_summary_pie_row(row1, axes[0], ["GW", "GW", "GW"])
+        self._draw_summary_pie_row(row2, axes[1], ["GWh", "GWh", "TWh/yr"])
+        self._draw_summary_pie_row(row3, axes[2], ["TWh/yr", "TWh/yr", "TWh/yr"])
 
         if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        plt.show()
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
 
-    def _dispatch_plot(
-            self,
-            data_type: str,
-            atlas: bool = False,
-            delta: bool = False,
-            **kwargs
-    ):
+        return fig
+
+    def _dispatch_plot(self, data_type: str, atlas: bool = False, delta: bool = False, **kwargs):
         if (atlas or delta) and not self.mhmga:
             raise ValueError(f"Cannot plot multiple solutions when mhmga is False. ({atlas=}, {delta=})")
 
@@ -356,11 +163,19 @@ class Display:
         if atlas:
             grid = kwargs.get("grid", (2, 2))
             if grid[0] * grid[1] < len(indices):
-                warnings.warn("Not enough axes to plot all graphs. Some graphs will not be rendered"
-                              "Supply via kwarg 'grid'=(nrows, ncols)", UserWarning, 4)
+                warnings.warn(
+                    "Not enough axes to plot all graphs. Some graphs will not be rendered"
+                    "Supply via kwarg 'grid'=(nrows, ncols)",
+                    UserWarning,
+                    4,
+                )
             if grid[0] * grid[1] > len(indices):
-                warnings.warn("More axes than graphs to plot. There will be blank graphs."
-                              "Supply via kwarg 'grid'=(nrows, ncols)", UserWarning, 4)
+                warnings.warn(
+                    "More axes than graphs to plot. There will be blank graphs."
+                    "Supply via kwarg 'grid'=(nrows, ncols)",
+                    UserWarning,
+                    4,
+                )
             fig, axes = self._setup_map_axis(nrows=grid[0], ncols=grid[1])
             plot_targets = indices
         else:
@@ -376,9 +191,7 @@ class Display:
         if delta:
             ref_data = (
                 self._aggregate_solution_energy_by_node(
-                    ref_sol,
-                    kwargs.get("curtailment", False),
-                    kwargs.get("energy_mode", "generation")
+                    ref_sol, kwargs.get("curtailment", False), kwargs.get("energy_mode", "generation")
                 )
                 if data_type == "energy"
                 else self._aggregate_solution_capacity_by_node(ref_sol, kwargs.get("build", "all"))
@@ -388,9 +201,7 @@ class Display:
                 comp_sol = self.noptima[idx] if self.mhmga else self.solution
                 comp_data = (
                     self._aggregate_solution_energy_by_node(
-                        comp_sol,
-                        kwargs.get("curtailment", False),
-                        kwargs.get("energy_mode", "generation")
+                        comp_sol, kwargs.get("curtailment", False), kwargs.get("energy_mode", "generation")
                     )
                     if data_type == "energy"
                     else self._aggregate_solution_capacity_by_node(comp_sol, kwargs.get("build", "all"))
@@ -414,9 +225,7 @@ class Display:
             if is_delta_axis:
                 comp_data = (
                     self._aggregate_solution_energy_by_node(
-                        target_sol,
-                        kwargs.get("curtailment", False),
-                        kwargs.get("energy_mode", "generation")
+                        target_sol, kwargs.get("curtailment", False), kwargs.get("energy_mode", "generation")
                     )
                     if data_type == "energy"
                     else self._aggregate_solution_capacity_by_node(target_sol, kwargs.get("build", "all"))
@@ -433,7 +242,7 @@ class Display:
         fig.suptitle(f"{data_type.capitalize()} Mix{build_info}", fontsize=14)
 
         if kwargs.get("save_path"):
-            plt.savefig(kwargs.get("save_path"), dpi=300, bbox_inches='tight')
+            plt.savefig(kwargs.get("save_path"), dpi=300, bbox_inches="tight")
 
         return axes if atlas else axes[0]
 
@@ -442,15 +251,16 @@ class Display:
         chart_scale = kwargs.get("chart_scale", 1.0)
 
         for node_name, mix in delta_dict.items():
-            if node_name not in self.centroids: continue
+            if node_name not in self.centroids:
+                continue
 
             filtered_mix = {k: v for k, v in mix.items() if abs(v) > kwargs.get("threshold", 1e-3)}
-            if not filtered_mix: continue
+            if not filtered_mix:
+                continue
 
             x_coord, y_coord = self.centroids[node_name]
             self._draw_bars(
-                ax, filtered_mix, x_coord, y_coord, global_max_delta,
-                is_delta=True, chart_scale=chart_scale
+                ax, filtered_mix, x_coord, y_coord, global_max_delta, is_delta=True, chart_scale=chart_scale
             )
 
         if kwargs.get("legend", True):
@@ -491,9 +301,7 @@ class Display:
         # Data aggregation
         if data_type == "energy":
             node_data = self._aggregate_solution_energy_by_node(
-                solution,
-                kwargs.get("curtailment", False),
-                kwargs.get("energy_mode", "generation")
+                solution, kwargs.get("curtailment", False), kwargs.get("energy_mode", "generation")
             )
             flow_type = "energy"
         else:
@@ -575,9 +383,7 @@ class Display:
         for node in self.solution.network.nodes.values():
             # Match ISO3 or Name
             # Ensure your GeoJSON column name matches (e.g. 'ISO3', 'id', 'name')
-            match_indices = self.map_data.index[
-                self.map_data["ISO3"].str.lower() == node.name.lower()
-            ]
+            match_indices = self.map_data.index[self.map_data["ISO3"].str.lower() == node.name.lower()]
 
             if not match_indices.empty:
                 idx = match_indices[0]
@@ -607,23 +413,12 @@ class Display:
             deg = val * 360
             end_angle = start_angle + deg
 
-            w = Wedge(
-                (xpos, ypos),
-                radius,
-                start_angle,
-                end_angle,
-                facecolor=colors[i],
-                zorder=100,
-                edgecolor='none'
-            )
+            w = Wedge((xpos, ypos), radius, start_angle, end_angle, facecolor=colors[i], zorder=100, edgecolor="none")
             ax.add_patch(w)
             start_angle = end_angle
 
         # Outline
-        outline = Wedge(
-            (xpos, ypos), radius, 0, 360,
-            facecolor="none", edgecolor="black", linewidth=0.5, zorder=101
-        )
+        outline = Wedge((xpos, ypos), radius, 0, 360, facecolor="none", edgecolor="black", linewidth=0.5, zorder=101)
         ax.add_patch(outline)
 
     def _draw_bars(self, ax, mix, xpos, ypos, y_limit, is_delta=False, chart_scale=1.0):
@@ -648,24 +443,24 @@ class Display:
         for i, val in enumerate(values):
             # Scale height. If delta, height can be negative.
             # If absolute, val/y_limit scales 0 to 1.
-            h_ratio = (val / y_limit)
+            h_ratio = val / y_limit
             h = h_ratio * (height_m / (2 if is_delta else 1))
 
             bar_x = x_start + (i + 0.5) * bar_width
 
             rect = plt.Rectangle(
-                (bar_x - bar_width/2, baseline_y),
+                (bar_x - bar_width / 2, baseline_y),
                 bar_width * 0.8,
                 h,
                 facecolor=colors[i],
-                edgecolor='black',
+                edgecolor="black",
                 linewidth=0.5,
-                zorder=110
+                zorder=110,
             )
             ax.add_patch(rect)
 
         # Draw a horizontal line at the baseline
-        ax.plot([x_start, x_start + width_m], [baseline_y, baseline_y], color='black', lw=0.8, zorder=111)
+        ax.plot([x_start, x_start + width_m], [baseline_y, baseline_y], color="black", lw=0.8, zorder=111)
 
     def _setup_map_axis(self, nrows=1, ncols=1, figsize=None):
         """Handles single and multi-axis creation with background maps."""
@@ -724,7 +519,7 @@ class Display:
             elif flow_type == "energy":
                 val = accessor.get_line_use_net(line)
             else:
-                raise ValueError(f"Invalid 'flow_type'. Expected \"capacity\" or \"energy\". Got {flow_type}")
+                raise ValueError(f'Invalid \'flow_type\'. Expected "capacity" or "energy". Got {flow_type}')
             max_val = max(max_val, val)
 
             p1 = self.centroids[n_start]
@@ -805,8 +600,178 @@ class Display:
         #         print(f"Node: {n}, Tech: {tech}, Capacity: {data[n][tech]} GW")
         return data
 
+    def _get_display_label(self, asset):
+        """Standardizes display names for assets, resolving sub-types."""
+        base = self.scenario.identify_tech(asset.name)
+        raw_type = str(getattr(asset, "unit_type", "")).lower()
+
+        if base in ["Biomass", "Biogas"]:
+            return "Bioenergy"
+
+        if (
+            asset.object_class == "storage"
+            and base not in ["Hydro", "Run of River"]
+            and raw_type not in ["hydro", "pond", "ror"]
+        ):
+            if raw_type == "nphes":
+                return "New PHES"
+            if raw_type in ["clphes", "olphes"]:
+                return "Legacy PHES"
+            if "bess" in raw_type or raw_type == "battery":
+                return "Battery"
+
+        if asset.object_class == "line":
+            tx_map = {
+                "ac_ohl_transmission": "AC OHL",
+                "ac_ohl_mountain_transmission": "AC OHL (Mountain)",
+                "dc_subsea_transmission": "DC Subsea",
+                "dc_underground_transmission": "DC Underground",
+            }
+            return tx_map.get(raw_type, raw_type)
+
+        return base
+
+    def _aggregate_fleet_summary_data(self, solution, energy_type="both"):
+        """Extracts and formats the 3x3 datasets for a specific solution."""
+        accessor = Accessor(solution, "GW")
+        year_count = self.scenario.static.year_count
+
+        row1 = {"Generation (Power)": {}, "Transmission (Power)": {}, "Rechargeable Storage (Power)": {}}
+        row2 = {"Hydro (Energy Cap)": {}, "Rechargeable Storage (Energy Cap)": {}, "Rechargeable Storage (Sources)": {}}
+        row3 = {"Generation (Energy Mix)": {}, "Transmission (Flows)": {}, "Rechargeable Storage (Discharge)": {}}
+
+        # 1. Generators
+        for asset in accessor.get_assets("generators").values():
+            label = self._get_display_label(asset)
+            row1["Generation (Power)"][label] = row1["Generation (Power)"].get(label, 0) + accessor.get_power_capacity(
+                asset
+            )
+
+            energy_yr = (accessor.get_discharge_net(asset) / year_count) / 1000
+            row3["Generation (Energy Mix)"][label] = row3["Generation (Energy Mix)"].get(label, 0) + energy_yr
+
+            if energy_type == "both":
+                curtail_yr = (accessor.get_nominal_curtailment_net(asset) / year_count) / 1000
+                row3["Generation (Energy Mix)"]["Curtailment"] = (
+                    row3["Generation (Energy Mix)"].get("Curtailment", 0) + curtail_yr
+                )
+
+        # 2. Storages
+        for asset in accessor.get_assets("storages").values():
+            base_tech = self.scenario.identify_tech(asset.name)
+            raw_type = str(getattr(asset, "unit_type", "")).lower()
+
+            if base_tech in ["Hydro", "Run of River"] or raw_type in ["hydro", "pond", "ror"]:
+                label = base_tech
+                row1["Generation (Power)"][label] = row1["Generation (Power)"].get(
+                    label, 0
+                ) + accessor.get_power_capacity(asset)
+                row2["Hydro (Energy Cap)"][label] = row2["Hydro (Energy Cap)"].get(
+                    label, 0
+                ) + accessor.get_energy_capacity(asset)
+
+                energy_yr = (accessor.get_discharge_net(asset) / year_count) / 1000
+                row3["Generation (Energy Mix)"][label] = row3["Generation (Energy Mix)"].get(label, 0) + energy_yr
+                if energy_type == "both":
+                    curtail_yr = (accessor.get_nominal_curtailment_net(asset) / year_count) / 1000
+                    row3["Generation (Energy Mix)"]["Curtailment"] = (
+                        row3["Generation (Energy Mix)"].get("Curtailment", 0) + curtail_yr
+                    )
+            else:
+                label = self._get_display_label(asset)
+                row1["Rechargeable Storage (Power)"][label] = row1["Rechargeable Storage (Power)"].get(
+                    label, 0
+                ) + accessor.get_power_capacity(asset)
+                row2["Rechargeable Storage (Energy Cap)"][label] = row2["Rechargeable Storage (Energy Cap)"].get(
+                    label, 0
+                ) + accessor.get_energy_capacity(asset)
+
+                energy_yr = (accessor.get_discharge_net(asset) / year_count) / 1000
+                row3["Rechargeable Storage (Discharge)"][label] = (
+                    row3["Rechargeable Storage (Discharge)"].get(label, 0) + energy_yr
+                )
+                if energy_type == "both":
+                    losses_yr = (accessor.get_storage_losses(asset) / year_count) / 1000
+                    spillage_yr = (accessor.get_storage_spillage_net(asset) / year_count) / 1000
+                    row3["Rechargeable Storage (Discharge)"]["Losses"] = (
+                        row3["Rechargeable Storage (Discharge)"].get("Losses", 0) + losses_yr
+                    )
+                    row3["Rechargeable Storage (Discharge)"]["Spillage"] = (
+                        row3["Rechargeable Storage (Discharge)"].get("Spillage", 0) + spillage_yr
+                    )
+
+                if raw_type in ["clphes", "olphes", "nphes", "bess2h", "bess4h"]:
+                    elec_label = f"{label} (Electrical)"
+                    elec_val = (abs(accessor.get_charge_net(asset)) / year_count) / 1000
+                    row2["Rechargeable Storage (Sources)"][elec_label] = (
+                        row2["Rechargeable Storage (Sources)"].get(elec_label, 0) + elec_val
+                    )
+
+                    if accessor.has_inflows(asset):
+                        inflow_label = f"{label} (Inflows)"
+                        inflow_val = (
+                            (np.sum(accessor.get_inflow_trace(asset)) * accessor.resolution) / year_count
+                        ) / 1000
+                        row2["Rechargeable Storage (Sources)"][inflow_label] = (
+                            row2["Rechargeable Storage (Sources)"].get(inflow_label, 0) + inflow_val
+                        )
+
+        # 3. Transmission
+        for asset in accessor.get_assets("major_lines").values():
+            label = self._get_display_label(asset)
+            row1["Transmission (Power)"][label] = row1["Transmission (Power)"].get(
+                label, 0
+            ) + accessor.get_power_capacity(asset)
+
+            energy_yr = (accessor.get_line_use_net(asset) / year_count) / 1000
+            row3["Transmission (Flows)"][label] = row3["Transmission (Flows)"].get(label, 0) + energy_yr
+            if energy_type == "both":
+                losses_yr = (accessor.get_line_losses(asset) / year_count) / 1000
+                row3["Transmission (Flows)"]["Losses"] = row3["Transmission (Flows)"].get("Losses", 0) + losses_yr
+
+        return row1, row2, row3
+
+    def _draw_summary_pie_row(self, data_dict, row_axes, units):
+        """Worker method to draw a single row of pie charts."""
+        unit_maxes = {}
+        for mix, unit in zip(data_dict.values(), units):
+            total = sum(v for v in mix.values() if v > 0)
+            unit_maxes[unit] = max(unit_maxes.get(unit, 1), total)
+
+        items = list(data_dict.items())
+
+        for i, ax in enumerate(row_axes):
+            if i >= len(items):
+                ax.axis("off")
+                continue
+
+            category, mix = items[i]
+            unit = units[i]
+            clean_mix = {k: v for k, v in mix.items() if v > 1e-6}
+            total = sum(clean_mix.values())
+
+            if total <= 0:
+                ax.axis("off")
+                continue
+
+            radius = np.sqrt(total / unit_maxes[unit])
+            labels = list(clean_mix.keys())
+            values = list(clean_mix.values())
+            colors = [self._get_color(label) for label in labels]
+
+            wedges, _ = ax.pie(
+                values, radius=radius, colors=colors, wedgeprops={"linewidth": 0.5, "edgecolor": "black"}
+            )
+
+            ax.set_title(f"{category}\nTotal: {total:,.1f} {unit}", pad=10)
+            ax.set_aspect("equal")
+            ax.legend(wedges, labels, loc="center left", bbox_to_anchor=(1, 0.5), frameon=False, fontsize=9)
+
     def _init_colors(self):
         self.colors = sns.color_palette("Paired")
+        tx_palette = sns.color_palette("mako", 4)
+        src_palette = sns.color_palette("Set2", 8)
+
         self.tech_colors = {
             "Utility Solar": self.colors[7],
             "Rooftop Solar": self.colors[6],
@@ -815,12 +780,29 @@ class Display:
             "Hydro": self.colors[1],
             "Biomass": self.colors[3],
             "Biogas": self.colors[2],
+            "Bioenergy": (0.4, 0.7, 0.3),
             "Fossil Gas": (0.5, 0.5, 0.5),
             "Nuclear": self.colors[4],
             "Battery": self.colors[10],
             "PHES": self.colors[0],
             "Geothermal": self.colors[5],
             "Coal": (0.15, 0.15, 0.15),
+            # Sub-type Additions
+            "AC OHL": tx_palette[0],
+            "AC OHL (Mountain)": tx_palette[1],
+            "DC Subsea": tx_palette[2],
+            "DC Underground": tx_palette[3],
+            "New PHES": self.colors[1],
+            "Legacy PHES": self.colors[0],
+            # Status / Secondary metrics
+            "Losses": (0.7, 0.7, 0.7),
+            "Curtailment": (0.7, 0.7, 0.7),
+            "Spillage": (0.6, 0.8, 0.9),
+            # Storage Sources
+            "New PHES (Electrical)": src_palette[0],
+            "Legacy PHES (Electrical)": src_palette[1],
+            "Legacy PHES (Inflows)": src_palette[2],
+            "Battery (Electrical)": src_palette[3],
         }
 
     def _get_color(self, tech):

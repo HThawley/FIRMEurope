@@ -132,7 +132,7 @@ class Accessor:
 
     # -- Capacity --
     @staticmethod
-    def get_power_capacity(asset: Any, errors: str = 'raise') -> float:
+    def get_power_capacity(asset: Any, errors: str = "raise") -> float:
         """Safe retrieval of installed capacity in GW."""
         match asset.object_class:
             case "generator" | "line":
@@ -140,20 +140,26 @@ class Accessor:
             case "storage":
                 return asset.power_capacity
             case _:
-                return _handle_errors(errors, f"Unknown asset type for capacity retrieval: {asset.name} ({asset.object_class})")
+                return _handle_errors(
+                    errors, f"Unknown asset type for capacity retrieval: {asset.name} ({asset.object_class})"
+                )
 
     @staticmethod
-    def get_energy_capacity(asset: Any, errors: str = 'raise') -> float:
+    def get_energy_capacity(asset: Any, errors: str = "raise") -> float:
         """Safe retrieval of installed capacity in GW."""
         match asset.object_class:
             case "generator" | "line":
-                return _handle_errors(errors, f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity.")
+                return _handle_errors(
+                    errors, f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity."
+                )
             case "storage":
                 return asset.energy_capacity
             case _:
-                return _handle_errors(errors, f"Unknown asset type for capacity retrieval: {asset.name} ({asset.object_class})")
+                return _handle_errors(
+                    errors, f"Unknown asset type for capacity retrieval: {asset.name} ({asset.object_class})"
+                )
 
-    def get_capacity(self, asset: Any, attribute: str, errors: str = 'raise') -> float:
+    def get_capacity(self, asset: Any, attribute: str, errors: str = "raise") -> float:
         """Safe retrieval of installed capacity in GW."""
         match attribute.lower():
             case "power":
@@ -164,7 +170,7 @@ class Accessor:
                 raise ValueError(f"Unknown attribute for capacity retrieval: '{attribute}'")
 
     @staticmethod
-    def get_new_build_power(asset: Any, errors: str = 'raise') -> float:
+    def get_new_build_power(asset: Any, errors: str = "raise") -> float:
         """Safe retrieval of new build capacity in GW."""
         match asset.object_class:
             case "generator" | "line":
@@ -177,11 +183,13 @@ class Accessor:
                 )
 
     @staticmethod
-    def get_new_build_energy(asset: Any, errors: str = 'raise') -> float:
+    def get_new_build_energy(asset: Any, errors: str = "raise") -> float:
         """Safe retrieval of new build capacity in GW."""
         match asset.object_class:
             case "generator" | "line":
-                return _handle_errors(errors, f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity.")
+                return _handle_errors(
+                    errors, f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity."
+                )
             case "storage":
                 return asset.new_build_e
             case _:
@@ -189,7 +197,7 @@ class Accessor:
                     errors, f"Unknown asset type for new_build (energy) retrieval: {asset.name} ({asset.object_class})"
                 )
 
-    def get_new_build_capacity(self, asset: Any, attribute: str, errors: str = 'raise') -> float:
+    def get_new_build_capacity(self, asset: Any, attribute: str, errors: str = "raise") -> float:
         """Safe retrieval of new build capacity in GW."""
         match attribute.lower():
             case "power":
@@ -200,7 +208,7 @@ class Accessor:
                 raise ValueError(f"Unknown attribute for capacity retrieval: {attribute}")
 
     @staticmethod
-    def get_existing_power_capacity(asset: Any, errors: str = 'raise') -> float:
+    def get_existing_power_capacity(asset: Any, errors: str = "raise") -> float:
         match asset.object_class:
             case "generator" | "line":
                 return asset.initial_capacity
@@ -208,22 +216,26 @@ class Accessor:
                 return asset.initial_power_capacity
             case _:
                 return _handle_errors(
-                    errors, f"Unknown asset type for existing capacity (power) retrieval: {asset.name} ({asset.object_class})"
+                    errors,
+                    f"Unknown asset type for existing capacity (power) retrieval: {asset.name} ({asset.object_class})",
                 )
 
     @staticmethod
-    def get_existing_energy_capacity(asset: Any, errors: str = 'raise') -> float:
+    def get_existing_energy_capacity(asset: Any, errors: str = "raise") -> float:
         match asset.object_class:
             case "generator" | "line":
-                return _handle_errors(errors, f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity.")
+                return _handle_errors(
+                    errors, f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity."
+                )
             case "storage":
                 return asset.initial_energy_capacity
             case _:
                 return _handle_errors(
-                    errors, f"Unknown asset type for existing capacity (energy) retrieval: {asset.name} ({asset.object_class})"
+                    errors,
+                    f"Unknown asset type for existing capacity (energy) retrieval: {asset.name} ({asset.object_class})",
                 )
 
-    def get_existing_capacity(self, asset: Any, attribute: str, errors: str = 'raise') -> float:
+    def get_existing_capacity(self, asset: Any, attribute: str, errors: str = "raise") -> float:
         match attribute.lower():
             case "power":
                 return self.get_existing_power_capacity(asset, errors=errors)
@@ -233,7 +245,7 @@ class Accessor:
                 raise ValueError(f"Unknown attribute for capacity retrieval: '{attribute}'")
 
     @staticmethod
-    def get_build_power(asset: Any, errors: str = 'raise') -> tuple[float, float, float]:
+    def get_build_power(asset: Any, errors: str = "raise") -> tuple[float, float, float]:
         """Returns the build limits for power capacity (existing, new_build, min_build, max_build)."""
         match asset.object_class:
             case "generator" | "line":
@@ -242,12 +254,13 @@ class Accessor:
                 return asset.initial_power_capacity, asset.new_build_p, asset.min_build_p, asset.max_build_p
             case _:
                 return _handle_errors(
-                    errors, f"Unknown asset type for build limits (power) retrieval: {asset.name} ({asset.object_class})",
+                    errors,
+                    f"Unknown asset type for build limits (power) retrieval: {asset.name} ({asset.object_class})",
                     (np.nan, np.nan, np.nan, np.nan),
                 )
 
     @staticmethod
-    def get_build_energy(asset: Any, errors: str = 'raise') -> tuple[float, float, float]:
+    def get_build_energy(asset: Any, errors: str = "raise") -> tuple[float, float, float]:
         """Returns the build limits for energy capacity (new_build, min_build, max_build)."""
         match asset.object_class:
             case "storage":
@@ -265,7 +278,7 @@ class Accessor:
                     (np.nan, np.nan, np.nan, np.nan),
                 )
 
-    def get_build(self, asset: Any, attribute: str, errors: str = 'raise') -> tuple[float, float, float]:
+    def get_build(self, asset: Any, attribute: str, errors: str = "raise") -> tuple[float, float, float]:
         """Returns the build limits for capacity (existing, new_build, min_build, max_build)."""
         match attribute.lower():
             case "power":
@@ -276,7 +289,7 @@ class Accessor:
                 raise ValueError(f"Unknown attribute for build limits retrieval: '{attribute}'")
 
     @staticmethod
-    def get_annualised_build_cost(asset: Any, errors: str = 'raise') -> float:
+    def get_annualised_build_cost(asset: Any, errors: str = "raise") -> float:
         """Safe retrieval of total annualised capital costs (Power + Energy)."""
         if hasattr(asset, "lt_costs"):
             p_cost = getattr(asset.lt_costs, "annualised_build_p", 0.0)
@@ -286,7 +299,7 @@ class Accessor:
         return _handle_errors(errors, f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
 
     @staticmethod
-    def get_fixed_om_cost(asset: Any, errors: str = 'raise') -> float:
+    def get_fixed_om_cost(asset: Any, errors: str = "raise") -> float:
         """Safe retrieval of fixed operations & maintenance costs."""
         if hasattr(asset, "lt_costs"):
             return getattr(asset.lt_costs, "fom", 0.0)
@@ -294,7 +307,7 @@ class Accessor:
         return _handle_errors(errors, f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
 
     @staticmethod
-    def get_variable_om_cost(asset: Any, errors: str = 'raise') -> float:
+    def get_variable_om_cost(asset: Any, errors: str = "raise") -> float:
         """Safe retrieval of variable operations & maintenance costs."""
         if hasattr(asset, "lt_costs"):
             return getattr(asset.lt_costs, "vom", 0.0)
@@ -302,20 +315,20 @@ class Accessor:
         return _handle_errors(errors, f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
 
     @staticmethod
-    def get_fuel_cost(asset: Any, errors: str = 'raise') -> float:
+    def get_fuel_cost(asset: Any, errors: str = "raise") -> float:
         """Safe retrieval of total fuel costs."""
         if hasattr(asset, "lt_costs"):
             return getattr(asset.lt_costs, "fuel", 0.0)
 
         return _handle_errors(errors, f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
 
-    def get_all_costs(self, asset: Any, errors: str = 'raise') -> dict[str, float]:
+    def get_all_costs(self, asset: Any, errors: str = "raise") -> dict[str, float]:
         """Returns a dictionary containing all standard long-term costs for an asset."""
         return {
             "Annualised Build": self.get_annualised_build_cost(asset, errors=errors),
             "Fixed O&M": self.get_fixed_om_cost(asset, errors=errors),
             "Variable O&M": self.get_variable_om_cost(asset, errors=errors),
-            "Fuel Cost": self.get_fuel_cost(asset, errors=errors)
+            "Fuel Cost": self.get_fuel_cost(asset, errors=errors),
         }
 
     # -- Other static attributes --
@@ -343,7 +356,9 @@ class Accessor:
         Returns the discharge efficiency for a storage asset.
         """
         if not hasattr(asset, "discharge_efficiency"):
-            raise ValueError(f"Asset does not have 'discharge_efficiency' attribute: {asset.name} ({asset.object_class})")
+            raise ValueError(
+                f"Asset does not have 'discharge_efficiency' attribute: {asset.name} ({asset.object_class})"
+            )
         if not hasattr(asset, "charge_efficiency"):
             raise ValueError(f"Asset does not have 'charge_efficiency' attribute: {asset.name} ({asset.object_class})")
         return asset.discharge_efficiency * asset.charge_efficiency
@@ -387,18 +402,24 @@ class Accessor:
             case "generator":
                 if self.is_flexible(asset):
                     if not hasattr(asset, "dispatch_power"):
-                        raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have 'dispatch_power' attribute.")
+                        raise ValueError(
+                            f"Asset {asset.name} ({asset.object_class}) does not have 'dispatch_power' attribute."
+                        )
                     return asset.dispatch_power * self.factor
                 elif self.is_not_flexible(asset):
                     if not hasattr(asset, "data"):
                         raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have 'data' attribute.")
                     if not hasattr(asset, "capacity"):
-                        raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have 'capacity' attribute.")
+                        raise ValueError(
+                            f"Asset {asset.name} ({asset.object_class}) does not have 'capacity' attribute."
+                        )
                     return asset.data * asset.capacity * self.factor
             case "storage":
                 # Positive = Generation, Negative = Load
                 if not hasattr(asset, "dispatch_power"):
-                    raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have 'dispatch_power' attribute.")
+                    raise ValueError(
+                        f"Asset {asset.name} ({asset.object_class}) does not have 'dispatch_power' attribute."
+                    )
                 return asset.dispatch_power * self.factor
             case "node":
                 # returns demand
@@ -455,7 +476,9 @@ class Accessor:
         Negative values indicate flows from terminal_node to initial_node.
         """
         if not self.is_line(asset):
-            raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Line and therefore has no transmission power.")
+            raise ValueError(
+                f"Asset {asset.name} ({asset.object_class}) is not a Line and therefore has no transmission power."
+            )
         return asset.flows * self.factor
 
     def get_inflow_trace(self, asset: Any) -> NDArray[npfloat]:
@@ -477,7 +500,9 @@ class Accessor:
         Returns the storage level time series (MWh) for storage units and reservoirs.
         """
         if not (self.is_storage(asset) or self.is_reservoir(asset)):
-            raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not Storage and has no 'stored_energy' attr.")
+            raise ValueError(
+                f"Asset {asset.name} ({asset.object_class}) is not Storage and has no 'stored_energy' attr."
+            )
         return asset.stored_energy * self.factor
 
     def get_remaining_energy_trace(self, asset: Any) -> NDArray[npfloat]:
@@ -485,8 +510,9 @@ class Accessor:
         Returns the remaining energy (GWh) for fuels.
         """
         if not self.is_fuel(asset):
-            raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a fuel "
-                             "and has no 'remaining_energy' attr.")
+            raise ValueError(
+                f"Asset {asset.name} ({asset.object_class}) is not a fuel " "and has no 'remaining_energy' attr."
+            )
         return asset.remaining_energy * self.factor
 
     def get_nodal_generation_trace(self, asset: Any) -> NDArray[npfloat]:
@@ -595,11 +621,11 @@ class Accessor:
         """
         charge = np.abs(self.get_charge_trace(asset))
         discharge = self.get_discharge_trace(asset)
-        
+
         # Safely default to 1.0 (100% efficient) if asset lacks the parameter
         eta_c = getattr(asset, "charge_efficiency", 1.0)
         eta_d = getattr(asset, "discharge_efficiency", 1.0)
-        
+
         # Loss = Energy lost during charging + Energy lost during discharging
         losses = charge * (1.0 - eta_c) + discharge * ((1.0 / eta_d) - 1.0)
         return losses
@@ -618,16 +644,16 @@ class Accessor:
         inflows = np.sum(self.get_inflow_trace(asset)) * self.resolution if self.has_inflows(asset) else 0.0
         charge = np.abs(self.get_charge_net(asset))
         discharge = self.get_discharge_net(asset)
-        
+
         stored_energy = self.get_storage_level_trace(asset)
         delta_e = stored_energy[-1] - stored_energy[0]
-        
+
         # 1. Calculate Black-Box apparent loss
         total_missing_energy = (charge + inflows) - discharge - delta_e
-        
+
         # 2. Subtract known thermodynamic losses
         thermo_loss = self.get_storage_losses(asset)
-        
+
         # 3. The remainder is spillage (clamped to 0 to eliminate negative floating-point noise)
         spillage = max(0.0, total_missing_energy - thermo_loss)
         return spillage
@@ -637,8 +663,10 @@ class Accessor:
         Returns the transmission losses time series (MW).
         """
         if not self.is_line(asset):
-            raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Line and therefore has no transmission losses.")
-        
+            raise ValueError(
+                f"Asset {asset.name} ({asset.object_class}) is not a Line and therefore has no transmission losses."
+            )
+
         flows = self.get_transmission_trace(asset)
         efficiency = self.get_transm_efficiency(asset)
         return np.abs(flows) * (1.0 - efficiency)
@@ -731,7 +759,9 @@ class Accessor:
         Positive values = Net Import. Negative values = Net Export.
         """
         if asset.object_class != "node":
-            raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Node and therefore has no net flow trace.")
+            raise ValueError(
+                f"Asset {asset.name} ({asset.object_class}) is not a Node and therefore has no net flow trace."
+            )
 
         return self.get_imports_exports_trace(asset)
 
@@ -779,8 +809,8 @@ class Accessor:
 
 # -- General Utility Helpers --
 def _handle_errors(errors: str, message: str, coerce_value=np.nan):
-    if errors == 'raise':
+    if errors == "raise":
         raise ValueError(message)
-    elif errors == 'coerce':
+    elif errors == "coerce":
         return coerce_value
     raise ValueError(f"Unknown error handling method. Expected 'raise' or 'coerce'. Got: {errors}")
