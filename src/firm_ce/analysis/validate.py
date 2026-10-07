@@ -178,7 +178,7 @@ class Validation:
             node_balances[node.id] -= self.accessor.get_power_trace(node)
             # protect against possible future changes to sign convention
             node_balances[node.id] += np.abs(self.accessor.get_deficit_trace(node))
-            node_balances[node.id] -= np.abs(self.accessor.get_spillage_trace(node))
+            node_balances[node.id] -= np.abs(self.accessor.get_curtail_trace(node))
 
         for gen in self.solution.fleet.generators.values():
             node_balances[gen.node.id] += self.accessor.get_power_trace(gen)

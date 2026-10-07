@@ -112,7 +112,7 @@ class Accessor:
 
     # -- Objects --
     @staticmethod
-    def get_assets_from_solution(solution, asset_class: str) -> dict[str, Any]:
+    def get_assets_from_solution(solution, asset_class: str, errors: str = 'raise') -> dict[str, Any]:
         """Static method version of get_assets."""
         match asset_class:
             case "generators" | "storages" | "fuels":
@@ -120,11 +120,11 @@ class Accessor:
             case "major_lines" | "minor_lines" | "nodes":
                 return getattr(solution.network, asset_class)
             case _:
-                raise ValueError(f"Unknown asset class for asset retrieval: {asset_class}")
+                _handle_errors(errors, f"Unknown asset class for asset retrieval: {asset_class}")
 
-    def get_assets(self, asset_class: str) -> dict[str, Any]:
+    def get_assets(self, asset_class: str, errors: str = "raise") -> dict[str, Any]:
         """Returns the assets for a given asset class."""
-        return self.get_assets_from_solution(self.solution, asset_class)
+        return self.get_assets_from_solution(self.solution, asset_class, errors=errors)
 
     @staticmethod
     def get_display_name(asset_class: str) -> str:
@@ -167,7 +167,7 @@ class Accessor:
             case "energy":
                 return self.get_energy_capacity(asset, errors=errors)
             case _:
-                raise ValueError(f"Unknown attribute for capacity retrieval: '{attribute}'")
+                _handle_errors(errors, f"Unknown attribute for capacity retrieval: '{attribute}'")
 
     @staticmethod
     def get_new_build_power(asset: Any, errors: str = "raise") -> float:
@@ -205,7 +205,7 @@ class Accessor:
             case "energy":
                 return self.get_new_build_energy(asset, errors=errors)
             case _:
-                raise ValueError(f"Unknown attribute for capacity retrieval: {attribute}")
+                _handle_errors(errors, f"Unknown attribute for capacity retrieval: {attribute}")
 
     @staticmethod
     def get_existing_power_capacity(asset: Any, errors: str = "raise") -> float:
@@ -242,7 +242,7 @@ class Accessor:
             case "energy":
                 return self.get_existing_energy_capacity(asset, errors=errors)
             case _:
-                raise ValueError(f"Unknown attribute for capacity retrieval: '{attribute}'")
+                _handle_errors(errors, f"Unknown attribute for capacity retrieval: '{attribute}'")
 
     @staticmethod
     def get_build_power(asset: Any, errors: str = "raise") -> tuple[float, float, float]:
@@ -286,7 +286,7 @@ class Accessor:
             case "energy":
                 return self.get_build_energy(asset, errors=errors)
             case _:
-                raise ValueError(f"Unknown attribute for build limits retrieval: '{attribute}'")
+                return _handle_errors(errors, f"Unknown attribute for build limits retrieval: '{attribute}'")
 
     @staticmethod
     def get_annualised_build_cost(asset: Any, errors: str = "raise") -> float:
@@ -337,28 +337,24 @@ class Accessor:
         """
         Returns the charge efficiency for a storage asset.
         """
-        if hasattr(asset, "charge_efficiency"):
-            return asset.charge_efficiency
-        raise ValueError(f"Unknown asset type for charge efficiency retrival: {asset.name} ({asset.object_class})")
+        _check_asset_has_attr(asset, "charge_efficiency")
+        return asset.charge_efficiency
 
     @staticmethod
     def get_discharge_efficiency(asset: Any) -> float:
         """
         Returns the discharge efficiency for a storage asset.
         """
-        if hasattr(asset, "discharge_efficiency"):
-            return asset.discharge_efficiency
-        raise ValueError(f"Unknown asset type for discharge efficiency retrival: {asset.name} ({asset.object_class})")
+        _check_asset_has_attr(asset, "discharge_efficiency")
+        return asset.discharge_efficiency
 
     @staticmethod
     def get_round_efficiency(asset: Any) -> float:
         """
         Returns the discharge efficiency for a storage asset.
         """
-        if not hasattr(asset, "discharge_efficiency"):
-            raise ValueError(
-                f"Asset does not have 'discharge_efficiency' attribute: {asset.name} ({asset.object_class})"
-            )
+        _check_asset_has_attr(asset, "discharge_efficiency")
+        _check_asset_has_attr(asset, "charge_efficiency")
         if not hasattr(asset, "charge_efficiency"):
             raise ValueError(f"Asset does not have 'charge_efficiency' attribute: {asset.name} ({asset.object_class})")
         return asset.discharge_efficiency * asset.charge_efficiency
@@ -368,9 +364,8 @@ class Accessor:
         """
         Returns the efficiency of a transmission line or route
         """
-        if hasattr(asset, "efficiency"):
-            return asset.efficiency
-        raise ValueError(f"Unknown asset type for efficiency retrival: {asset.name} ({asset.object_class})")
+        _check_asset_has_attr(asset, "efficiency")
+        return asset.efficiency
 
     def get_efficiency(self, asset: Any, attribute: str = None) -> float:
         """
@@ -453,13 +448,13 @@ class Accessor:
         trace = self.get_power_trace(asset)
         return np.minimum(0, trace)
 
-    def get_spillage_trace(self, asset: Any) -> NDArray[npfloat]:
+    def get_curtail_trace(self, asset: Any) -> NDArray[npfloat]:
         """
-        Returns the spillage power time series (MW) for nodes.
+        Returns the curtail power time series (MW) for nodes.
         """
         if not self.is_node(asset):
-            raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Node and therefore has no spillage.")
-        return asset.spillage * self.factor
+            raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Node and therefore has no curtail.")
+        return asset.curtail * self.factor
 
     def get_deficit_trace(self, asset: Any) -> NDArray[npfloat]:
         """
@@ -527,7 +522,7 @@ class Accessor:
             if _asset.node.id == asset.node.id:
                 node_generation += self.get_power_trace(_asset)
 
-        # in principle, when spillage occurs this is zero - but calculated for robustness
+        # in principle, when curtail occurs this is zero - but calculated for robustness
         for _asset in self.solution.fleet.storages.values():
             if _asset.node.id == asset.node.id:
                 node_generation += self.get_discharge_trace(_asset)
@@ -536,15 +531,18 @@ class Accessor:
 
     def get_nominal_curtailment_trace(self, asset: Any) -> NDArray[npfloat]:
         """
-        get time series of curtailment for a given asset (calculated by apportioning spillage)
-        nominal curtailment is all spillage apportioned according to the asset's share of generation at the node
+        get time series of curtailment for a given asset (calculated by apportioning curtail)
+        nominal curtailment is all curtail apportioned according to the asset's share of generation at the node
         """
-        nodal_generation = self.get_nodal_generation_trace(asset)
-        asset_generation = np.maximum(0, self.get_power_trace(asset))
-        spillage = self.get_spillage_trace(asset.node)
+        if self.isnode(asset):
+            curtailment = self.get_curtail_trace(asset)
+        else:
+            nodal_generation = self.get_nodal_generation_trace(asset)
+            asset_generation = np.maximum(0, self.get_power_trace(asset))
+            nodal_curtailment = self.get_curtail_trace(asset.node)
 
-        curtailment = np.empty_like(spillage)
-        curtailment = spillage * safe_divide_array(asset_generation, nodal_generation, curtailment)
+            curtailment = np.empty_like(nodal_curtailment)
+            curtailment = nodal_curtailment * safe_divide_array(asset_generation, nodal_generation, curtailment)
         return curtailment
 
     def get_expected_curtailment_trace(self, asset: Any) -> NDArray[npfloat]:
@@ -585,79 +583,85 @@ class Accessor:
         return trace - curtailment
 
     # -- Aggregate Energy --
-    def get_energy_net(self, asset: Any) -> float:
+    def get_energy_gross_asset(self, asset: Any) -> float:
         """
         Returns the total dispatched energy (MWh) for an asset over the simulation period.
         """
         power_trace = self.get_power_trace(asset)
-        return np.sum(power_trace) * self.resolution
+        return self._trace_to_gross(power_trace)
 
-    def get_discharge_net(self, asset: Any) -> float:
+    def get_discharge_gross_asset(self, asset: Any) -> float:
         """
         Returns the total dispatched energy (MWh) for storage assets over the simulation period.
         Only counts positive dispatch energy.
         """
         power_trace = self.get_discharge_trace(asset)
-        return np.sum(power_trace) * self.resolution
+        return self._trace_to_gross(power_trace)
 
-    def get_charge_net(self, asset: Any) -> float:
+    def get_charge_gross_asset(self, asset: Any) -> float:
         """
-        Returns the total stored energy (MWh) for storage assets over the simulation period.
+        Returns the total charged energy (MWh) for storage assets over the simulation period.
         Only counts negative dispatch energy.
         """
         power_trace = self.get_charge_trace(asset)
-        return np.sum(power_trace) * self.resolution
+        return self._trace_to_gross(power_trace)
 
-    def get_charge_loss_net(self, asset: Any) -> float:
+    def get_charge_loss_gross_asset(self, asset: Any) -> float:
         """
         Returns the total energy (MWh) lost to thermodynamic efficiency while charging
         """
         eff = self.get_charge_efficiency(asset)
         trace = (1 - eff) * self.get_charge_trace(asset)
-        return np.sum(trace) * self.resolution
+        return self._trace_to_gross(trace)
 
-    def get_discharge_loss_net(self, asset: Any) -> float:
+    def get_discharge_loss_gross_asset(self, asset: Any) -> float:
         """
-        Returns the total energy (MWh) lost to thermodynamic efficiency while charging
+        Returns the total energy (MWh) lost to thermodynamic efficiency while discharging
         """
         eff = self.get_discharge_efficiency(asset)
         trace = (1 - eff) * self.get_discharge_trace(asset)
-        return np.sum(trace) * self.resolution
+        return self._trace_to_gross(trace)
 
-    def get_storage_loss_net(self, asset: Any) -> float:
+    def get_storage_loss_gross_asset(self, asset: Any) -> float:
         """
         Returns the total thermodynamic storage losses (MWh) lost to thermodynamic efficiency
         """
-        return self.get_discharge_loss_net(asset) + self.get_charge_loss_net(asset)
+        return self.get_discharge_loss_gross_asset(asset) + self.get_charge_loss_gross_asset(asset)
 
-    def get_inflow_net(self, asset: Any) -> float:
+    def get_inflow_gross_asset(self, asset: Any) -> float:
         """
         Returns the total energy inflowing (MWh) into an asset
         """
         # inflow is in MWh not MW
         return np.sum(self.get_inflow_trace(asset))
 
-    def get_spillage_net(self, asset: Any) -> float:
+    def get_curtail_gross_asset(self, asset: Any) -> float:
         """
-        Return total curtailment
+        Return total curtailment (MWh) for an asset.
         """
-        trace = self.get_spillage_trace(asset)
-        return np.sum(trace) * self.resolution
+        trace = self.get_curtail_trace(asset)
+        return self._trace_to_gross(trace)
 
-    def get_line_use_net(self, asset: Any) -> float:
+    def get_line_use_gross_asset(self, asset: Any) -> float:
         """
         Returns the total line use (MWh) for line assets over the simulation period.
         """
-        return np.sum(np.abs(self.get_transmission_trace(asset))) * self.resolution
+        trace = self.get_transmission_trace(asset)
+        return self._trace_to_gross(trace)
 
-    def get_storage_spillage_net(self, asset: Any) -> float:
+    def get_spillage_gross_asset(self, asset: Any) -> float:
         """
         Returns the total spilled inflows (MWh) over the simulation.
         Calculated via mass balance: Total Energy In - Total Energy Out - Delta Storage - Thermo Losses.
         """
-        inflows = np.sum(self.get_inflow_trace(asset)) * self.resolution if self.has_inflows(asset) else 0.0
-        charge = np.abs(self.get_charge_net(asset))
-        discharge = self.get_discharge_net(asset)
+        if not self.has_inflows(asset):
+            return 0.0
+
+        inflow_trace = self.get_inflow_trace(asset)
+        inflows = self._trace_to_gross(inflow_trace)
+
+        charge = np.abs(self.get_charge_gross_asset(asset))
+        discharge = self.get_discharge_gross_asset(asset)
 
         stored_energy = self.get_storage_level_trace(asset)
         delta_e = stored_energy[-1] - stored_energy[0]
@@ -671,7 +675,7 @@ class Accessor:
         spillage = max(0.0, total_missing_energy - thermo_loss)
         return spillage
 
-    def get_line_losses_trace(self, asset: Any) -> NDArray[npfloat]:
+    def get_line_loss_trace(self, asset: Any) -> NDArray[npfloat]:
         """
         Returns the transmission losses time series (MW).
         """
@@ -684,23 +688,24 @@ class Accessor:
         efficiency = self.get_transm_efficiency(asset)
         return np.abs(flows) * (1.0 - efficiency)
 
-    def get_line_losses(self, asset: Any) -> float:
+    def get_line_losses_gross_asset(self, asset: Any) -> float:
         """
         Returns the total line losses (MWh) for line assets over the simulation period.
         """
-        return np.sum(self.get_line_losses_trace(asset)) * self.resolution
+        trace = self.get_line_loss_trace(asset)
+        return self._trace_to_gross(trace)
 
-    def get_nominal_curtailment_net(self, asset: Any) -> NDArray[npfloat]:
+    def get_nominal_curtail_gross_asset(self, asset: Any) -> NDArray[npfloat]:
         """
-        get time series of curtailment for a given asset (calculated by apportioning spillage)
-        nominal curtailment is all spillage apportioned according to the asset's share of generation at the node
+        get time series of curtailment for a given asset (calculated by apportioning curtailment)
+        nominal curtailment is all curtailment apportioned according to the asset's share of generation at the node
         """
         curtailment = self.get_nominal_curtailment_trace(asset)
-        return np.sum(curtailment) * self.resolution
+        return self._trace_to_gross(curtailment)
 
-    def get_post_curtailment_energy_net(self, asset: Any) -> NDArray[npfloat]:
+    def get_post_curtail_energy_gross_asset(self, asset: Any) -> NDArray[npfloat]:
         trace = self.get_post_curtailment_power_trace(asset)
-        return np.sum(trace) * self.resolution
+        return self._trace_to_gross(trace)
 
     def _get_asset_tier(self, asset: Any) -> int:
         """
@@ -743,9 +748,9 @@ class Accessor:
             return self._curtailment_cache[cache_key]
 
         assets = self._get_assets_at_node_cached(node.id)
-        spillage = self.get_spillage_trace(node)
+        curtail = self.get_curtail_trace(node)
 
-        zeros = np.zeros_like(spillage)
+        zeros = np.zeros_like(curtail)
         tier_gen = {1: zeros.copy(), 2: zeros.copy(), 3: zeros.copy(), 4: zeros.copy()}
 
         for asset in assets:
@@ -753,12 +758,12 @@ class Accessor:
             tier_gen[tier] += self.get_discharge_trace(asset)
 
         tier_curtailment = {}
-        remaining_spillage = spillage.copy()  # avoid unintentionally editing
+        remaining_curtail = curtail.copy()  # avoid unintentionally editing
 
         for tier in range(1, 5):
-            allocated_curtailment = np.minimum(remaining_spillage, tier_gen[tier])
+            allocated_curtailment = np.minimum(remaining_curtail, tier_gen[tier])
             tier_curtailment[tier] = allocated_curtailment
-            remaining_spillage -= allocated_curtailment
+            remaining_curtail -= allocated_curtailment
 
         result = (tier_gen, tier_curtailment)
         self._curtailment_cache[cache_key] = result
@@ -771,17 +776,17 @@ class Accessor:
         Returns the net flow trace for a node (MW).
         Positive values = Net Import. Negative values = Net Export.
         """
-        if asset.object_class != "node":
+        if not self.is_node(asset):
             raise ValueError(
                 f"Asset {asset.name} ({asset.object_class}) is not a Node and therefore has no net flow trace."
             )
 
         return self.get_imports_exports_trace(asset)
 
-    def get_gross_export_trace(self, node: Any) -> NDArray[npfloat]:
+    def get_export_trace_node(self, node: Any) -> NDArray[npfloat]:
         return np.maximum(0, -self.get_net_flow_trace(node))
 
-    def get_gross_import_trace(self, node: Any) -> NDArray[npfloat]:
+    def get_import_trace_node(self, node: Any) -> NDArray[npfloat]:
         return np.maximum(0, self.get_net_flow_trace(node))
 
     def get_retention_trace(self, node: Any) -> NDArray[npfloat]:
@@ -795,15 +800,15 @@ class Accessor:
         for a in self._get_assets_at_node_cached(node.id):
             actual_nodal_gen += self.get_post_curtailment_power_trace(a)
 
-        exports = self.get_gross_export_trace(node)
+        exports = self.get_export_trace_node(node)
 
-        # Calculate retention factor per interval, preventing divide
+        # Calculate retention factor per interval, preventing divide by zero
         retention = np.empty_like(actual_nodal_gen)
         retention = safe_divide_array(actual_nodal_gen - exports, actual_nodal_gen, retention)
         retention = np.maximum(0, retention)
         return retention
 
-    def get_local_consumption_net(self, asset: Any) -> float:
+    def get_local_consumption_gross_asset(self, asset: Any) -> float:
         """
         Returns the total locally consumed energy (MWh) for an asset.
         """
@@ -811,51 +816,110 @@ class Accessor:
         retention_trace = self.get_retention_trace(asset.node)
 
         local_trace = gen_trace * retention_trace
-        return np.sum(local_trace) * self.resolution
+        return self._trace_to_gross(local_trace)
 
-    def get_gross_import_net(self, node: Any) -> float:
+    def get_import_gross_node(self, node: Any) -> float:
         """
         Returns the total imported energy (MWh) for a node over the simulation.
         """
-        return np.sum(self.get_gross_import_trace(node)) * self.resolution
+        trace = self.get_import_trace_node(node)
+        return self._trace_to_gross(trace)
 
-    def get_gross_demand(self) -> NDArray[npfloat]:
-        """Returns the system-wide gross demand time series."""
+    def get_demand_trace_network(self) -> NDArray[npfloat]:
+        """Returns the system-wide demand time series."""
         total = np.zeros(self.solution.static.intervals_count, dtype=npfloat)
         for asset in self.get_assets("nodes").values():
             total += self.get_power_trace(asset)
         return total
 
-    def get_gross_deficit(self) -> NDArray[npfloat]:
-        """Returns the system-wide gross deficit time series."""
+    def get_demand_gross_network(self) -> NDArray[npfloat]:
+        """Returns the system-wide gross demand."""
+        trace = self.get_demand_trace_network()
+        return self._trace_to_gross(trace)
+
+    def get_deficit_trace_network(self) -> NDArray[npfloat]:
+        """Returns the system-wide deficit time series."""
         total = np.zeros(self.solution.static.intervals_count, dtype=npfloat)
         for asset in self.get_assets("nodes").values():
             total += self.get_deficit_trace(asset)
         return total
 
-    def get_gross_generation(self) -> NDArray[npfloat]:
+    def get_deficit_gross_network(self) -> NDArray[npfloat]:
+        """Returns the system-wide gross deficit."""
+        trace = self.get_deficit_trace_network()
+        return self._trace_to_gross(trace)
+
+    def get_curtail_trace_network(self) -> NDArray[npfloat]:
+        """Returns the system-wide curtailment time series."""
+        total = np.zeros(self.solution.static.intervals_count, dtype=npfloat)
+        for asset in self.get_assets("nodes").values():
+            total += self.get_curtail_trace_node(asset)
+        return total
+
+    def get_curtail_gross_network(self) -> NDArray[npfloat]:
+        """Returns the system-wide gross curtailment."""
+        trace = self.get_curtail_trace_network()
+        return self._trace_to_gross(trace)
+
+    def get_generation_trace_network(self) -> NDArray[npfloat]:
         """Returns the system-wide gross generation time series."""
         total = np.zeros(self.solution.static.intervals_count, dtype=npfloat)
         for asset in self.get_assets("generators").values():
             total += np.maximum(0, self.get_power_trace(asset))
         return total
 
-    def get_gross_storage_discharge(self) -> NDArray[npfloat]:
-        """Returns the system-wide gross storage dispatch time series."""
+    def get_generation_gross_network(self) -> NDArray[npfloat]:
+        """Returns the system-wide gross generation."""
+        trace = self.get_generation_trace_network()
+        return self._trace_to_gross(trace)
+
+    def get_storage_discharge_trace_network(self) -> NDArray[npfloat]:
+        """Returns the system-wide storage discharge time series."""
         total = np.zeros(self.solution.static.intervals_count, dtype=npfloat)
         for asset in self.get_assets("storages").values():
             total += self.get_discharge_trace(asset)
         return total
 
-    def get_gross_storage_charge(self) -> NDArray[npfloat]:
-        """Returns the system-wide gross storage dispatch time series."""
+    def get_storage_discharge_gross_network(self) -> NDArray[npfloat]:
+        """Returns the system-wide gross storage discharge."""
+        trace = self.get_storage_discharge_trace_network()
+        return self._trace_to_gross(trace)
+
+    def get_storage_charge_trace_network(self) -> NDArray[npfloat]:
+        """Returns the system-wide storage charge time series."""
         total = np.zeros(self.solution.static.intervals_count, dtype=npfloat)
         for asset in self.get_assets("storages").values():
             total += self.get_charge_trace(asset)
         return total
 
+    def get_storage_charge_gross_network(self) -> NDArray[npfloat]:
+        """Returns the system-wide gross storage charge."""
+        trace = self.get_storage_charge_trace_network()
+        return self._trace_to_gross(trace)
+
+    def _trace_to_gross(self, trace: NDArray[npfloat]) -> npfloat:
+        """Returns the total energy (MWh) for a given time series."""
+        return np.sum(trace) * self.resolution
+
 
 # -- General Utility Helpers --
+def _check_asset_has_attr(asset: Any, attr: str, raise_if_missing: bool = True):
+    if not hasattr(asset, attr):
+        if raise_if_missing:
+            raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have '{attr}' attribute.")
+        return False
+    return True
+
+
+def _check_asset_has_data(asset: Any, raise_if_missing: bool = True):
+    _check_asset_has_attr(asset, "data", raise_if_missing=raise_if_missing)
+    if not asset.data_status:
+        if raise_if_missing:
+            raise ValueError(f"Asset {asset.name} ({asset.object_class}) has data_status=False, data not loaded.")
+        return False
+    return True
+
+
 def _handle_errors(errors: str, message: str, coerce_value=np.nan):
     if errors == "raise":
         raise ValueError(message)

@@ -153,7 +153,7 @@ class Statistics:
 
                 if is_node:
                     write_trace(meta_data, "Demand", self.accessor.get_power_trace(asset))
-                    write_trace(meta_data, "Spillage", self.accessor.get_spillage_trace(asset))
+                    write_trace(meta_data, "Curtailment", self.accessor.get_curtail_trace(asset))
                     write_trace(meta_data, "Deficit", self.accessor.get_deficit_trace(asset))
                 elif self.accessor.is_line(asset):
                     write_trace(meta_data, "Flow", self.accessor.get_transmission_trace(asset))
@@ -330,7 +330,7 @@ class Statistics:
         drop_cols = ["_node_sort", "_asset_sort"]
 
         var_order = [
-            'Demand', 'Deficit', 'Spillage', 'Dispatch', 'Flow', 'Line_Input_Power',
+            'Demand', 'Deficit', 'Curtailment', 'Dispatch', 'Flow', 'Line_Input_Power',
             'Line_Output_Power', 'Net_Imports', 'Net_Exports', 'Power_Into_Lines',
             'Power_Out_Of_Lines', 'Discharge', 'Charge', 'Inflows', 'Stored_Energy', 'Fuel_Remaining'
         ]
@@ -861,7 +861,7 @@ class Statistics:
         df_merged = df_costs.join(df_totals, on=["Asset Name", "Unit Type"], how="left").fill_null(0.0)
 
         # Ensure required temporal columns exist before mapping
-        for v in ["Dispatch", "Inflows", "Spillage", "Flow"]:
+        for v in ["Dispatch", "Inflows", "Curtailment", "Flow"]:
             if v not in df_merged.columns:
                 df_merged = df_merged.with_columns(pl.lit(0.0).alias(v))
 
@@ -871,7 +871,7 @@ class Statistics:
             pl.when(pl.col("Asset Type").str.to_lowercase() == "storage")
               .then(pl.col("Discharge")).otherwise(0.0).alias("Storage [GWh]"),
             pl.col("Flow").alias("Transmission [GWh]"),
-            pl.col("Spillage").alias("Curtailment [GWh]")
+            pl.col("Curtailment").alias("Curtailment [GWh]")
         ])
 
         mapped_costs = [f"{c} [M$/yr]" for c in cost_cols]
