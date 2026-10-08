@@ -574,7 +574,7 @@ class Accessor:
         if not self.is_node(asset):
             raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Node.")
         _check_asset_has_attr(asset, "curtail")
-        return asset.curtail * self.factor
+        return np.abs(asset.curtail) * self.factor
 
     def _deficit_trace_single(self, asset: Any) -> NDArray[npfloat]:
         if not self.is_node(asset):

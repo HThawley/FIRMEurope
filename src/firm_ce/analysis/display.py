@@ -148,24 +148,36 @@ class Display:
         """
         return self._dispatch_plot(data_type="capacity", atlas=atlas, delta=delta, **kwargs)
 
-    def plot_fleet_summary(self, energy_type="both", alternative=0, rows="all", save_path=None):
+    def plot_fleet_summary(
+        self,
+        energy_type="both",
+        alternative=0,
+        rows="all",
+        chart_type: str = "treemap",
+        save_path=None,
+    ):
         """
-        Plots a 3x3 grid of pie charts summarizing the fleet for a target solution.
+        Plots a 3x3 grid of charts summarizing the fleet for a target solution.
         """
         if energy_type == "consumption":
             raise NotImplementedError("Methods for attributing curtailment are not yet defined.")
         elif energy_type not in ["generation", "both"]:
             raise ValueError("energy_type must be 'consumption', 'generation', or 'both'")
 
+        chart_type = chart_type.lower()
+        if chart_type not in ("pie", "treemap"):
+            raise ValueError(f"Argument 'chart_type' expected 'pie' or 'treemap'. Got '{chart_type}'")
+
         if isinstance(rows, str):
             if rows.lower() != "all":
                 raise ValueError(f"Argument 'rows' expected 'all' or a list with elements in {{0, 1, 2}}. Got '{rows}'")
             rows = [0, 1, 2]
         elif isinstance(rows, (list, tuple)):
-            if not all([x in (0, 1, 2) for x in rows]):
+            if not all(x in (0, 1, 2) for x in rows):
                 raise ValueError(f"Argument 'rows' expected 'all' or a list with elements in {{0, 1, 2}}. Got {rows}")
         else:
             raise TypeError(f"Argument 'rows' expected a string, list or tuple. Got: {type(rows)}")
+
         nrows = len(rows)
         if nrows == 1:
             hspace, wspace = 0.1, 0.6
@@ -177,9 +189,7 @@ class Display:
             hspace, wspace = 0.4, 0.5
             figsize = (18, 14)
 
-        # Mimic _dispatch_plot logic for selecting solution
         target_sol = self.noptima[alternative] if self.mhmga and self.noptima else self.solution
-
         row0, row1, row2 = self._aggregate_fleet_summary_data(target_sol, energy_type)
 
         fig, axes = plt.subplots(nrows=nrows, ncols=3, figsize=figsize)
@@ -188,14 +198,11 @@ class Display:
         ax_iter = iter(np.atleast_2d(axes))
 
         if 0 in rows:
-            ax = next(ax_iter)
-            self._draw_summary_pie_row(row0, ax, ["GW", "GW", "GW"])
+            self._draw_summary_row(row0, next(ax_iter), ["GW", "GW", "GW"], chart_type=chart_type)
         if 1 in rows:
-            ax = next(ax_iter)
-            self._draw_summary_pie_row(row1, ax, ["GWh", "GWh", "TWh/yr"])
+            self._draw_summary_row(row1, next(ax_iter), ["GWh", "GWh", "TWh/yr"], chart_type=chart_type)
         if 2 in rows:
-            ax = next(ax_iter)
-            self._draw_summary_pie_row(row2, ax, ["TWh/yr", "TWh/yr", "TWh/yr"])
+            self._draw_summary_row(row2, next(ax_iter), ["TWh/yr", "TWh/yr", "TWh/yr"], chart_type=chart_type)
 
         if nrows == 3:
             fig.suptitle("Network Overview", fontsize=self.large_fontsize)
@@ -204,6 +211,119 @@ class Display:
             plt.savefig(save_path, dpi=self.dpi, bbox_inches="tight")
 
         return fig
+
+    def _draw_summary_row(self, data_dict, row_axes, units, chart_type="pie"):
+        """Worker method to draw a single row of summary charts ('pie' or 'treemap')."""
+        unit_maxes = {}
+        for mix, unit in zip(data_dict.values(), units):
+            total = sum(v for v in mix.values() if v > 0)
+            unit_maxes[unit] = max(unit_maxes.get(unit, 1), total)
+
+        items = list(data_dict.items())
+
+        for i, ax in enumerate(row_axes):
+            if i >= len(items):
+                ax.axis("off")
+                continue
+
+            category, mix = items[i]
+            unit = units[i]
+            clean_mix = {k: v for k, v in mix.items() if v > 1e-6}
+            total = sum(clean_mix.values())
+
+            if total <= 0:
+                ax.axis("off")
+                continue
+
+            # Sort descending so largest slices/rectangles are placed consistently
+            sorted_items = sorted(clean_mix.items(), key=lambda item: item[1], reverse=True)
+            labels = [k for k, _ in sorted_items]
+            values = [v for _, v in sorted_items]
+            colors = [self._get_color(label) for label in labels]
+
+            # Linear dimension scaling so total area is proportional to total / unit_maxes[unit]
+            scale = np.sqrt(total / unit_maxes[unit])
+
+            if chart_type == "pie":
+                handles, _ = ax.pie(
+                    values,
+                    radius=scale,
+                    colors=colors,
+                    wedgeprops={"linewidth": 0.5, "edgecolor": "black"},
+                )
+            elif chart_type == "treemap":
+                handles = self._draw_treemap(ax, values, colors, scale)
+
+            ax.set_title(f"{category}\nTotal: {total:,.1f} {unit}", pad=10)
+            ax.set_aspect("equal")
+            ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
+
+    def _draw_treemap(self, ax, values, colors, scale):
+        """
+        Draws a centered treemap scaled by `scale` (in [0, 1]) within a [-1, 1] x [-1, 1] axis.
+        Returns the list of Rectangle patches for legend binding.
+        """
+        ax.set_xlim(-1.05, 1.05)
+        ax.set_ylim(-1.05, 1.05)
+        ax.axis("off")
+
+        # Bounding box centered at (0, 0) with side length = 2 * scale (matching pie diameter)
+        side = 2.0 * scale
+        x0, y0 = -scale, -scale
+
+        rects = self._compute_treemap_rects(values, x0, y0, side, side)
+        patches = []
+        for (rx, ry, rw, rh), color in zip(rects, colors):
+            rect = plt.Rectangle(
+                (rx, ry),
+                rw,
+                rh,
+                facecolor=color,
+                edgecolor="black",
+                linewidth=0.5,
+            )
+            ax.add_patch(rect)
+            patches.append(rect)
+
+        return patches
+
+    @classmethod
+    def _compute_treemap_rects(cls, values, x, y, dx, dy):
+        """
+        Recursively partitions a rectangle (x, y, dx, dy) into sub-rectangles
+        proportional to `values` using a balanced binary split.
+        """
+        if len(values) == 0:
+            return []
+        if len(values) == 1:
+            return [(x, y, dx, dy)]
+
+        total = sum(values)
+        if total <= 0:
+            return [(x, y, 0.0, 0.0) for _ in values]
+
+        # Find split index where cumulative sum is closest to half of total
+        cumsum = np.cumsum(values)
+        split_idx = int(np.argmin(np.abs(cumsum - total / 2.0))) + 1
+        split_idx = min(max(split_idx, 1), len(values) - 1)
+
+        left_vals = values[:split_idx]
+        right_vals = values[split_idx:]
+        frac = sum(left_vals) / total
+
+        # Split along the longer axis to keep aspect ratios close to square
+        if dx >= dy:
+            w1 = dx * frac
+            return (
+                cls._compute_treemap_rects(left_vals, x, y, w1, dy)
+                + cls._compute_treemap_rects(right_vals, x + w1, y, dx - w1, dy)
+            )
+        else:
+            h1 = dy * frac
+            return (
+                cls._compute_treemap_rects(left_vals, x, y, dx, h1)
+                + cls._compute_treemap_rects(right_vals, x, y + h1, dx, dy - h1)
+            )
 
     def _dispatch_plot(self, data_type: str, atlas: bool = False, delta: bool = False, **kwargs):
         if (atlas or delta) and not self.mhmga:
@@ -639,13 +759,15 @@ class Display:
 
         if (
             asset.object_class == "storage"
-            and base not in ["Hydro", "Run of River"]
+            and base not in ["Hydro", "Pondage", "Run of River"]
             and raw_type not in ["hydro", "pond", "ror"]
         ):
             if raw_type == "nphes":
                 return "New PHES"
-            if raw_type in ["clphes", "olphes"]:
-                return "Legacy PHES"
+            if raw_type == "clphes":
+                return "Closed-loop PHES"
+            if raw_type == "olphes":
+                return "Open-loop PHES"
             if "bess" in raw_type or raw_type == "battery":
                 return "Battery"
 
@@ -734,16 +856,20 @@ class Display:
             dictsafe_check(row1["Transmission (Power)"], label)
             row1["Transmission (Power)"][label] += accessor.get_power_capacity(asset)
 
+            energy_in_yr = accessor.get_line_use_gross(asset) * to_twh_yr
+            losses_yr = accessor.get_line_loss_gross(asset) * to_twh_yr
+            energy_out_yr = energy_in_yr - losses_yr
+
             dictsafe_check(row3["Transmission (Flows)"], label)
-            row3["Transmission (Flows)"][label] += accessor.get_line_use_gross(asset) * to_twh_yr
+            row3["Transmission (Flows)"][label] += energy_out_yr
 
             if energy_type == "both":
                 dictsafe_check(row3["Transmission (Flows)"], "Losses")
-                row3["Transmission (Flows)"]["Losses"] += accessor.get_line_loss_gross(asset) * to_twh_yr
+                row3["Transmission (Flows)"]["Losses"] += losses_yr
 
         # 4. System Curtailment
         if energy_type == "both":
-            row3["Generation (Energy Mix)"]["Curtailment"] = accessor.get_curtail_gross("network") * to_twh_yr
+            row3["Generation (Energy Mix)"]["Curtailment"] = accessor.get_curtail_gross("system") * to_twh_yr
 
         return row1, row2, row3
 
@@ -809,16 +935,18 @@ class Display:
             "DC Subsea": tx_palette[2],
             "DC Underground": tx_palette[3],
             "New PHES": self.colors[1],
-            "Legacy PHES": self.colors[0],
+            "Open-loop PHES": self.colors[0],
+            "Closed-loop PHES": self.colors[2],
             # Status / Secondary metrics
             "Losses": (0.7, 0.7, 0.7),
             "Curtailment": (0.7, 0.7, 0.7),
-            "Spillage": (0.6, 0.8, 0.9),
+            "Spillage": (0.5, 0.8, 0.9),
             # Storage Sources
             "New PHES (Electrical)": src_palette[0],
-            "Legacy PHES (Electrical)": src_palette[1],
-            "Legacy PHES (Inflows)": src_palette[2],
-            "Battery (Electrical)": src_palette[3],
+            "Closed-loop PHES (Electrical)": src_palette[1],
+            "Open-loop PHES (Electrical)": src_palette[2],
+            "Open-loop PHES (Inflows)": src_palette[3],
+            "Battery (Electrical)": src_palette[4],
         }
 
     def _get_color(self, tech):
