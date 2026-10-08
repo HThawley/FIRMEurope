@@ -2,7 +2,7 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Wedge
 import numpy as np
-import seaborn as sns
+# import seaborn as sns
 from typing import Dict, List, Tuple
 import os
 import pandas as pd
@@ -198,11 +198,11 @@ class Display:
         ax_iter = iter(np.atleast_2d(axes))
 
         if 0 in rows:
-            self._draw_summary_row(row0, next(ax_iter), ["GW", "GW", "GW"], chart_type=chart_type)
+            self._draw_summary_row(row0, next(ax_iter), ["GW", "GW", "GW"], sort="size", chart_type=chart_type)
         if 1 in rows:
-            self._draw_summary_row(row1, next(ax_iter), ["GWh", "GWh", "TWh/yr"], chart_type=chart_type)
+            self._draw_summary_row(row1, next(ax_iter), ["GWh", "GWh", "TWh/yr"], sort="size", chart_type=chart_type)
         if 2 in rows:
-            self._draw_summary_row(row2, next(ax_iter), ["TWh/yr", "TWh/yr", "TWh/yr"], chart_type=chart_type)
+            self._draw_summary_row(row2, next(ax_iter), ["TWh/yr", "TWh/yr", "TWh/yr"], sort="size", chart_type=chart_type)
 
         if nrows == 3:
             fig.suptitle("Network Overview", fontsize=self.large_fontsize)
@@ -212,7 +212,167 @@ class Display:
 
         return fig
 
-    def _draw_summary_row(self, data_dict, row_axes, units, chart_type="pie"):
+    def plot_fleet_bars(
+        self,
+        view: str = "generation",
+        *,
+        include_storage: bool = True,
+        energy_type: str = "both",
+        normalize: bool = True,
+        alternative: int = 0,
+        figsize: Tuple[float, float] = None,
+        save_path: str = None,
+    ):
+        """
+        Plots stacked bar charts of fleet summary metrics on a single axis.
+
+        Args:
+            view (str): Which summary slice to plot:
+                - 'generation': Generation Power (GW) & Energy Mix (TWh/yr).
+                - 'storage': Rechargeable Storage Power (GW), Energy Cap (GWh), & Discharge (TWh/yr).
+                - 'power_overview': Row 0 of fleet summary (Gen, Transmission, Storage Power in GW).
+                - 'energy_overview': All 4 TWh/yr charts (Gen Mix, Tx Flows, Storage Sources, Storage Discharge).
+            include_storage (bool): For view='generation', whether to include rechargeable storage
+                in the Power Capacity and Energy Mix bars. Default True.
+            energy_type (str): 'generation' or 'both' (includes Curtailment, Losses, Spillage).
+            normalize (bool): If True, plots 100% stacked bars with total annotations on top.
+                If False, plots absolute values (only valid when all bars share units).
+            alternative (int): Solution index for MHMGA mode. Default 0.
+            figsize (tuple): Optional (width, height) override.
+            save_path (str): Optional file path to save the figure.
+        """
+        if energy_type == "consumption":
+            raise NotImplementedError("Methods for attributing curtailment are not yet defined.")
+        if energy_type not in ("generation", "both", "consumption"):
+            raise ValueError("energy_type must be 'generation', 'consumption', or 'both'")
+
+        target_sol = self.noptima[alternative] if self.mhmga and self.noptima else self.solution
+        row0, row1, row2 = self._aggregate_fleet_summary_data(target_sol, energy_type)
+
+        view_key = view.lower()
+        match view_key:
+            case "generation":
+                p_dict = dict(row0["Generation (Power)"])
+                e_dict = dict(row2["Generation (Energy Mix)"])
+                if include_storage:
+                    for k, v in row0["Rechargeable Storage (Power)"].items():
+                        p_dict[k] = p_dict.get(k, 0.0) + v
+                    for k, v in row2["Rechargeable Storage (Discharge)"].items():
+                        e_dict[k] = e_dict.get(k, 0.0) + v
+
+                bars_spec = [
+                    ("Power Capacity", p_dict, "GW"),
+                    ("Energy Mix", e_dict, "TWh/yr"),
+                ]
+                title = "Generation Capacity & Energy Mix" + (" (incl. Storage)" if include_storage else "")
+
+            case "storage":
+                bars_spec = [
+                    ("Power Capacity", row0["Rechargeable Storage (Power)"], "GW"),
+                    ("Energy Capacity", row1["Rechargeable Storage (Energy Cap)"], "GWh"),
+                    ("Discharge Energy", row2["Rechargeable Storage (Discharge)"], "TWh/yr"),
+                ]
+                title = "Rechargeable Storage Summary"
+
+            case "power_overview":
+                bars_spec = [
+                    ("Generation", row0["Generation (Power)"], "GW"),
+                    ("Transmission", row0["Transmission (Power)"], "GW"),
+                    ("Rechargeable Storage", row0["Rechargeable Storage (Power)"], "GW"),
+                ]
+                title = "Network Power Capacity Overview"
+
+            case "energy_overview":
+                bars_spec = [
+                    ("Generation Mix", row2["Generation (Energy Mix)"], "TWh/yr"),
+                    ("Transmission Flows", row2["Transmission (Flows)"], "TWh/yr"),
+                    ("Storage Sources", row1["Rechargeable Storage (Sources)"], "TWh/yr"),
+                    ("Storage Discharge", row2["Rechargeable Storage (Discharge)"], "TWh/yr"),
+                ]
+                title = "Annual Energy Overview"
+
+            case _:
+                raise ValueError(
+                    f"Unknown view '{view}'. Expected 'generation', 'storage', 'power_overview', or 'energy_overview'."
+                )
+
+        units_set = {u for _, _, u in bars_spec}
+        if not normalize and len(units_set) > 1:
+            raise ValueError(f"Cannot plot absolute stacked bars across mixed units {units_set}. Set normalize=True.")
+
+        if figsize is None:
+            figsize = (max(6, 2.5 * len(bars_spec) + 2), 7)
+
+        fig, ax = plt.subplots(figsize=figsize, dpi=self.dpi)
+        x_positions = np.arange(len(bars_spec))
+        bar_width = 0.55
+
+        legend_handles = {}
+        max_bar_height = 0.0
+
+        for idx, (_bar_label, mix, unit) in enumerate(bars_spec):
+            clean_mix = {k: v for k, v in mix.items() if v > 1e-6}
+            total = sum(clean_mix.values())
+            max_bar_height = max(max_bar_height, 100.0 if normalize else total)
+
+            if total <= 0:
+                continue
+
+            sorted_items = self._sort_mix_items(clean_mix)
+
+            bottom = 0.0
+            for tech, val in sorted_items:
+                height = (val / total * 100.0) if normalize else val
+                bar_container = ax.bar(
+                    x_positions[idx],
+                    height,
+                    width=bar_width,
+                    bottom=bottom,
+                    color=self._get_color(tech),
+                    hatch=self._get_hatch(tech),
+                    edgecolor="black",
+                    linewidth=0.5,
+                )
+                bottom += height
+                if tech not in legend_handles:
+                    legend_handles[tech] = bar_container[0]
+
+            # Annotate physical total above each bar
+            y_pos = 101.5 if normalize else total * 1.02
+            ax.text(
+                x_positions[idx],
+                y_pos,
+                f"{total:,.1f} {unit}",
+                ha="center",
+                va="bottom",
+                fontsize=self.small_fontsize,
+                fontweight="bold",
+            )
+
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels([b[0] for b in bars_spec], fontsize=self.base_fontsize)
+        ax.set_ylabel("Share (%)" if normalize else f"Total ({next(iter(units_set))})", fontsize=self.base_fontsize)
+        ax.set_ylim(0, 110.0 if normalize else max_bar_height * 1.12)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.set_title(title, fontsize=self.large_fontsize, pad=15)
+
+        if legend_handles:
+            ax.legend(
+                list(legend_handles.values()),
+                list(legend_handles.keys()),
+                loc="center left",
+                bbox_to_anchor=(1.02, 0.5),
+                frameon=False,
+                title="Component",
+            )
+
+        if save_path:
+            plt.savefig(save_path, dpi=self.dpi, bbox_inches="tight")
+
+        return fig
+
+    def _draw_summary_row(self, data_dict, row_axes, units, sort="size", chart_type="pie"):
         """Worker method to draw a single row of summary charts ('pie' or 'treemap')."""
         unit_maxes = {}
         for mix, unit in zip(data_dict.values(), units):
@@ -236,10 +396,16 @@ class Display:
                 continue
 
             # Sort descending so largest slices/rectangles are placed consistently
-            sorted_items = sorted(clean_mix.items(), key=lambda item: item[1], reverse=True)
+            if sort.lower() == "size":
+                sorted_items = sorted(clean_mix.items(), key=lambda item: item[1], reverse=True)
+            elif sort.lower() == "name":
+                sorted_items = self._sort_mix_items(clean_mix)
+            else:
+                sorted_items = list(clean_mix.items())
             labels = [k for k, _ in sorted_items]
             values = [v for _, v in sorted_items]
             colors = [self._get_color(label) for label in labels]
+            hatches = [self._get_hatch(label) for label in labels]
 
             # Linear dimension scaling so total area is proportional to total / unit_maxes[unit]
             scale = np.sqrt(total / unit_maxes[unit])
@@ -249,16 +415,17 @@ class Display:
                     values,
                     radius=scale,
                     colors=colors,
+                    hatches=hatches,
                     wedgeprops={"linewidth": 0.5, "edgecolor": "black"},
                 )
             elif chart_type == "treemap":
-                handles = self._draw_treemap(ax, values, colors, scale)
+                handles = self._draw_treemap(ax, values, colors, hatches, scale)
 
             ax.set_title(f"{category}\nTotal: {total:,.1f} {unit}", pad=10)
             ax.set_aspect("equal")
             ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
 
-    def _draw_treemap(self, ax, values, colors, scale):
+    def _draw_treemap(self, ax, values, colors, hatches, scale):
         """
         Draws a centered treemap scaled by `scale` (in [0, 1]) within a [-1, 1] x [-1, 1] axis.
         Returns the list of Rectangle patches for legend binding.
@@ -273,12 +440,13 @@ class Display:
 
         rects = self._compute_treemap_rects(values, x0, y0, side, side)
         patches = []
-        for (rx, ry, rw, rh), color in zip(rects, colors):
+        for (rx, ry, rw, rh), color, hatch in zip(rects, colors, hatches):
             rect = plt.Rectangle(
                 (rx, ry),
                 rw,
                 rh,
                 facecolor=color,
+                hatch=hatch,
                 edgecolor="black",
                 linewidth=0.5,
             )
@@ -509,7 +677,8 @@ class Display:
                 keys = sorted(mix.keys())
                 values = [mix[k] for k in keys]
                 colors = [self._get_color(k) for k in keys]
-                self._draw_pie(ax, values, x, y, radius, colors)
+                hatches = [self._get_hatch(k) for k in keys]
+                self._draw_pie(ax, values, x, y, radius, colors, hatches)
 
         self._draw_solution_transmission(solution, ax, flow_type=flow_type, build=kwargs.get("build"))
 
@@ -572,7 +741,7 @@ class Display:
                 centroids[node.name] = (0, 0)
         return centroids
 
-    def _draw_pie(self, ax, dist, xpos, ypos, radius, colors):
+    def _draw_pie(self, ax, dist, xpos, ypos, radius, colors, hatches):
         """
         Draws a pie chart using Wedge patches which respect data coordinates.
         Replaces ax.scatter to fix the 'exploding wedge' distortion.
@@ -591,7 +760,8 @@ class Display:
             deg = val * 360
             end_angle = start_angle + deg
 
-            w = Wedge((xpos, ypos), radius, start_angle, end_angle, facecolor=colors[i], zorder=100, edgecolor="none")
+            w = Wedge((xpos, ypos), radius, start_angle, end_angle,
+                      facecolor=colors[i], hatch=hatches[i], zorder=100, edgecolor="none")
             ax.add_patch(w)
             start_angle = end_angle
 
@@ -607,6 +777,7 @@ class Display:
         keys = sorted(mix.keys())
         values = [mix[k] for k in keys]
         colors = [self._get_color(k) for k in keys]
+        hatches = [self._get_hatch(k) for k in keys]
 
         num_bars = len(keys)
         bar_width = width_m / (num_bars + 1)
@@ -631,6 +802,7 @@ class Display:
                 bar_width * 0.8,
                 h,
                 facecolor=colors[i],
+                hatch=hatches[i],
                 edgecolor="black",
                 linewidth=0.5,
                 zorder=110,
@@ -910,47 +1082,71 @@ class Display:
             ax.legend(wedges, labels, loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
 
     def _init_colors(self):
-        self.colors = sns.color_palette("Paired")
-        tx_palette = sns.color_palette("mako", 4)
-        src_palette = sns.color_palette("Set2", 8)
-
         self.tech_colors = {
-            "Utility Solar": self.colors[7],
-            "Rooftop Solar": self.colors[6],
-            "Onshore Wind": self.colors[8],
-            "Offshore Wind": self.colors[9],
-            "Hydro": self.colors[1],
-            "Biomass": self.colors[3],
-            "Biogas": self.colors[2],
-            "Bioenergy": (0.4, 0.7, 0.3),
-            "Fossil Gas": (0.5, 0.5, 0.5),
-            "Nuclear": self.colors[4],
-            "Battery": self.colors[10],
-            "PHES": self.colors[0],
-            "Geothermal": self.colors[5],
-            "Coal": (0.15, 0.15, 0.15),
-            # Sub-type Additions
-            "AC OHL": tx_palette[0],
-            "AC OHL (Mountain)": tx_palette[1],
-            "DC Subsea": tx_palette[2],
-            "DC Underground": tx_palette[3],
-            "New PHES": self.colors[1],
-            "Open-loop PHES": self.colors[0],
-            "Closed-loop PHES": self.colors[2],
-            # Status / Secondary metrics
-            "Losses": (0.7, 0.7, 0.7),
-            "Curtailment": (0.7, 0.7, 0.7),
-            "Spillage": (0.5, 0.8, 0.9),
-            # Storage Sources
-            "New PHES (Electrical)": src_palette[0],
-            "Closed-loop PHES (Electrical)": src_palette[1],
-            "Open-loop PHES (Electrical)": src_palette[2],
-            "Open-loop PHES (Inflows)": src_palette[3],
-            "Battery (Electrical)": src_palette[4],
+            # --- Solar (Gold / Bright Yellow) ---
+            "Utility Solar": "#F59E0B",
+            "Rooftop Solar": "#FEF08A",
+            # --- Wind (Sky Blue / Royal Blue) ---
+            "Onshore Wind": "#60A5FA",
+            "Offshore Wind": "#1D4ED8",
+            # --- Hydroelectric (Emerald Teal / Aqua / Mint) ---
+            "Hydro": "#0D9488",
+            "Pondage": "#2DD4BF",
+            "Run of River": "#99F6E4",
+            # --- Bioenergy & Geothermal (Forest Greens & Crimson) ---
+            "Bioenergy": "#16A34A",
+            "Biomass": "#15803D",
+            "Biogas": "#86EFAC",
+            "Geothermal": "#B91C1C",
+            # --- Thermal / Nuclear (Rose Red, Warm Taupe, Charcoal) ---
+            "Nuclear": "#E11D48",
+            "Fossil Gas": "#78716C",
+            "Coal": "#27272A",
+            # --- Rechargeable Storage (Distinct Purple / Magenta / Indigo family) ---
+            "Battery": "#A855F7",  # Vivid Purple
+            "Closed-loop PHES": "#EC4899",  # Hot Rose / Magenta
+            "Open-loop PHES": "#6366F1",  # Medium Indigo
+            "New PHES": "#3730A3",  # Deep Violet-Indigo
+            "Legacy PHES": "#818CF8",  # Soft Periwinkle (fallback)
+            "PHES": "#6366F1",  # Fallback
+            # --- Transmission (Copper/Terracotta for AC, Petrol/Slate for DC) ---
+            "AC OHL": "#9A3412",  # Deep Rust / Copper
+            "AC OHL (Mountain)": "#EA580C",  # Terracotta Orange (distinct from Solar Gold)
+            "DC Subsea": "#0E7490",  # Deep Cyan / Petrol
+            "DC Underground": "#1E293B",  # Dark Slate Navy
+            # --- Secondary / System Balance Metrics ---
+            "Curtailment": "#E5E7EB",  # Light Silver-Gray
+            "Losses": "#9CA3AF",  # Medium Neutral Gray
+            "Spillage": "#BAE6FD",  # Pale Ice Blue
         }
 
-    def _get_color(self, tech):
-        return self.tech_colors.get(tech, (0.5, 0.5, 0.5))
+        self.tech_hatches = {
+            "Curtailment": "xx",
+            "Losses": "--",
+            "Spillage": "oo",
+        }
+
+    def _get_color(self, tech: str) -> str:
+        """
+        Returns the hex color for a technology.
+        Automatically maps '(Electrical)' and '(Inflows)' storage sources
+        to their parent storage technology's color.
+        """
+        base_tech = tech.removesuffix(" (Electrical)").removesuffix(" (Inflows)")
+        return self.tech_colors.get(tech, self.tech_colors.get(base_tech, "#6B7280"))
+
+    def _get_hatch(self, tech: str) -> str | None:
+        """
+        Returns the hatch pattern for a technology or energy state:
+            - '//' for electrical charging inputs
+            - '..' for natural inflow inputs
+            - Specific patterns for Curtailment ('xx'), Losses ('--'), and Spillage ('oo')
+        """
+        if tech.endswith(" (Electrical)"):
+            return "//"
+        if tech.endswith(" (Inflows)"):
+            return ".."
+        return self.tech_hatches.get(tech, None)
 
     def _add_legend(self, ax, data_dict):
         """Dynamically creates legend based on present technologies."""
@@ -961,7 +1157,17 @@ class Display:
         handles = []
         labels = []
         for tech in sorted(present_techs):
-            handles.append(plt.Rectangle((0, 0), 1, 1, color=self._get_color(tech)))
+            handles.append(
+                plt.Rectangle(
+                    (0, 0),
+                    1,
+                    1,
+                    facecolor=self._get_color(tech),
+                    hatch=self._get_hatch(tech),
+                    edgecolor="black",
+                    linewidth=0.5,
+                )
+            )
             labels.append(tech)
 
         ax.legend(
@@ -991,6 +1197,15 @@ class Display:
             'legend.title_fontsize': self.small_fontsize,
             'axes.titlesize': self.small_fontsize  # Applies to subplot titles
         })
+
+    @staticmethod
+    def _sort_mix_items(mix: dict) -> list[tuple[str, float]]:
+        """
+        Sorts technology dictionary items deterministically by name,
+        placing secondary metrics ('Curtailment', 'Losses', 'Spillage') last.
+        """
+        secondary = {"Curtailment", "Losses", "Spillage"}
+        return sorted(mix.items(), key=lambda item: (item[0] in secondary, item[0]))
 
 
 def dictsafe_check(d, key, val=0.0):
