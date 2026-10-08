@@ -182,6 +182,9 @@ class Display:
 
     def _eval_asset_metric(self, accessor: Accessor, asset, spec: MetricSpec, scale: float) -> Dict[str, float]:
         """Evaluates a MetricSpec on a single asset, returning {label: value}."""
+        if spec.metric == "none":
+            return {}
+
         label = self._resolve_label(asset, spec.group_by)
 
         if spec.metric == "storage_sources":
@@ -249,11 +252,15 @@ class Display:
                 # Asset-level balances
                 if not by_node and spec.include_balances:
                     if "storage_losses" in spec.include_balances and asset_class == "storages":
-                        data["Losses"] = data.get("Losses", 0.0) + accessor.get_storage_loss_gross(asset) * scale
+                        data["Storage Losses"] = (
+                            data.get("Storage Losses", 0.0) + accessor.get_storage_loss_gross(asset) * scale
+                        )
                     if "spillage" in spec.include_balances and asset_class == "storages":
                         data["Spillage"] = data.get("Spillage", 0.0) + accessor.get_spillage_gross(asset) * scale
                     if "line_losses" in spec.include_balances and asset_class == "major_lines":
-                        data["Losses"] = data.get("Losses", 0.0) + accessor.get_line_loss_gross(asset) * scale
+                        data["Transmission Losses"] = (
+                            data.get("Transmission Losses", 0.0) + accessor.get_line_loss_gross(asset) * scale
+                        )
 
         # System-level balances
         if not by_node and "curtailment" in spec.include_balances:
@@ -477,8 +484,9 @@ class Display:
         ref_sol = self._resolve_solution(ref_solution) if mode == "delta" else None
 
         # Build bar/panel items: List of (label, mix_dict, unit)
-        items: List[Tuple[str, Dict[str, float], str]] = []
+        items: List[Tuple[str, Dict[str, float], str, int | None]] = []
         for sol_idx in sol_list:
+            base_offset = len(items)
             sol = self._resolve_solution(sol_idx)
             for spec in resolved_specs:
                 mix = self._aggregate_spec(sol, spec, by_node=False)
@@ -494,7 +502,8 @@ class Display:
                 else:
                     item_label = spec.title
 
-                items.append((item_label, mix, spec.unit))
+                resolved_ref = (base_offset + spec.norm_ref) if spec.norm_ref is not None else None
+                items.append((item_label, mix, spec.unit, resolved_ref))
 
         with plt.rc_context(self.style.to_rc()):
             if chart_type == "stacked_bar":
@@ -602,14 +611,14 @@ class Display:
 
     def _render_stacked_bars(
         self,
-        items: List[Tuple[str, Dict[str, float], str]],
+        items: List[Tuple[str, Dict[str, float], str, int | None]],
         normalize: bool,
         is_delta: bool,
         sort: str,
         figsize: Tuple[float, float] | None,
         ax: plt.Axes | None,
     ) -> Tuple[plt.Figure, np.ndarray]:
-        units_set = {u for _, _, u in items}
+        units_set = {u for _, _, u, _ in items}
         if not normalize and len(units_set) > 1:
             raise ValueError(
                 f"Cannot plot unnormalized stacked bars across mixed units {units_set}. Set normalize=True."
@@ -626,13 +635,32 @@ class Display:
         x_positions = np.arange(len(items))
         bar_width = 0.55
         legend_handles = {}
-        max_pos_height = 0.0
-        min_neg_height = 0.0
 
-        for idx, (_label, mix, unit) in enumerate(items):
+        # Pre-compute positive/negative totals and global axis extrema up front
+        bar_pos_totals = [sum(v for v in mix.values() if v > 1e-6) for _, mix, _, _ in items]
+        bar_neg_totals = [sum(v for v in mix.values() if v < -1e-6) for _, mix, _, _ in items]
+
+        if normalize and not is_delta:
+            bar_denoms = [
+                bar_pos_totals[norm_ref] if (norm_ref is not None and 0 <= norm_ref < len(items)) else pos_tot
+                for pos_tot, (_, _, _, norm_ref) in zip(bar_pos_totals, items)
+            ]
+            bar_heights = [
+                (pos_tot / denom * 100.0) if denom > 0 else 0.0
+                for pos_tot, denom in zip(bar_pos_totals, bar_denoms)
+            ]
+            max_pos_height = max(bar_heights, default=100.0)
+            min_neg_height = 0.0
+        else:
+            bar_denoms = bar_pos_totals
+            max_pos_height = max(bar_pos_totals, default=1.0)
+            min_neg_height = min(bar_neg_totals, default=0.0)
+
+        annot_offset = 1.5 if (normalize and not is_delta) else max(max_pos_height * 0.02, 0.1)
+
+        for idx, (_label, mix, unit, _norm_ref) in enumerate(items):
             clean_mix = {k: v for k, v in mix.items() if abs(v) > 1e-6}
-            pos_total = sum(v for v in clean_mix.values() if v > 0)
-            # neg_total = sum(v for v in clean_mix.values() if v < 0)
+            denom = bar_denoms[idx]
             net_total = sum(clean_mix.values())
 
             sorted_items = (
@@ -646,9 +674,9 @@ class Display:
 
             for tech, val in sorted_items:
                 if normalize and not is_delta:
-                    if pos_total <= 0:
+                    if denom <= 0:
                         continue
-                    height = (val / pos_total) * 100.0
+                    height = (val / denom) * 100.0
                     bottom = pos_bottom
                     pos_bottom += height
                 else:
@@ -673,14 +701,10 @@ class Display:
                 if tech not in legend_handles:
                     legend_handles[tech] = bar_container[0]
 
-            max_pos_height = max(max_pos_height, 100.0 if (normalize and not is_delta) else pos_bottom)
-            min_neg_height = min(min_neg_height, neg_bottom)
-
-            y_annot = 101.5 if (normalize and not is_delta) else pos_bottom + max(max_pos_height * 0.02, 0.1)
             prefix = "+" if (is_delta and net_total > 0) else ""
             axis.text(
                 x_positions[idx],
-                y_annot,
+                pos_bottom + annot_offset,
                 f"{prefix}{net_total:,.1f} {unit}",
                 ha="center",
                 va="bottom",
@@ -699,7 +723,7 @@ class Display:
             fontsize=self.style.base_fontsize,
         )
 
-        y_top = 110.0 if (normalize and not is_delta) else max(max_pos_height * 1.15, 1.0)
+        y_top = max(110.0, max_pos_height * 1.12) if (normalize and not is_delta) else max(max_pos_height * 1.15, 1.0)
         y_bot = min_neg_height * 1.15 if is_delta else 0.0
         axis.set_ylim(y_bot, y_top)
         axis.spines["top"].set_visible(False)
@@ -719,7 +743,7 @@ class Display:
 
     def _render_part_to_whole_grid(
         self,
-        items: List[Tuple[str, Dict[str, float], str]],
+        items: List[Tuple[str, Dict[str, float], str, int | None]],
         chart_type: str,
         sort: str,
         grid: Tuple[int, int] | None,
@@ -744,7 +768,7 @@ class Display:
 
         # Normalize area per shared physical unit
         unit_maxes: Dict[str, float] = {}
-        for _, mix, unit in items:
+        for _, mix, unit, _ in items:
             total = sum(v for v in mix.values() if v > 0)
             unit_maxes[unit] = max(unit_maxes.get(unit, 1.0), total)
 
@@ -753,7 +777,7 @@ class Display:
                 axis.axis("off")
                 continue
 
-            title, mix, unit = items[i]
+            title, mix, unit, _ = items[i]
             clean_mix = {k: v for k, v in mix.items() if v > 1e-6}
             total = sum(clean_mix.values())
 
@@ -1128,12 +1152,14 @@ class Display:
             "DC Subsea": "#0E7490",
             "DC Underground": "#1E293B",
             "Curtailment": "#E5E7EB",
-            "Losses": "#9CA3AF",
+            "Storage Losses": "#9CA3AF",
+            "Transmission Losses": "#6B7280",
             "Spillage": "#BAE6FD",
         }
         self.tech_hatches = {
             "Curtailment": "xx",
-            "Losses": "--",
+            "Storage Losses": "--",
+            "Transmission Losses": "\\\\",
             "Spillage": "oo",
         }
 
@@ -1169,5 +1195,5 @@ class Display:
 
     @staticmethod
     def _sort_mix_items(mix: dict) -> list[tuple[str, float]]:
-        secondary = {"Curtailment", "Losses", "Spillage"}
+        secondary = {"Curtailment", "Storage Losses", "Transmission Losses", "Spillage"}
         return sorted(mix.items(), key=lambda item: (item[0] in secondary, item[0]))

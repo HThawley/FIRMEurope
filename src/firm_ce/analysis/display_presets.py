@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Literal, Sequence, Union
 
 AssetClass = Literal["generators", "storages", "major_lines"]
@@ -41,27 +41,34 @@ def is_generation_or_hydro(asset, base_tech: str = "") -> bool:
     return True
 
 
+MetricType = Literal[
+    "none",
+    "power_capacity",
+    "energy_capacity",
+    "dispatch",
+    "post_curtailment_power",
+    "discharge",
+    "charge",
+    "inflows",
+    "storage_sources",
+    "line_flow",
+    "line_flow_net",
+]
+
+
 @dataclass(frozen=True)
 class MetricSpec:
-    """
-    Declarative query specification for extracting and aggregating solution metrics.
-    Supports runtime customization via `.with_options(...)`.
-    """
-
     title: str
     unit: str
     assets: Sequence[AssetClass]
-    metric: MetricType
+    metric: MetricType = "none"  # type: ignore
     build: BuildFilter = "all"
     asset_filter: Callable[[object, str], bool] = lambda asset, base_tech: True
     group_by: Union[Literal["tech", "subtech", "node"], Callable[[object], str]] = "subtech"
     include_balances: Sequence[BalanceType] = field(default_factory=tuple)
-    annualize: bool = False  # Multiplies gross GWh by 1 / (year_count * 1000) -> TWh/yr
+    annualize: bool = False
     scale_factor: float = 1.0
-
-    def with_options(self, **kwargs) -> "MetricSpec":
-        """Returns a modified copy of this MetricSpec with updated fields."""
-        return replace(self, **kwargs)
+    norm_ref: int | None = None  # Index of spec in preset to normalize against when normalize=True
 
 
 @dataclass
@@ -235,6 +242,33 @@ SUMMARY_PRESETS: Dict[str, List[MetricSpec]] = {
             asset_filter=is_rechargeable_storage,
             include_balances=("storage_losses", "spillage"),
             annualize=True,
+        ),
+    ],
+    "system_overview_with_losses": [
+        # Bar 0: Installed Power Capacity (stacks to 100% of total GW)
+        MetricSpec(
+            title="Power Capacity",
+            unit="GW",
+            assets=("generators", "storages"),
+            metric="power_capacity",
+        ),
+        # Bar 1: Gross Annual Energy Mix (stacks to 100% of total TWh/yr)
+        MetricSpec(
+            title="Annual Energy Mix",
+            unit="TWh/yr",
+            assets=("generators", "storages"),
+            metric="dispatch",
+            annualize=True,
+        ),
+        # Bar 2: Losses & Curtailment (normalized against Bar 1's TWh/yr total -> <100%)
+        MetricSpec(
+            title="Losses & Curtailment",
+            unit="TWh/yr",
+            assets=("storages", "major_lines"),
+            metric="none",
+            include_balances=("curtailment", "storage_losses", "spillage", "line_losses"),
+            annualize=True,
+            norm_ref=1,  # Normalize height against Bar 1 ("Annual Energy Mix")
         ),
     ],
 }
