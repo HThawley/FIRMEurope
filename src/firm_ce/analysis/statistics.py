@@ -113,64 +113,75 @@ class Statistics:
             os.remove(self.temporal_file_path)
 
         schema = pa.schema([
-            ('Time_Step', pa.int32()),
-            ('Asset Name', pa.string()),
-            ('Asset Type', pa.string()),
-            ('Unit Type', pa.string()),
-            ('Node', pa.string()),
-            ('Variable', pa.string()),
-            ('Value', pa.float32())
+            ("Time_Step", pa.int32()),
+            ("Asset Name", pa.string()),
+            ("Asset Type", pa.string()),
+            ("Unit Type", pa.string()),
+            ("Node", pa.string()),
+            ("Variable", pa.string()),
+            ("Value", pa.float32()),
         ])
-        writer = pq.ParquetWriter(self.temporal_file_path, schema)
-        time_steps = np.arange(self.intervals_count, dtype=np.int32)
-        n_steps = len(time_steps)
+        time_steps = pa.array(np.arange(self.intervals_count, dtype=np.int32))
+        n_steps = self.intervals_count
 
-        def write_trace(meta, variable_name, trace_array):
-            table = pa.Table.from_arrays([
-                time_steps,
-                pa.array([meta[1]] * n_steps),
-                pa.array([meta[2]] * n_steps),
-                pa.array([meta[4]] * n_steps),
-                pa.array([meta[5]] * n_steps),
-                pa.array([variable_name] * n_steps),
-                pa.array(trace_array.astype(np.float32))
-            ], schema=schema)
-            writer.write_table(table)
+        # Declarative mapping: asset_class -> [(Parquet Variable, Accessor Metric, Optional Predicate)]
+        class_trace_specs = {
+            "nodes": [
+                ("Demand", "demand", None),
+                ("Curtailment", "curtail", None),
+                ("Deficit", "deficit", None),
+            ],
+            "generators": [
+                ("Dispatch", "power", None),
+            ],
+            "storages": [
+                ("Dispatch", "power", None),
+                ("Stored_Energy", "storage_level", None),
+                ("Charge", "charge", None),
+                ("Discharge", "discharge", None),
+                ("Inflows", "inflow", self.accessor.has_inflows),
+                ("Spillage", "spillage", self.accessor.has_inflows),
+            ],
+            "major_lines": [
+                ("Flow", "transmission", None),
+            ],
+            "fuels": [
+                ("Fuel_Remaining", "remaining_energy", None),
+            ],
+        }
 
-        asset_classes = ["nodes", "generators", "storages", "major_lines"]
-        for asset_class in asset_classes:
-            is_node = asset_class == "nodes"
-            assets = self.accessor.get_assets(asset_class)
-            for asset in assets.values():
-                meta_data = (
-                    asset.id,
-                    asset.name,
-                    self.accessor.get_display_name(asset_class),
-                    asset_class,
-                    getattr(asset, "unit_type", "node" if is_node else None),
-                    asset.node.name if hasattr(asset, "node") else (asset.name if is_node else None),
-                )
+        with pq.ParquetWriter(self.temporal_file_path, schema) as writer:
+            for asset_class, trace_specs in class_trace_specs.items():
+                display_type = self.accessor.get_display_name(asset_class)
 
-                if is_node:
-                    write_trace(meta_data, "Demand", self.accessor.get_power_trace(asset))
-                    write_trace(meta_data, "Curtailment", self.accessor.get_curtail_trace(asset))
-                    write_trace(meta_data, "Deficit", self.accessor.get_deficit_trace(asset))
-                elif self.accessor.is_line(asset):
-                    write_trace(meta_data, "Flow", self.accessor.get_transmission_trace(asset))
-                else:
-                    write_trace(meta_data, "Dispatch", self.accessor.get_power_trace(asset))
-                    if self.accessor.is_storage(asset):
-                        write_trace(meta_data, "Stored_Energy", self.accessor.get_storage_level_trace(asset))
-                        write_trace(meta_data, "Charge", self.accessor.get_charge_trace(asset))
-                        write_trace(meta_data, "Discharge", self.accessor.get_discharge_trace(asset))
-                    if self.accessor.has_inflows(asset):
-                        write_trace(meta_data, "Inflows", self.accessor.get_inflow_trace(asset))
+                for asset in self.accessor.get_assets(asset_class).values():
+                    if asset_class == "nodes":
+                        unit_type, node_name = "node", asset.name
+                    elif asset_class == "fuels":
+                        unit_type, node_name = "fuel", "network"
+                    else:
+                        unit_type = getattr(asset, "unit_type", None)
+                        node_name = asset.node.name if hasattr(asset, "node") else None
 
-        for asset in self.accessor.get_assets("fuels").values():
-            meta_data = (asset.id, asset.name, self.accessor.get_display_name("fuels"), "fuels", "fuel", "network")
-            write_trace(meta_data, "Fuel_Remaining", self.accessor.get_remaining_energy_trace(asset))
+                    base_cols = [
+                        time_steps,
+                        pa.repeat(asset.name, n_steps),
+                        pa.repeat(display_type, n_steps),
+                        pa.repeat(unit_type, n_steps),
+                        pa.repeat(node_name, n_steps),
+                    ]
 
-        writer.close()
+                    for var_name, metric, condition in trace_specs:
+                        if condition is None or condition(asset):
+                            trace = self.accessor.get_trace(metric, asset)
+                            table = pa.Table.from_arrays(
+                                base_cols + [
+                                    pa.repeat(var_name, n_steps),
+                                    pa.array(trace, type=pa.float32()),
+                                ],
+                                schema=schema,
+                            )
+                            writer.write_table(table)
 
     def _build_static_df(self) -> pl.DataFrame:
         """Constructs static asset and nodal metadata directly as a Polars DataFrame."""
@@ -791,11 +802,9 @@ class Statistics:
             lf_flow_assets = lf_flow_split.drop(["Node_A", "Node_B", "Eff"])
             summary_lf = pl.concat([lf_base, lf_flow_assets]).group_by(index_cols + ["Variable"]).agg(pl.col("Value").abs().sum())
 
-        summary_lf = summary_lf.with_columns([
-            pl.when(pl.col("Variable") == "Inflows")
-              .then(pl.col("Value") / (year_count * 1000))
-              .otherwise((pl.col("Value") * resolution) / (year_count * 1000)).alias("Total_TWh_yr")
-        ])
+        summary_lf = summary_lf.with_columns(
+            ((pl.col("Value") * resolution) / (year_count * 1000)).alias("Total_TWh_yr")
+        )
 
         summary_df = summary_lf.collect().pivot(
             values="Total_TWh_yr",
@@ -841,10 +850,6 @@ class Statistics:
             .collect()
             .pivot(values="Total_GWh", index=["Asset Name", "Unit Type"], on="Variable", aggregate_function=None)
             .fill_null(pl.lit(0.0))
-        )
-        # Inflows are natively energy, not power
-        df_totals = df_totals.with_columns(
-            (pl.col("Inflows") / resolution).alias("Inflows")
         )
 
         # Native Polars dataframe integration

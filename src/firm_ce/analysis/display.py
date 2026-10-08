@@ -55,7 +55,9 @@ class Display:
             else:
                 self._read_and_evaluate_optimum()
             if not self.solution.evaluated:
-                evaluate(solution)
+                evaluate(self.solution)
+
+        self._accessor_cache = {}
 
         self._load_map_data("./inputs/map/europe.geojson")
         self._init_colors()
@@ -64,6 +66,26 @@ class Display:
         self.set_base_fontsize(12)
         self.set_large_fontsize(14)
         self.set_small_fontsize(10)
+
+    def _get_accessor(self, solution: Solution) -> Accessor:
+        """Returns a cached Accessor instance for the given Solution."""
+        sol_id = id(solution)
+        if sol_id not in self._accessor_cache:
+            self._accessor_cache[sol_id] = Accessor(solution, "GW")
+        return self._accessor_cache[sol_id]
+
+    @staticmethod
+    def _get_build_power_capacity(accessor: Accessor, asset, build: str = None) -> float:
+        """Retrieves power capacity filtered by investment status."""
+        match str(build).lower():
+            case "none" | "all":
+                return accessor.get_power_capacity(asset)
+            case "new_build":
+                return accessor.get_new_build_capacity(asset, "power")
+            case "existing" | "initial":
+                return accessor.get_existing_capacity(asset, "power")
+            case _:
+                raise ValueError(f"Unknown build filter: '{build}'")
 
     def plot(
         self,
@@ -524,19 +546,15 @@ class Display:
     def _draw_solution_transmission(self, solution, ax, flow_type="capacity", build=None):
         """
         Draws transmission lines with dynamic width scaling.
-        Uses a two-pass approach:
-        1. Scan all lines to find the maximum value (capacity or flow).
-        2. Draw lines scaled relative to that maximum.
         """
-        # Configuration for visual scaling
-        MAX_LINE_WIDTH = 5.0  # The thickest line will be this wide (in points)
-        MIN_LINE_WIDTH = 0.3  # The thinnest visible line
+        MAX_LINE_WIDTH = 5.0
+        MIN_LINE_WIDTH = 0.3
 
         lines_data = []
         max_val = 0.0
-        accessor = Accessor(solution, "GW")
+        accessor = self._get_accessor(solution)
 
-        for line in solution.network.major_lines.values():
+        for line in accessor.get_assets("major_lines").values():
             n_start = line.node_start.name
             n_end = line.node_end.name
             if n_start not in self.centroids:
@@ -545,33 +563,24 @@ class Display:
                 raise RuntimeError(f"Line node {n_end} not found in map centroids.")
 
             if flow_type == "capacity":
-                match str(build).lower():
-                    case "none" | "all":
-                        val = accessor.get_power_capacity(line)
-                    case "new_build":
-                        val = accessor.get_new_build_capacity(line, "power")
-                    case "existing" | "initial":
-                        val = accessor.get_existing_capacity(line, "power")
+                val = self._get_build_power_capacity(accessor, line, build)
             elif flow_type == "energy":
-                val = accessor.get_line_use_gross_asset(line)
+                val = accessor.get_line_use_gross(line)
             else:
                 raise ValueError(f'Invalid \'flow_type\'. Expected "capacity" or "energy". Got {flow_type}')
-            max_val = max(max_val, val)
 
-            p1 = self.centroids[n_start]
-            p2 = self.centroids[n_end]
-            lines_data.append((p1, p2, val))
+            max_val = max(max_val, val)
+            lines_data.append((self.centroids[n_start], self.centroids[n_end], val))
 
         if max_val == 0:
             return
 
+        color = "red" if flow_type == "capacity" else "blue"
+        alpha = 0.7 if flow_type == "capacity" else 0.5
+
         for p1, p2, val in lines_data:
-            # Calculate dynamic width: (Current / Max) * Target_Max_Width
             scaled_width = (val / max_val) * MAX_LINE_WIDTH
-            # Enforce minimum visibility
             final_width = max(scaled_width, MIN_LINE_WIDTH)
-            color = "red" if flow_type == "capacity" else "blue"
-            alpha = 0.7 if flow_type == "capacity" else 0.5
             ax.plot(
                 [p1[0], p2[0]],
                 [p1[1], p2[1]],
@@ -583,10 +592,11 @@ class Display:
 
     def _aggregate_solution_energy_by_node(self, solution, curtailment=False, energy_mode="generation"):
         """
-        Scans fleet generators, storages to sum energy by node and tech.
+        Scans fleet generators and storages to sum energy (GWh) by node and tech.
         """
         data = {}
-        accessor = Accessor(solution, "GW")
+        accessor = self._get_accessor(solution)
+        metric = "post_curtailment_power" if curtailment else "dispatch"
 
         for asset_class in ("generators", "storages"):
             for asset in accessor.get_assets(asset_class).values():
@@ -595,16 +605,9 @@ class Display:
 
                 if n not in data:
                     data[n] = {}
-                if tech not in data[n]:
-                    data[n][tech] = 0.0
-                if curtailment:
-                    data[n][tech] += accessor.get_post_curtail_energy_gross_asset(asset)
-                else:
-                    data[n][tech] += accessor.get_discharge_gross_asset(asset)
-        # --- Debug print ---
-        # for n in data:
-        #     for tech in data[n]:
-        #         print(f"Node: {n}, Tech: {tech}, Energy: {data[n][tech]} GWh")
+                dictsafe_check(data[n], tech)
+                data[n][tech] += accessor.get_gross(metric, asset)
+
         return data
 
     def _aggregate_solution_capacity_by_node(self, solution, build=None):
@@ -612,7 +615,7 @@ class Display:
         Scans fleet to sum capacity (GW) by node and tech.
         """
         data = {}
-        accessor = Accessor(solution, "GW")
+        accessor = self._get_accessor(solution)
 
         for asset_class in ("generators", "storages"):
             for asset in accessor.get_assets(asset_class).values():
@@ -621,19 +624,9 @@ class Display:
 
                 if n not in data:
                     data[n] = {}
-                if tech not in data[n]:
-                    data[n][tech] = 0.0
-                match str(build).lower():
-                    case "none" | "all":
-                        data[n][tech] += accessor.get_power_capacity(asset)
-                    case "new_build":
-                        data[n][tech] += accessor.get_new_build_capacity(asset, "power")
-                    case "existing" | "initial":
-                        data[n][tech] += accessor.get_existing_capacity(asset, "power")
-        # --- Debug print ---
-        # for n in data:
-        #     for tech in data[n]:
-        #         print(f"Node: {n}, Tech: {tech}, Capacity: {data[n][tech]} GW")
+                dictsafe_check(data[n], tech)
+                data[n][tech] += self._get_build_power_capacity(accessor, asset, build)
+
         return data
 
     def _get_display_label(self, asset):
@@ -669,8 +662,8 @@ class Display:
 
     def _aggregate_fleet_summary_data(self, solution, energy_type="both"):
         """Extracts and formats the 3x3 datasets for a specific solution."""
-        accessor = Accessor(solution, "GW")
-        year_count = self.scenario.static.year_count
+        accessor = self._get_accessor(solution)
+        to_twh_yr = 1.0 / (self.scenario.static.year_count * 1000.0)
 
         row1 = {"Generation (Power)": {}, "Transmission (Power)": {}, "Rechargeable Storage (Power)": {}}
         row2 = {"Hydro (Energy Cap)": {}, "Rechargeable Storage (Energy Cap)": {}, "Rechargeable Storage (Sources)": {}}
@@ -683,14 +676,14 @@ class Display:
             row1["Generation (Power)"][label] += accessor.get_power_capacity(asset)
 
             dictsafe_check(row3["Generation (Energy Mix)"], label)
-            energy_yr = accessor.get_energy_gross_asset(asset) / year_count / 1000  # TWh/yr
-            row3["Generation (Energy Mix)"][label] += energy_yr
+            row3["Generation (Energy Mix)"][label] += accessor.get_dispatch_gross(asset) * to_twh_yr
 
         # 2. Storages
         for asset in accessor.get_assets("storages").values():
             base_tech = self.scenario.identify_tech(asset.name)
             raw_type = str(getattr(asset, "unit_type", "")).lower()
 
+            # Retain hydro storage classification as generation
             if base_tech in ["Hydro", "Pondage", "Run of River"] or raw_type in ["hydro", "pond", "ror"]:
                 label = base_tech
                 dictsafe_check(row1["Generation (Power)"], label)
@@ -699,8 +692,7 @@ class Display:
                 row2["Hydro (Energy Cap)"][label] += accessor.get_energy_capacity(asset)
 
                 dictsafe_check(row3["Generation (Energy Mix)"], label)
-                energy_yr = accessor.get_energy_gross_asset(asset) / year_count / 1000  # TWh/yr
-                row3["Generation (Energy Mix)"][label] += energy_yr
+                row3["Generation (Energy Mix)"][label] += accessor.get_dispatch_gross(asset) * to_twh_yr
 
             else:
                 label = self._get_display_label(asset)
@@ -710,28 +702,31 @@ class Display:
                 row2["Rechargeable Storage (Energy Cap)"][label] += accessor.get_energy_capacity(asset)
 
                 dictsafe_check(row3["Rechargeable Storage (Discharge)"], label)
-                energy_yr = accessor.get_discharge_gross_asset(asset) / year_count / 1000  # TWh/yr
-                row3["Rechargeable Storage (Discharge)"][label] += energy_yr
+                row3["Rechargeable Storage (Discharge)"][label] += accessor.get_discharge_gross(asset) * to_twh_yr
 
                 if energy_type == "both":
                     dictsafe_check(row3["Rechargeable Storage (Discharge)"], "Losses")
                     dictsafe_check(row3["Rechargeable Storage (Discharge)"], "Spillage")
-                    losses_yr = accessor.get_storage_loss_gross_asset(asset) / year_count / 1000
-                    spillage_yr = accessor.get_storage_spillage_gross_asset(asset) / year_count / 1000
-                    row3["Rechargeable Storage (Discharge)"]["Losses"] += losses_yr
-                    row3["Rechargeable Storage (Discharge)"]["Spillage"] += spillage_yr
+                    row3["Rechargeable Storage (Discharge)"]["Losses"] += (
+                        accessor.get_storage_loss_gross(asset) * to_twh_yr
+                    )
+                    row3["Rechargeable Storage (Discharge)"]["Spillage"] += (
+                        accessor.get_spillage_gross(asset) * to_twh_yr
+                    )
 
                 if raw_type in ["clphes", "olphes", "nphes", "bess2h", "bess4h"]:
                     elec_label = f"{label} (Electrical)"
-                    elec_val = (abs(accessor.get_charge_gross_asset(asset)) / year_count) / 1000
                     dictsafe_check(row2["Rechargeable Storage (Sources)"], elec_label)
-                    row2["Rechargeable Storage (Sources)"][elec_label] += elec_val
+                    row2["Rechargeable Storage (Sources)"][elec_label] += (
+                        abs(accessor.get_charge_gross(asset)) * to_twh_yr
+                    )
 
                     if accessor.has_inflows(asset):
                         inflow_label = f"{label} (Inflows)"
                         dictsafe_check(row2["Rechargeable Storage (Sources)"], inflow_label)
-                        inflow_yr = np.sum(accessor.get_inflow_gross_asset(asset)) / year_count / 1000
-                        row2["Rechargeable Storage (Sources)"][inflow_label] += inflow_yr
+                        row2["Rechargeable Storage (Sources)"][inflow_label] += (
+                            accessor.get_inflow_gross(asset) * to_twh_yr
+                        )
 
         # 3. Transmission
         for asset in accessor.get_assets("major_lines").values():
@@ -739,19 +734,16 @@ class Display:
             dictsafe_check(row1["Transmission (Power)"], label)
             row1["Transmission (Power)"][label] += accessor.get_power_capacity(asset)
 
-            energy_yr = accessor.get_line_use_gross_asset(asset) / year_count / 1000  # TWh/yr
             dictsafe_check(row3["Transmission (Flows)"], label)
-            row3["Transmission (Flows)"][label] += energy_yr
+            row3["Transmission (Flows)"][label] += accessor.get_line_use_gross(asset) * to_twh_yr
+
             if energy_type == "both":
                 dictsafe_check(row3["Transmission (Flows)"], "Losses")
-                losses_yr = accessor.get_line_loss_gross_asset(asset) / year_count / 1000  # TWh/yr
-                row3["Transmission (Flows)"]["Losses"] += losses_yr
+                row3["Transmission (Flows)"]["Losses"] += accessor.get_line_loss_gross(asset) * to_twh_yr
 
+        # 4. System Curtailment
         if energy_type == "both":
-            row3["Generation (Energy Mix)"]["Curtailment"] = 0.0
-            for node in accessor.get_assets("nodes").values():
-                curtail_yr = accessor.get_nominal_curtail_gross_asset(node) / year_count / 1000
-                row3["Generation (Energy Mix)"]["Curtailment"] += curtail_yr
+            row3["Generation (Energy Mix)"]["Curtailment"] = accessor.get_curtail_gross("network") * to_twh_yr
 
         return row1, row2, row3
 
