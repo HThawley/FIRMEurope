@@ -16,10 +16,20 @@ from firm_ce.model import Model
 from firm_ce.analysis.statistics import Statistics
 from firm_ce.analysis.validate import Validation, ValidationTensor
 from firm_ce.analysis.display import Display
+from firm_ce.analysis.display import MetricSpec, is_rechargeable_storage
 from firm_ce.common.typing import npfloat
 
 
-def try_read_x(scenario, filename):
+def try_read_x(scenario):
+    try:
+        full_path = os.path.join(scenario.solution_dir, "current_optimum.csv")
+        x = pd.read_csv(full_path, header=None).to_numpy().flatten().astype(npfloat)[2:]
+    except FileNotFoundError as e:
+        return e
+    return x
+
+
+def try_read_x_from_stat(scenario, filename):
     try:
         full_path = os.path.join(scenario.solution_dir, "statistics", f"{filename}.csv")
         x = pd.read_csv(full_path, header=None).to_numpy().flatten().astype(npfloat)
@@ -70,24 +80,27 @@ def run_statistics(scenario, run_mode, x_loc=None, x0_fallback=True):
             x = population[0, 3:].astype(npfloat)
 
         else:
-            x_rel = try_read_x(scenario, "x_rel")
-            x_abs = try_read_x(scenario, "x_abs")
-            x_rel_failure = isinstance(x_rel, FileNotFoundError)
-            x_abs_failure = isinstance(x_abs, FileNotFoundError)
+            x = try_read_x(scenario)
 
-            if x_rel_failure and x_abs_failure:
-                if x0_fallback:
-                    x = scenario.x0
+            if isinstance(x, FileNotFoundError):
+                x_rel = try_read_x_from_stat(scenario, "x_rel")
+                x_abs = try_read_x_from_stat(scenario, "x_abs")
+                x_rel_failure = isinstance(x_rel, FileNotFoundError)
+                x_abs_failure = isinstance(x_abs, FileNotFoundError)
+
+                if x_rel_failure and x_abs_failure:
+                    if x0_fallback:
+                        x = scenario.x0
+                    else:
+                        scenario.unload_datafiles()
+                        raise FileNotFoundError("Could not find x csv. Has the solution been run?")
+                elif scenario.config.parameterisation == "relative":
+                    x = scenario.convert_x_to_rel(x_abs) if x_rel_failure else x_rel
+                elif scenario.config.parameterisation == "absolute":
+                    x = scenario.convert_x_to_abs(x_rel) if x_abs_failure else x_abs
                 else:
                     scenario.unload_datafiles()
-                    raise FileNotFoundError("Could not find x csv. Has the solution been run?")
-            elif scenario.config.parameterisation == "relative":
-                x = scenario.convert_x_to_rel(x_abs) if x_rel_failure else x_rel
-            elif scenario.config.parameterisation == "absolute":
-                x = scenario.convert_x_to_abs(x_rel) if x_abs_failure else x_abs
-            else:
-                scenario.unload_datafiles()
-                raise ValueError(f"Unknown parameterisation type: {scenario.config.parameterisation}")
+                    raise ValueError(f"Unknown parameterisation type: {scenario.config.parameterisation}")
 
         x = x.astype(npfloat)
         scenario.build_and_evaluate_solution(x)
@@ -127,17 +140,49 @@ def run_statistics(scenario, run_mode, x_loc=None, x0_fallback=True):
         print(f"Generating single_time plots {scenario.name}")
         scenario.display = Display(scenario, model.config, solution=scenario.solution)
 
-        # TODO: Energy mix based on consumption / generation
-        scenario.display.plot_energy_mix()
-        scenario.display.plot_power_capacity()
+        scenario.display.plot_summary("energy_balance", solutions=0, chart_type="stacked_bar", normalize=False)
+        scenario.display.plot_summary("power_capacity", solutions=0, chart_type="treemap")
+        scenario.display.plot_summary("power_capacity", solutions=0, chart_type="stacked_bar", normalize=False)
+
+        # Custom Ad-Hoc Map Spec (e.g., plot ONLY new-build rechargeable storage power capacity by sub-tech)
+        custom_map_spec = MetricSpec(
+            title="New Storage Energy Capacity",
+            unit="GWh",
+            assets=("storages",),
+            metric="power_capacity",
+            build="new_build",
+            asset_filter=is_rechargeable_storage,
+            group_by="subtech",
+        )
+        scenario.display.plot_map(node_spec=custom_map_spec, line_spec=None)
 
     if model.config.type == "mhmga":
         print(f"Generating mhmga plots {scenario.name}")
         scenario.display = Display(scenario, model.config, noptima=scenario.noptima)
 
-        scenario.display.plot_power_capacity(atlas=True, chart_type="pie", indices=[0, 1, 2, 3])
-        scenario.display.plot_energy_mix(atlas=True, delta=True, chart_type="bar", indices=[0, 1, 2, 3])
-        # scenario.display.plot_energy_mix(curtailment=False, alternative=2)
+        scenario.display.plot_summary("energy_balance", solutions=0, chart_type="stacked_bar", normalize=False)
+        scenario.display.plot_summary("power_capacity", solutions=0, chart_type="treemap")
+
+        # Multi-Solution MGA Comparison on a Single Axis
+        # Passing a single MetricSpec and multiple solutions compares alternatives side-by-side:
+        gen_mix_spec = scenario.display.presets["energy_balance"][0]
+        scenario.display.plot_summary(gen_mix_spec, solutions=[0, 1, 2, 3, 4], normalize=False)
+
+        # 3. Delta Summary Bars (Alt 2 minus Alt 0 across all power capacity categories)
+        scenario.display.plot_summary("power_capacity", solutions=2, ref_solution=0, mode="delta", normalize=False)
+
+        # 4. Custom Ad-Hoc Map Spec (e.g., plot ONLY new-build rechargeable storage energy capacity by sub-tech)
+        custom_map_spec = MetricSpec(
+            title="New Storage Energy Capacity",
+            unit="GWh",
+            assets=("storages",),
+            metric="energy_capacity",
+            build="new_build",
+            asset_filter=is_rechargeable_storage,
+            group_by="subtech",
+        )
+        scenario.display.plot_map(node_spec=custom_map_spec, line_spec=None, solutions=[0, 1, 2, 3])
+
         data = []
         for s in scenario.display.noptima:
             col = dict(zip(scenario.projection_groups.keys(), s.x @ scenario.projection_matrix))
@@ -153,7 +198,7 @@ def run_statistics(scenario, run_mode, x_loc=None, x0_fallback=True):
 if __name__ == "__main__":
 
     # RUN_MODE = "latest"
-    RUN_MODE = "results/firmeur_derlab_new"
+    RUN_MODE = "results/firmeur_10yr_20260726_074409"
 
     start_time = time.time()
     model = Model(model_location=RUN_MODE)
@@ -163,4 +208,4 @@ if __name__ == "__main__":
     for name in ("7percent",):
         scenario = model.scenarios[name]
         model.config.type = 'single_time'
-        run_statistics(scenario, RUN_MODE, x_loc="latest_population.csv")
+        run_statistics(scenario, RUN_MODE)  # x_loc="latest_population.csv")
