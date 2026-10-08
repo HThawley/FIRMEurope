@@ -1,25 +1,43 @@
+import math
+import os
+from typing import Callable, Dict, List, Literal, Sequence, Tuple, Union
+import warnings
+
 import geopandas as gpd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Wedge
 import numpy as np
-# import seaborn as sns
-from typing import Dict, List, Tuple
-import os
 import pandas as pd
-import warnings
 
-from firm_ce.common.typing import npfloat
-from firm_ce.system.scenario import Scenario
-from firm_ce.backend.scalar.solution import Solution, evaluate
-from firm_ce.system.scalar.parameters import ModelConfig
 from firm_ce.analysis.accessor import Accessor
+from firm_ce.backend.scalar.solution import Solution, evaluate
+from firm_ce.common.typing import npfloat
+from firm_ce.system.scalar.parameters import ModelConfig
+from firm_ce.system.scenario import Scenario
+
+from firm_ce.analysis.display_presets import (
+    MAP_SPECS,
+    SUMMARY_PRESETS,
+    MetricSpec,
+    PlotStyle,
+    is_generation_or_hydro,
+    is_rechargeable_storage,
+)
+
+
+# ==============================================================================
+# Display Engine
+# ==============================================================================
 
 
 class Display:
     """
-    Visualizes optimization results for the European energy system based on a
-    Solution objects.
+    Visualizes and extracts optimization results for the European energy system
+    across single solutions and MGA ensembles.
     """
+
+    presets: Dict[str, List[MetricSpec]] = dict(SUMMARY_PRESETS)
+    map_specs: Dict[str, MetricSpec] = dict(MAP_SPECS)
 
     def __init__(
         self,
@@ -27,16 +45,15 @@ class Display:
         config: ModelConfig,
         solution: Solution = None,
         noptima: List[Solution] = None,
+        map_path: str = "./inputs/map/europe.geojson",
     ):
-        """
-        Initialize the plotter with a Solution object and map data.
-        """
         self.scenario = scenario
         self.config = config
         self.mhmga = self.config.type == "mhmga"
+        self.style = PlotStyle()
 
-        self.noptima = []
-        self.solution = None
+        self.noptima: List[Solution] = []
+        self.solution: Solution = None
 
         if self.mhmga:
             if noptima:
@@ -57,26 +74,77 @@ class Display:
             if not self.solution.evaluated:
                 evaluate(self.solution)
 
-        self._accessor_cache = {}
-
-        self._load_map_data("./inputs/map/europe.geojson")
+        self._accessor_cache: Dict[int, Accessor] = {}
+        self._load_map_data(map_path)
         self._init_colors()
 
-        self.set_dpi(300)
-        self.set_base_fontsize(12)
-        self.set_large_fontsize(14)
-        self.set_small_fontsize(10)
+    # --------------------------------------------------------------------------
+    # Registration & Configuration
+    # --------------------------------------------------------------------------
+
+    @classmethod
+    def register_preset(cls, name: str, specs: Sequence[MetricSpec]) -> None:
+        """Registers a custom named list of MetricSpecs for `plot_summary` and `extract`."""
+        cls.presets[name.lower()] = list(specs)
+
+    @classmethod
+    def register_map_spec(cls, name: str, spec: MetricSpec) -> None:
+        """Registers a custom named MetricSpec for `plot_map`."""
+        cls.map_specs[name.lower()] = spec
+
+    def set_dpi(self, dpi: int):
+        self.style.dpi = dpi
+
+    def set_base_fontsize(self, size: int):
+        self.style.base_fontsize = size
+
+    def set_large_fontsize(self, size: int):
+        self.style.large_fontsize = size
+
+    def set_small_fontsize(self, size: int):
+        self.style.small_fontsize = size
+
+    # --------------------------------------------------------------------------
+    # Data Extraction & Aggregation Layer
+    # --------------------------------------------------------------------------
 
     def _get_accessor(self, solution: Solution) -> Accessor:
-        """Returns a cached Accessor instance for the given Solution."""
         sol_id = id(solution)
         if sol_id not in self._accessor_cache:
             self._accessor_cache[sol_id] = Accessor(solution, "GW")
         return self._accessor_cache[sol_id]
 
+    def _resolve_solution(self, idx: Union[int, Solution]) -> Solution:
+        if isinstance(idx, Solution):
+            if not idx.evaluated:
+                evaluate(idx)
+            return idx
+        if self.mhmga and self.noptima:
+            return self.noptima[idx]
+        if idx != 0:
+            raise ValueError(f"Solution index {idx} requested, but mhmga is False.")
+        return self.solution
+
+    def _resolve_map_spec(self, spec: Union[MetricSpec, str, None]) -> MetricSpec | None:
+        if spec is None or isinstance(spec, MetricSpec):
+            return spec
+        key = spec.lower()
+        if key not in self.map_specs:
+            raise ValueError(f"Unknown map spec '{spec}'. Available: {list(self.map_specs.keys())}")
+        return self.map_specs[key]
+
+    def _resolve_summary_specs(self, specs: Union[str, MetricSpec, Sequence[MetricSpec]]) -> List[MetricSpec]:
+        if isinstance(specs, MetricSpec):
+            return [specs]
+        if isinstance(specs, str):
+            key = specs.lower()
+            if key not in self.presets:
+                raise ValueError(f"Unknown preset '{specs}'. Available: {list(self.presets.keys())}")
+            return self.presets[key]
+        return list(specs)
+
     @staticmethod
-    def _get_build_power_capacity(accessor: Accessor, asset, build: str = None) -> float:
-        """Retrieves power capacity filtered by investment status."""
+    def _get_build_power_capacity(accessor: Accessor, asset, build: str = "all") -> float:
         match str(build).lower():
             case "none" | "all":
                 return accessor.get_power_capacity(asset)
@@ -87,130 +155,411 @@ class Display:
             case _:
                 raise ValueError(f"Unknown build filter: '{build}'")
 
-    def plot(
+    @staticmethod
+    def _get_build_energy_capacity(accessor: Accessor, asset, build: str = "all") -> float:
+        match str(build).lower():
+            case "none" | "all":
+                return accessor.get_energy_capacity(asset)
+            case "new_build":
+                return accessor.get_new_build_capacity(asset, "energy")
+            case "existing" | "initial":
+                return accessor.get_existing_capacity(asset, "energy")
+            case _:
+                raise ValueError(f"Unknown build filter: '{build}'")
+
+    def _resolve_label(self, asset, group_by: Union[str, Callable]) -> str:
+        if callable(group_by):
+            return group_by(asset)
+        match group_by:
+            case "tech":
+                return self.scenario.identify_tech(asset.name)
+            case "subtech":
+                return self._get_display_label(asset)
+            case "node":
+                return asset.node.name if hasattr(asset, "node") else f"{asset.node_start.name}-{asset.node_end.name}"
+            case _:
+                raise ValueError(f"Unknown group_by mode: '{group_by}'")
+
+    def _eval_asset_metric(self, accessor: Accessor, asset, spec: MetricSpec, scale: float) -> Dict[str, float]:
+        """Evaluates a MetricSpec on a single asset, returning {label: value}."""
+        label = self._resolve_label(asset, spec.group_by)
+
+        if spec.metric == "storage_sources":
+            out = {}
+            raw_type = str(getattr(asset, "unit_type", "")).lower()
+            if raw_type in ("clphes", "olphes", "nphes", "bess2h", "bess4h") or "bess" in raw_type:
+                out[f"{label} (Electrical)"] = abs(accessor.get_charge_gross(asset)) * scale
+                if accessor.has_inflows(asset):
+                    out[f"{label} (Inflows)"] = accessor.get_inflow_gross(asset) * scale
+            return out
+
+        match spec.metric:
+            case "power_capacity":
+                val = self._get_build_power_capacity(accessor, asset, spec.build)
+            case "energy_capacity":
+                val = self._get_build_energy_capacity(accessor, asset, spec.build)
+            case "dispatch":
+                val = accessor.get_dispatch_gross(asset)
+            case "post_curtailment_power":
+                val = accessor.get_gross("post_curtailment_power", asset)
+            case "discharge":
+                val = accessor.get_discharge_gross(asset)
+            case "charge":
+                val = abs(accessor.get_charge_gross(asset))
+            case "inflows":
+                val = accessor.get_inflow_gross(asset) if accessor.has_inflows(asset) else 0.0
+            case "line_flow":
+                val = accessor.get_line_use_gross(asset)
+            case "line_flow_net":
+                val = accessor.get_line_use_gross(asset) - accessor.get_line_loss_gross(asset)
+            case _:
+                raise ValueError(f"Unknown metric '{spec.metric}'")
+
+        return {label: val * scale}
+
+    def _aggregate_spec(self, solution: Solution, spec: MetricSpec, by_node: bool = False) -> dict:
+        """
+        Core query engine.
+        Returns `{label: float}` if `by_node=False`, or `{node_name: {label: float}}` if `by_node=True`.
+        """
+        accessor = self._get_accessor(solution)
+        scale = spec.scale_factor
+        if spec.annualize:
+            scale /= self.scenario.static.year_count * 1000.0
+
+        data: dict = {}
+
+        for asset_class in spec.assets:
+            for asset in accessor.get_assets(asset_class).values():
+                base_tech = self.scenario.identify_tech(asset.name) if asset_class != "major_lines" else ""
+                if not spec.asset_filter(asset, base_tech):
+                    continue
+
+                contributions = self._eval_asset_metric(accessor, asset, spec, scale)
+
+                if by_node:
+                    node_name = asset.node.name
+                    node_dict = data.setdefault(node_name, {})
+                    for k, v in contributions.items():
+                        node_dict[k] = node_dict.get(k, 0.0) + v
+                else:
+                    for k, v in contributions.items():
+                        data[k] = data.get(k, 0.0) + v
+
+                # Asset-level balances
+                if not by_node and spec.include_balances:
+                    if "storage_losses" in spec.include_balances and asset_class == "storages":
+                        data["Losses"] = data.get("Losses", 0.0) + accessor.get_storage_loss_gross(asset) * scale
+                    if "spillage" in spec.include_balances and asset_class == "storages":
+                        data["Spillage"] = data.get("Spillage", 0.0) + accessor.get_spillage_gross(asset) * scale
+                    if "line_losses" in spec.include_balances and asset_class == "major_lines":
+                        data["Losses"] = data.get("Losses", 0.0) + accessor.get_line_loss_gross(asset) * scale
+
+        # System-level balances
+        if not by_node and "curtailment" in spec.include_balances:
+            data["Curtailment"] = data.get("Curtailment", 0.0) + accessor.get_curtail_gross("system") * scale
+
+        return data
+
+    def extract(
         self,
-        data_type: str = "energy",
+        specs: Union[str, MetricSpec, Sequence[MetricSpec]] = "system_overview",
+        solutions: Union[int, Sequence[int]] = 0,
+        by_node: bool = False,
+    ) -> pd.DataFrame:
+        """
+        Extracts aggregated metrics into a tidy pandas DataFrame for inspection or export.
+        """
+        resolved_specs = self._resolve_summary_specs(specs)
+        sol_indices = [solutions] if isinstance(solutions, int) else list(solutions)
+
+        records = []
+        for sol_idx in sol_indices:
+            sol = self._resolve_solution(sol_idx)
+            for spec in resolved_specs:
+                agg = self._aggregate_spec(sol, spec, by_node=by_node)
+                if by_node:
+                    for node, mix in agg.items():
+                        for label, val in mix.items():
+                            records.append(
+                                {
+                                    "solution": sol_idx,
+                                    "metric": spec.title,
+                                    "unit": spec.unit,
+                                    "node": node,
+                                    "label": label,
+                                    "value": val,
+                                }
+                            )
+                else:
+                    for label, val in agg.items():
+                        records.append(
+                            {
+                                "solution": sol_idx,
+                                "metric": spec.title,
+                                "unit": spec.unit,
+                                "label": label,
+                                "value": val,
+                            }
+                        )
+        return pd.DataFrame.from_records(records)
+
+    # --------------------------------------------------------------------------
+    # Primary Plotting Entry Points
+    # --------------------------------------------------------------------------
+
+    def plot_map(
+        self,
+        node_spec: Union[MetricSpec, str] = "capacity",
+        line_spec: Union[MetricSpec, str, None] = "auto",
         *,
-        atlas: bool = False,
-        delta: bool = False,
-        **kwargs,
-    ):
-        return self._dispatch_plot(data_type=data_type, atlas=atlas, delta=delta, **kwargs)
-
-    def plot_energy_mix(
-        self,
-        *,
-        atlas: bool = False,
-        delta: bool = False,
-        **kwargs,
-    ):
+        solutions: Union[int, Sequence[int]] = 0,
+        mode: Literal["absolute", "delta", "atlas_delta"] = "absolute",
+        ref_solution: int = 0,
+        node_chart: Literal["pie", "bar"] = "auto",
+        grid: Tuple[int, int] | None = None,
+        ax: Union[plt.Axes, Sequence[plt.Axes], None] = None,
+        max_scale: float | None = None,
+        chart_scale: float = 1.0,
+        threshold: float = 1e-5,
+        legend: bool = True,
+        save_path: str | None = None,
+    ) -> Tuple[plt.Figure, np.ndarray]:
         """
-        Visualizes the energy generation mix (GWh) across the network.
-
-        Args:
-            mode (str): Visualization layout.
-            **kwargs:
-                atlas: Grid of MGA alternatives (requires MHMGA config).
-                delta: Comparative bar chart between two solutions (requires MHMGA config).
-                alternative (int): Index of the solution to plot in 'single' mode. Default 0.
-                alt_a, alt_b (int): Indices for comparison in 'delta' mode.
-                curtailment (bool): If True, plots post-curtailment net energy. Default False.
-                chart_type (str): 'pie' or 'bar'. Note: 'delta' mode only supports 'bar'.
-                max_scale (float): Value used to normalize chart sizes across the map.
-                threshold (float): Minimum value to display in charts. Default 1e-5.
-                legend (bool): Toggle the technology legend. Default True.
-                save_path (str): File path to save the resulting figure.
+        Unified spatial network plotter supporting custom MetricSpecs, single/atlas layouts,
+        and delta comparisons.
         """
-        return self._dispatch_plot(data_type="energy", atlas=atlas, delta=delta, **kwargs)
+        resolved_node_spec = self._resolve_map_spec(node_spec)
 
-    def plot_power_capacity(
-        self,
-        *,
-        atlas: bool = False,
-        delta: bool = False,
-        **kwargs,
-    ):
-        """
-        Visualizes installed power capacity (GW) across the network.
-
-        Args:
-            mode (str): Visualization layout ('single', 'atlas', or 'delta').
-            **kwargs:
-                build (str): Filters capacity by investment status.
-                    'all' or None: Total installed capacity.
-                    'new_build': Only capacity added by the optimizer.
-                    'existing' or 'initial': Only starting/brownfield capacity.
-                alternative (int): Solution index for 'single' mode.
-                chart_type (str): 'pie' or 'bar'.
-                max_scale (float): Normalization constant for pie/bar scaling.
-                legend (bool): Toggle legend visibility.
-                save_path (str): File path to save the figure.
-        """
-        return self._dispatch_plot(data_type="capacity", atlas=atlas, delta=delta, **kwargs)
-
-    def plot_fleet_summary(
-        self,
-        energy_type="both",
-        alternative=0,
-        rows="all",
-        chart_type: str = "treemap",
-        save_path=None,
-    ):
-        """
-        Plots a 3x3 grid of charts summarizing the fleet for a target solution.
-        """
-        if energy_type == "consumption":
-            raise NotImplementedError("Methods for attributing curtailment are not yet defined.")
-        elif energy_type not in ["generation", "both"]:
-            raise ValueError("energy_type must be 'consumption', 'generation', or 'both'")
-
-        chart_type = chart_type.lower()
-        if chart_type not in ("pie", "treemap"):
-            raise ValueError(f"Argument 'chart_type' expected 'pie' or 'treemap'. Got '{chart_type}'")
-
-        if isinstance(rows, str):
-            if rows.lower() != "all":
-                raise ValueError(f"Argument 'rows' expected 'all' or a list with elements in {{0, 1, 2}}. Got '{rows}'")
-            rows = [0, 1, 2]
-        elif isinstance(rows, (list, tuple)):
-            if not all(x in (0, 1, 2) for x in rows):
-                raise ValueError(f"Argument 'rows' expected 'all' or a list with elements in {{0, 1, 2}}. Got {rows}")
+        if line_spec == "auto":
+            is_energy = resolved_node_spec.metric in ("dispatch", "post_curtailment_power", "discharge")
+            resolved_line_spec = self.map_specs["line_energy" if is_energy else "line_capacity"].with_options(
+                build=resolved_node_spec.build
+            )
         else:
-            raise TypeError(f"Argument 'rows' expected a string, list or tuple. Got: {type(rows)}")
+            resolved_line_spec = self._resolve_map_spec(line_spec)
 
-        nrows = len(rows)
-        if nrows == 1:
-            hspace, wspace = 0.1, 0.6
-            figsize = (16, 8)
-        elif nrows == 2:
-            hspace, wspace = 0.1, 0.5
-            figsize = (18, 12)
+        sol_list = [solutions] if isinstance(solutions, int) else list(solutions)
+        if mode in ("delta", "atlas_delta") and not self.mhmga and len(sol_list) > 1:
+            raise ValueError("Cannot plot multiple solutions when mhmga is False.")
+
+        if node_chart == "auto":
+            node_chart = "bar" if mode in ("delta", "atlas_delta") else "pie"
+        if mode in ("delta", "atlas_delta") and node_chart == "pie":
+            raise ValueError("Delta map plotting requires node_chart='bar'.")
+
+        n_plots = len(sol_list)
+        if grid is None:
+            ncols = min(n_plots, 3) if n_plots > 1 else 1
+            nrows = math.ceil(n_plots / ncols)
+            grid = (nrows, ncols)
+
+        with plt.rc_context(self.style.to_rc()):
+            if ax is None:
+                fig, axes_flat = self._setup_map_axis(nrows=grid[0], ncols=grid[1])
+            else:
+                axes_flat = np.atleast_1d(ax).flatten()
+                fig = axes_flat[0].figure
+                for a in axes_flat:
+                    self._format_single_map_ax(a)
+
+            ref_sol = self._resolve_solution(ref_solution)
+            ref_node_data = (
+                self._aggregate_spec(ref_sol, resolved_node_spec, by_node=True)
+                if mode in ("delta", "atlas_delta")
+                else None
+            )
+
+            # Pre-calculate global scaling across all panels for visual consistency
+            global_max_abs = max_scale or 0.0
+            global_max_delta = max_scale or 0.0
+
+            panel_payloads = []
+            for idx, sol_idx in enumerate(sol_list):
+                target_sol = self._resolve_solution(sol_idx)
+                target_node_data = self._aggregate_spec(target_sol, resolved_node_spec, by_node=True)
+                is_delta_panel = (mode == "delta") or (mode == "atlas_delta" and idx > 0)
+
+                if is_delta_panel:
+                    delta_data = self._calculate_delta_dict(ref_node_data, target_node_data)
+                    if max_scale is None:
+                        panel_max = max(
+                            (max((abs(v) for v in d.values()), default=0.0) for d in delta_data.values()),
+                            default=1.0,
+                        )
+                        global_max_delta = max(global_max_delta, panel_max)
+                    panel_payloads.append(("delta", sol_idx, target_sol, delta_data))
+                else:
+                    if max_scale is None:
+                        panel_max = max((sum(d.values()) for d in target_node_data.values()), default=1.0)
+                        global_max_abs = max(global_max_abs, panel_max)
+                    panel_payloads.append(("abs", sol_idx, target_sol, target_node_data))
+
+            global_max_abs = global_max_abs or 1.0
+            global_max_delta = global_max_delta or 1.0
+
+            for i, axis in enumerate(axes_flat):
+                if i >= len(panel_payloads):
+                    axis.set_visible(False)
+                    continue
+
+                p_type, sol_idx, target_sol, node_data = panel_payloads[i]
+                if p_type == "delta":
+                    self._draw_delta_on_axis(
+                        axis,
+                        node_data,
+                        global_max_delta,
+                        chart_scale=chart_scale,
+                        threshold=max(threshold, 1e-3),
+                        legend=legend,
+                    )
+                    axis.set_title(f"Delta: Alt {sol_idx} - Alt {ref_solution}")
+                else:
+                    self._draw_nodes_on_axis(
+                        axis,
+                        node_data,
+                        global_max_abs,
+                        node_chart=node_chart,
+                        chart_scale=chart_scale,
+                        threshold=threshold,
+                        legend=legend,
+                    )
+                    if resolved_line_spec is not None:
+                        self._draw_transmission_on_axis(axis, target_sol, resolved_line_spec)
+                    if n_plots > 1 or mode != "absolute":
+                        axis.set_title(f"Absolute: Alt {sol_idx}")
+
+            build_suffix = (
+                f" ({resolved_node_spec.build})"
+                if resolved_node_spec.build != "all"
+                else ""
+            )
+            fig.suptitle(
+                f"{resolved_node_spec.title}{build_suffix} [{resolved_node_spec.unit}]",
+                fontsize=self.style.large_fontsize,
+            )
+
+            if save_path:
+                fig.savefig(save_path, dpi=self.style.dpi, bbox_inches="tight")
+
+            return fig, axes_flat
+
+    def plot_summary(
+        self,
+        specs: Union[str, MetricSpec, Sequence[MetricSpec]] = "system_overview",
+        *,
+        solutions: Union[int, Sequence[int]] = 0,
+        mode: Literal["absolute", "delta"] = "absolute",
+        ref_solution: int = 0,
+        chart_type: Literal["stacked_bar", "treemap", "pie"] = "stacked_bar",
+        normalize: bool | Literal["auto"] = "auto",
+        sort: Literal["name", "size"] = "name",
+        grid: Tuple[int, int] | None = None,
+        figsize: Tuple[float, float] | None = None,
+        ax: Union[plt.Axes, Sequence[plt.Axes], None] = None,
+        save_path: str | None = None,
+    ) -> Tuple[plt.Figure, np.ndarray]:
+        """
+        Unified aggregate fleet chart plotter.
+        Supports stacked bars (across metrics or across multiple MGA solutions),
+        treemaps, and area-scaled pie charts.
+        """
+        resolved_specs = self._resolve_summary_specs(specs)
+        sol_list = [solutions] if isinstance(solutions, int) else list(solutions)
+
+        units_set = {s.unit for s in resolved_specs}
+        if normalize == "auto":
+            normalize = len(units_set) > 1 and chart_type == "stacked_bar" and mode == "absolute"
+
+        if mode == "delta" and chart_type in ("pie", "treemap"):
+            raise ValueError("Delta mode in plot_summary only supports chart_type='stacked_bar'.")
+
+        ref_sol = self._resolve_solution(ref_solution) if mode == "delta" else None
+
+        # Build bar/panel items: List of (label, mix_dict, unit)
+        items: List[Tuple[str, Dict[str, float], str]] = []
+        for sol_idx in sol_list:
+            sol = self._resolve_solution(sol_idx)
+            for spec in resolved_specs:
+                mix = self._aggregate_spec(sol, spec, by_node=False)
+                if mode == "delta":
+                    ref_mix = self._aggregate_spec(ref_sol, spec, by_node=False)
+                    all_k = set(ref_mix.keys()) | set(mix.keys())
+                    mix = {k: mix.get(k, 0.0) - ref_mix.get(k, 0.0) for k in all_k}
+
+                if len(sol_list) > 1 and len(resolved_specs) == 1:
+                    item_label = f"Alt {sol_idx}" if mode == "absolute" else f"Alt {sol_idx} - Alt {ref_solution}"
+                elif len(sol_list) > 1:
+                    item_label = f"{spec.title}\n(Alt {sol_idx})"
+                else:
+                    item_label = spec.title
+
+                items.append((item_label, mix, spec.unit))
+
+        with plt.rc_context(self.style.to_rc()):
+            if chart_type == "stacked_bar":
+                fig, axes_flat = self._render_stacked_bars(
+                    items,
+                    normalize=normalize,
+                    is_delta=(mode == "delta"),
+                    sort=sort,
+                    figsize=figsize,
+                    ax=ax,
+                )
+            elif chart_type in ("treemap", "pie"):
+                fig, axes_flat = self._render_part_to_whole_grid(
+                    items,
+                    chart_type=chart_type,
+                    sort="size" if sort == "name" else sort,
+                    grid=grid,
+                    figsize=figsize,
+                    ax=ax,
+                )
+            else:
+                raise ValueError(f"Unsupported chart_type '{chart_type}'.")
+
+            if save_path:
+                fig.savefig(save_path, dpi=self.style.dpi, bbox_inches="tight")
+
+            return fig, axes_flat
+
+    # --------------------------------------------------------------------------
+    # Backwards-Compatible Wrappers
+    # --------------------------------------------------------------------------
+
+    def plot(self, data_type: str = "energy", *, atlas: bool = False, delta: bool = False, **kwargs):
+        indices = kwargs.pop("indices", [0, 1] if delta else [0])
+        curtailment = kwargs.pop("curtailment", False)
+        build = kwargs.pop("build", "all")
+        chart_type = kwargs.pop("chart_type", "auto")
+
+        spec_key = "net_energy" if (data_type == "energy" and curtailment) else data_type
+        spec = self._resolve_map_spec(spec_key).with_options(build=build)
+
+        if atlas and delta:
+            mode, sols, ref = "atlas_delta", indices, indices[0]
+        elif delta:
+            mode, sols, ref = "delta", indices[1], indices[0]
+        elif atlas:
+            mode, sols, ref = "absolute", indices, 0
         else:
-            hspace, wspace = 0.4, 0.5
-            figsize = (18, 14)
+            mode, sols, ref = "absolute", indices[0], 0
 
-        target_sol = self.noptima[alternative] if self.mhmga and self.noptima else self.solution
-        row0, row1, row2 = self._aggregate_fleet_summary_data(target_sol, energy_type)
+        _, axes = self.plot_map(
+            node_spec=spec,
+            solutions=sols,
+            mode=mode,
+            ref_solution=ref,
+            node_chart=chart_type,
+            **kwargs,
+        )
+        return axes if atlas else axes[0]
 
-        fig, axes = plt.subplots(nrows=nrows, ncols=3, figsize=figsize)
-        fig.subplots_adjust(hspace=hspace, wspace=wspace)
+    def plot_energy_mix(self, *, atlas: bool = False, delta: bool = False, **kwargs):
+        return self.plot(data_type="energy", atlas=atlas, delta=delta, **kwargs)
 
-        ax_iter = iter(np.atleast_2d(axes))
-
-        if 0 in rows:
-            self._draw_summary_row(row0, next(ax_iter), ["GW", "GW", "GW"], sort="size", chart_type=chart_type)
-        if 1 in rows:
-            self._draw_summary_row(row1, next(ax_iter), ["GWh", "GWh", "TWh/yr"], sort="size", chart_type=chart_type)
-        if 2 in rows:
-            self._draw_summary_row(row2, next(ax_iter), ["TWh/yr", "TWh/yr", "TWh/yr"], sort="size", chart_type=chart_type)
-
-        if nrows == 3:
-            fig.suptitle("Network Overview", fontsize=self.large_fontsize)
-
-        if save_path:
-            plt.savefig(save_path, dpi=self.dpi, bbox_inches="tight")
-
-        return fig
+    def plot_power_capacity(self, *, atlas: bool = False, delta: bool = False, **kwargs):
+        return self.plot(data_type="capacity", atlas=atlas, delta=delta, **kwargs)
 
     def plot_fleet_bars(
         self,
@@ -223,107 +572,95 @@ class Display:
         figsize: Tuple[float, float] = None,
         save_path: str = None,
     ):
-        """
-        Plots stacked bar charts of fleet summary metrics on a single axis.
+        view_map = {
+            "generation": "system_overview",
+            "storage": "storage_profile",
+            "power_overview": "power_capacity",
+            "energy_overview": "energy_balance",
+        }
+        preset_key = view_map.get(view.lower(), view.lower())
+        specs = self._resolve_summary_specs(preset_key)
 
-        Args:
-            view (str): Which summary slice to plot:
-                - 'generation': Generation Power (GW) & Energy Mix (TWh/yr).
-                - 'storage': Rechargeable Storage Power (GW), Energy Cap (GWh), & Discharge (TWh/yr).
-                - 'power_overview': Row 0 of fleet summary (Gen, Transmission, Storage Power in GW).
-                - 'energy_overview': All 4 TWh/yr charts (Gen Mix, Tx Flows, Storage Sources, Storage Discharge).
-            include_storage (bool): For view='generation', whether to include rechargeable storage
-                in the Power Capacity and Energy Mix bars. Default True.
-            energy_type (str): 'generation' or 'both' (includes Curtailment, Losses, Spillage).
-            normalize (bool): If True, plots 100% stacked bars with total annotations on top.
-                If False, plots absolute values (only valid when all bars share units).
-            alternative (int): Solution index for MHMGA mode. Default 0.
-            figsize (tuple): Optional (width, height) override.
-            save_path (str): Optional file path to save the figure.
-        """
-        if energy_type == "consumption":
-            raise NotImplementedError("Methods for attributing curtailment are not yet defined.")
-        if energy_type not in ("generation", "both", "consumption"):
-            raise ValueError("energy_type must be 'generation', 'consumption', or 'both'")
+        if view.lower() == "generation" and not include_storage:
+            specs = [s.with_options(asset_filter=is_generation_or_hydro) for s in specs]
+        if energy_type == "generation":
+            specs = [s.with_options(include_balances=()) for s in specs]
 
-        target_sol = self.noptima[alternative] if self.mhmga and self.noptima else self.solution
-        row0, row1, row2 = self._aggregate_fleet_summary_data(target_sol, energy_type)
+        fig, _ = self.plot_summary(
+            specs=specs,
+            solutions=alternative,
+            chart_type="stacked_bar",
+            normalize=normalize,
+            figsize=figsize,
+            save_path=save_path,
+        )
+        return fig
 
-        view_key = view.lower()
-        match view_key:
-            case "generation":
-                p_dict = dict(row0["Generation (Power)"])
-                e_dict = dict(row2["Generation (Energy Mix)"])
-                if include_storage:
-                    for k, v in row0["Rechargeable Storage (Power)"].items():
-                        p_dict[k] = p_dict.get(k, 0.0) + v
-                    for k, v in row2["Rechargeable Storage (Discharge)"].items():
-                        e_dict[k] = e_dict.get(k, 0.0) + v
+    # --------------------------------------------------------------------------
+    # Rendering Primitives
+    # --------------------------------------------------------------------------
 
-                bars_spec = [
-                    ("Power Capacity", p_dict, "GW"),
-                    ("Energy Mix", e_dict, "TWh/yr"),
-                ]
-                title = "Generation Capacity & Energy Mix" + (" (incl. Storage)" if include_storage else "")
-
-            case "storage":
-                bars_spec = [
-                    ("Power Capacity", row0["Rechargeable Storage (Power)"], "GW"),
-                    ("Energy Capacity", row1["Rechargeable Storage (Energy Cap)"], "GWh"),
-                    ("Discharge Energy", row2["Rechargeable Storage (Discharge)"], "TWh/yr"),
-                ]
-                title = "Rechargeable Storage Summary"
-
-            case "power_overview":
-                bars_spec = [
-                    ("Generation", row0["Generation (Power)"], "GW"),
-                    ("Transmission", row0["Transmission (Power)"], "GW"),
-                    ("Rechargeable Storage", row0["Rechargeable Storage (Power)"], "GW"),
-                ]
-                title = "Network Power Capacity Overview"
-
-            case "energy_overview":
-                bars_spec = [
-                    ("Generation Mix", row2["Generation (Energy Mix)"], "TWh/yr"),
-                    ("Transmission Flows", row2["Transmission (Flows)"], "TWh/yr"),
-                    ("Storage Sources", row1["Rechargeable Storage (Sources)"], "TWh/yr"),
-                    ("Storage Discharge", row2["Rechargeable Storage (Discharge)"], "TWh/yr"),
-                ]
-                title = "Annual Energy Overview"
-
-            case _:
-                raise ValueError(
-                    f"Unknown view '{view}'. Expected 'generation', 'storage', 'power_overview', or 'energy_overview'."
-                )
-
-        units_set = {u for _, _, u in bars_spec}
+    def _render_stacked_bars(
+        self,
+        items: List[Tuple[str, Dict[str, float], str]],
+        normalize: bool,
+        is_delta: bool,
+        sort: str,
+        figsize: Tuple[float, float] | None,
+        ax: plt.Axes | None,
+    ) -> Tuple[plt.Figure, np.ndarray]:
+        units_set = {u for _, _, u in items}
         if not normalize and len(units_set) > 1:
-            raise ValueError(f"Cannot plot absolute stacked bars across mixed units {units_set}. Set normalize=True.")
+            raise ValueError(
+                f"Cannot plot unnormalized stacked bars across mixed units {units_set}. Set normalize=True."
+            )
 
-        if figsize is None:
-            figsize = (max(6, 2.5 * len(bars_spec) + 2), 7)
+        if ax is None:
+            if figsize is None:
+                figsize = (max(6.0, 2.2 * len(items) + 2.0), 7.0)
+            fig, axis = plt.subplots(figsize=figsize, dpi=self.style.dpi)
+        else:
+            axis = np.atleast_1d(ax).flatten()[0]
+            fig = axis.figure
 
-        fig, ax = plt.subplots(figsize=figsize, dpi=self.dpi)
-        x_positions = np.arange(len(bars_spec))
+        x_positions = np.arange(len(items))
         bar_width = 0.55
-
         legend_handles = {}
-        max_bar_height = 0.0
+        max_pos_height = 0.0
+        min_neg_height = 0.0
 
-        for idx, (_bar_label, mix, unit) in enumerate(bars_spec):
-            clean_mix = {k: v for k, v in mix.items() if v > 1e-6}
-            total = sum(clean_mix.values())
-            max_bar_height = max(max_bar_height, 100.0 if normalize else total)
+        for idx, (_label, mix, unit) in enumerate(items):
+            clean_mix = {k: v for k, v in mix.items() if abs(v) > 1e-6}
+            pos_total = sum(v for v in clean_mix.values() if v > 0)
+            # neg_total = sum(v for v in clean_mix.values() if v < 0)
+            net_total = sum(clean_mix.values())
 
-            if total <= 0:
-                continue
+            sorted_items = (
+                sorted(clean_mix.items(), key=lambda x: abs(x[1]), reverse=True)
+                if sort == "size"
+                else self._sort_mix_items(clean_mix)
+            )
 
-            sorted_items = self._sort_mix_items(clean_mix)
+            pos_bottom = 0.0
+            neg_bottom = 0.0
 
-            bottom = 0.0
             for tech, val in sorted_items:
-                height = (val / total * 100.0) if normalize else val
-                bar_container = ax.bar(
+                if normalize and not is_delta:
+                    if pos_total <= 0:
+                        continue
+                    height = (val / pos_total) * 100.0
+                    bottom = pos_bottom
+                    pos_bottom += height
+                else:
+                    height = val
+                    if val >= 0:
+                        bottom = pos_bottom
+                        pos_bottom += height
+                    else:
+                        bottom = neg_bottom
+                        neg_bottom += height
+
+                bar_container = axis.bar(
                     x_positions[idx],
                     height,
                     width=bar_width,
@@ -333,32 +670,43 @@ class Display:
                     edgecolor="black",
                     linewidth=0.5,
                 )
-                bottom += height
                 if tech not in legend_handles:
                     legend_handles[tech] = bar_container[0]
 
-            # Annotate physical total above each bar
-            y_pos = 101.5 if normalize else total * 1.02
-            ax.text(
+            max_pos_height = max(max_pos_height, 100.0 if (normalize and not is_delta) else pos_bottom)
+            min_neg_height = min(min_neg_height, neg_bottom)
+
+            y_annot = 101.5 if (normalize and not is_delta) else pos_bottom + max(max_pos_height * 0.02, 0.1)
+            prefix = "+" if (is_delta and net_total > 0) else ""
+            axis.text(
                 x_positions[idx],
-                y_pos,
-                f"{total:,.1f} {unit}",
+                y_annot,
+                f"{prefix}{net_total:,.1f} {unit}",
                 ha="center",
                 va="bottom",
-                fontsize=self.small_fontsize,
+                fontsize=self.style.small_fontsize,
                 fontweight="bold",
             )
 
-        ax.set_xticks(x_positions)
-        ax.set_xticklabels([b[0] for b in bars_spec], fontsize=self.base_fontsize)
-        ax.set_ylabel("Share (%)" if normalize else f"Total ({next(iter(units_set))})", fontsize=self.base_fontsize)
-        ax.set_ylim(0, 110.0 if normalize else max_bar_height * 1.12)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.set_title(title, fontsize=self.large_fontsize, pad=15)
+        if is_delta:
+            axis.axhline(0, color="black", linewidth=0.8)
+
+        axis.set_xticks(x_positions)
+        axis.set_xticklabels([b[0] for b in items], fontsize=self.style.base_fontsize)
+        unit_label = next(iter(units_set)) if len(units_set) == 1 else ""
+        axis.set_ylabel(
+            "Share (%)" if (normalize and not is_delta) else f"{'Delta' if is_delta else 'Total'} ({unit_label})",
+            fontsize=self.style.base_fontsize,
+        )
+
+        y_top = 110.0 if (normalize and not is_delta) else max(max_pos_height * 1.15, 1.0)
+        y_bot = min_neg_height * 1.15 if is_delta else 0.0
+        axis.set_ylim(y_bot, y_top)
+        axis.spines["top"].set_visible(False)
+        axis.spines["right"].set_visible(False)
 
         if legend_handles:
-            ax.legend(
+            axis.legend(
                 list(legend_handles.values()),
                 list(legend_handles.keys()),
                 loc="center left",
@@ -367,78 +715,185 @@ class Display:
                 title="Component",
             )
 
-        if save_path:
-            plt.savefig(save_path, dpi=self.dpi, bbox_inches="tight")
+        return fig, np.array([axis])
 
-        return fig
+    def _render_part_to_whole_grid(
+        self,
+        items: List[Tuple[str, Dict[str, float], str]],
+        chart_type: str,
+        sort: str,
+        grid: Tuple[int, int] | None,
+        figsize: Tuple[float, float] | None,
+        ax: Union[plt.Axes, Sequence[plt.Axes], None],
+    ) -> Tuple[plt.Figure, np.ndarray]:
+        n_items = len(items)
+        if grid is None:
+            ncols = min(n_items, 3)
+            nrows = math.ceil(n_items / ncols)
+            grid = (nrows, ncols)
 
-    def _draw_summary_row(self, data_dict, row_axes, units, sort="size", chart_type="pie"):
-        """Worker method to draw a single row of summary charts ('pie' or 'treemap')."""
-        unit_maxes = {}
-        for mix, unit in zip(data_dict.values(), units):
+        if ax is None:
+            if figsize is None:
+                figsize = (6.0 * grid[1], 5.0 * grid[0])
+            fig, axes = plt.subplots(grid[0], grid[1], figsize=figsize, dpi=self.style.dpi, squeeze=False)
+            axes_flat = axes.flatten()
+            fig.subplots_adjust(hspace=0.35, wspace=0.5)
+        else:
+            axes_flat = np.atleast_1d(ax).flatten()
+            fig = axes_flat[0].figure
+
+        # Normalize area per shared physical unit
+        unit_maxes: Dict[str, float] = {}
+        for _, mix, unit in items:
             total = sum(v for v in mix.values() if v > 0)
-            unit_maxes[unit] = max(unit_maxes.get(unit, 1), total)
+            unit_maxes[unit] = max(unit_maxes.get(unit, 1.0), total)
 
-        items = list(data_dict.items())
-
-        for i, ax in enumerate(row_axes):
-            if i >= len(items):
-                ax.axis("off")
+        for i, axis in enumerate(axes_flat):
+            if i >= n_items:
+                axis.axis("off")
                 continue
 
-            category, mix = items[i]
-            unit = units[i]
+            title, mix, unit = items[i]
             clean_mix = {k: v for k, v in mix.items() if v > 1e-6}
             total = sum(clean_mix.values())
 
             if total <= 0:
-                ax.axis("off")
+                axis.axis("off")
                 continue
 
-            # Sort descending so largest slices/rectangles are placed consistently
-            if sort.lower() == "size":
-                sorted_items = sorted(clean_mix.items(), key=lambda item: item[1], reverse=True)
-            elif sort.lower() == "name":
-                sorted_items = self._sort_mix_items(clean_mix)
-            else:
-                sorted_items = list(clean_mix.items())
+            sorted_items = (
+                sorted(clean_mix.items(), key=lambda x: x[1], reverse=True)
+                if sort == "size"
+                else self._sort_mix_items(clean_mix)
+            )
             labels = [k for k, _ in sorted_items]
             values = [v for _, v in sorted_items]
-            colors = [self._get_color(label) for label in labels]
-            hatches = [self._get_hatch(label) for label in labels]
-
-            # Linear dimension scaling so total area is proportional to total / unit_maxes[unit]
+            colors = [self._get_color(k) for k in labels]
+            hatches = [self._get_hatch(k) for k in labels]
             scale = np.sqrt(total / unit_maxes[unit])
 
             if chart_type == "pie":
-                handles, _ = ax.pie(
+                handles, _ = axis.pie(
                     values,
                     radius=scale,
                     colors=colors,
                     hatches=hatches,
                     wedgeprops={"linewidth": 0.5, "edgecolor": "black"},
                 )
-            elif chart_type == "treemap":
-                handles = self._draw_treemap(ax, values, colors, hatches, scale)
+            else:
+                handles = self._draw_treemap(axis, values, colors, hatches, scale)
 
-            ax.set_title(f"{category}\nTotal: {total:,.1f} {unit}", pad=10)
-            ax.set_aspect("equal")
-            ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
+            axis.set_title(f"{title}\nTotal: {total:,.1f} {unit}", pad=10)
+            axis.set_aspect("equal")
+            axis.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
+
+        return fig, axes_flat
+
+    def _draw_nodes_on_axis(
+        self,
+        ax: plt.Axes,
+        node_data: Dict[str, Dict[str, float]],
+        max_total: float,
+        node_chart: str = "pie",
+        chart_scale: float = 1.0,
+        threshold: float = 1e-5,
+        legend: bool = True,
+    ):
+        for node_name, mix in node_data.items():
+            if node_name not in self.centroids:
+                raise RuntimeError(f"Node {node_name} not found in map centroids.")
+
+            filtered_mix = {k: v for k, v in mix.items() if abs(v) > threshold}
+            if not filtered_mix:
+                continue
+
+            x, y = self.centroids[node_name]
+            if node_chart == "bar":
+                self._draw_bars(ax, filtered_mix, x, y, max_total, chart_scale=chart_scale)
+            else:
+                radius = 100_000 * chart_scale * np.sqrt(sum(filtered_mix.values()) / max_total)
+                keys = sorted(filtered_mix.keys())
+                values = [filtered_mix[k] for k in keys]
+                colors = [self._get_color(k) for k in keys]
+                hatches = [self._get_hatch(k) for k in keys]
+                self._draw_pie(ax, values, x, y, radius, colors, hatches)
+
+        if legend:
+            self._add_legend(ax, node_data)
+
+    def _draw_delta_on_axis(
+        self,
+        ax: plt.Axes,
+        delta_dict: Dict[str, Dict[str, float]],
+        global_max_delta: float,
+        chart_scale: float = 1.0,
+        threshold: float = 1e-3,
+        legend: bool = True,
+    ):
+        for node_name, mix in delta_dict.items():
+            if node_name not in self.centroids:
+                continue
+
+            filtered_mix = {k: v for k, v in mix.items() if abs(v) > threshold}
+            if not filtered_mix:
+                continue
+
+            x_coord, y_coord = self.centroids[node_name]
+            self._draw_bars(
+                ax,
+                filtered_mix,
+                x_coord,
+                y_coord,
+                global_max_delta,
+                is_delta=True,
+                chart_scale=chart_scale,
+            )
+
+        if legend:
+            self._add_legend(ax, delta_dict)
+
+    def _draw_transmission_on_axis(self, ax: plt.Axes, solution: Solution, line_spec: MetricSpec):
+        max_line_width = 5.0
+        min_line_width = 0.3
+
+        lines_data = []
+        max_val = 0.0
+        accessor = self._get_accessor(solution)
+
+        for line in accessor.get_assets("major_lines").values():
+            n_start, n_end = line.node_start.name, line.node_end.name
+            if n_start not in self.centroids or n_end not in self.centroids:
+                raise RuntimeError(f"Line endpoints ({n_start}, {n_end}) not found in map centroids.")
+
+            val = sum(self._eval_asset_metric(accessor, line, line_spec, line_spec.scale_factor).values())
+            max_val = max(max_val, val)
+            lines_data.append((self.centroids[n_start], self.centroids[n_end], val))
+
+        if max_val <= 0:
+            return
+
+        is_cap = line_spec.metric == "power_capacity"
+        color = "red" if is_cap else "blue"
+        alpha = 0.7 if is_cap else 0.5
+
+        for p1, p2, val in lines_data:
+            scaled_width = (val / max_val) * max_line_width
+            ax.plot(
+                [p1[0], p2[0]],
+                [p1[1], p2[1]],
+                color=color,
+                linewidth=max(scaled_width, min_line_width),
+                zorder=50,
+                alpha=alpha,
+            )
 
     def _draw_treemap(self, ax, values, colors, hatches, scale):
-        """
-        Draws a centered treemap scaled by `scale` (in [0, 1]) within a [-1, 1] x [-1, 1] axis.
-        Returns the list of Rectangle patches for legend binding.
-        """
         ax.set_xlim(-1.05, 1.05)
         ax.set_ylim(-1.05, 1.05)
         ax.axis("off")
 
-        # Bounding box centered at (0, 0) with side length = 2 * scale (matching pie diameter)
         side = 2.0 * scale
-        x0, y0 = -scale, -scale
-
-        rects = self._compute_treemap_rects(values, x0, y0, side, side)
+        rects = self._compute_treemap_rects(values, -scale, -scale, side, side)
         patches = []
         for (rx, ry, rw, rh), color, hatch in zip(rects, colors, hatches):
             rect = plt.Rectangle(
@@ -452,15 +907,10 @@ class Display:
             )
             ax.add_patch(rect)
             patches.append(rect)
-
         return patches
 
     @classmethod
     def _compute_treemap_rects(cls, values, x, y, dx, dy):
-        """
-        Recursively partitions a rectangle (x, y, dx, dy) into sub-rectangles
-        proportional to `values` using a balanced binary split.
-        """
         if len(values) == 0:
             return []
         if len(values) == 1:
@@ -470,7 +920,6 @@ class Display:
         if total <= 0:
             return [(x, y, 0.0, 0.0) for _ in values]
 
-        # Find split index where cumulative sum is closest to half of total
         cumsum = np.cumsum(values)
         split_idx = int(np.argmin(np.abs(cumsum - total / 2.0))) + 1
         split_idx = min(max(split_idx, 1), len(values) - 1)
@@ -479,211 +928,105 @@ class Display:
         right_vals = values[split_idx:]
         frac = sum(left_vals) / total
 
-        # Split along the longer axis to keep aspect ratios close to square
         if dx >= dy:
             w1 = dx * frac
-            return (
-                cls._compute_treemap_rects(left_vals, x, y, w1, dy)
-                + cls._compute_treemap_rects(right_vals, x + w1, y, dx - w1, dy)
+            return cls._compute_treemap_rects(left_vals, x, y, w1, dy) + cls._compute_treemap_rects(
+                right_vals, x + w1, y, dx - w1, dy
             )
         else:
             h1 = dy * frac
-            return (
-                cls._compute_treemap_rects(left_vals, x, y, dx, h1)
-                + cls._compute_treemap_rects(right_vals, x, y + h1, dx, dy - h1)
+            return cls._compute_treemap_rects(left_vals, x, y, dx, h1) + cls._compute_treemap_rects(
+                right_vals, x, y + h1, dx, dy - h1
             )
 
-    def _dispatch_plot(self, data_type: str, atlas: bool = False, delta: bool = False, **kwargs):
-        if (atlas or delta) and not self.mhmga:
-            raise ValueError(f"Cannot plot multiple solutions when mhmga is False. ({atlas=}, {delta=})")
+    def _draw_pie(self, ax, dist, xpos, ypos, radius, colors, hatches):
+        if sum(dist) == 0:
+            return
+        data = np.array(dist) / sum(dist)
+        start_angle = 90
 
-        indices = kwargs.get("indices", [0, 1] if delta else [0])
-        if delta and len(indices) < 2:
-            raise ValueError(f"Delta plotting requires at least two indices in 'indices' kwarg. (Got: {indices})")
-
-        chart_type = kwargs.get("chart_type", "bar" if delta else "pie")
-        if delta and chart_type == "pie":
-            raise ValueError("Delta plotting does not support 'pie' charts.")
-        kwargs["chart_type"] = chart_type
-
-        if atlas:
-            grid = kwargs.get("grid", (2, 2))
-            if grid[0] * grid[1] < len(indices):
-                warnings.warn(
-                    "Not enough axes to plot all graphs. Some graphs will not be rendered"
-                    "Supply via kwarg 'grid'=(nrows, ncols)",
-                    UserWarning,
-                    4,
-                )
-            if grid[0] * grid[1] > len(indices):
-                warnings.warn(
-                    "More axes than graphs to plot. There will be blank graphs."
-                    "Supply via kwarg 'grid'=(nrows, ncols)",
-                    UserWarning,
-                    4,
-                )
-            fig, axes = self._setup_map_axis(nrows=grid[0], ncols=grid[1])
-            plot_targets = indices
-        else:
-            fig, axes = self._setup_map_axis(nrows=1, ncols=1)
-            plot_targets = [indices[1]] if delta else [indices[0]]
-
-        ref_idx = indices[0]
-        ref_sol = self.noptima[ref_idx] if self.mhmga else self.solution
-
-        #  Pre-calculate reference data and global scaling if deltas are required
-        ref_data = None
-        global_max_delta = 1
-        if delta:
-            ref_data = (
-                self._aggregate_solution_energy_by_node(
-                    ref_sol, kwargs.get("curtailment", False), kwargs.get("energy_mode", "generation")
-                )
-                if data_type == "energy"
-                else self._aggregate_solution_capacity_by_node(ref_sol, kwargs.get("build", "all"))
+        for i, val in enumerate(data):
+            if val == 0:
+                continue
+            end_angle = start_angle + val * 360
+            w = Wedge(
+                (xpos, ypos),
+                radius,
+                start_angle,
+                end_angle,
+                facecolor=colors[i],
+                hatch=hatches[i],
+                zorder=100,
+                edgecolor="none",
             )
+            ax.add_patch(w)
+            start_angle = end_angle
 
-            for idx in indices[1:]:
-                comp_sol = self.noptima[idx] if self.mhmga else self.solution
-                comp_data = (
-                    self._aggregate_solution_energy_by_node(
-                        comp_sol, kwargs.get("curtailment", False), kwargs.get("energy_mode", "generation")
-                    )
-                    if data_type == "energy"
-                    else self._aggregate_solution_capacity_by_node(comp_sol, kwargs.get("build", "all"))
-                )
-                delta_dict = self._calculate_delta_dict(ref_data, comp_data)
-                max_d = max((max([abs(v) for v in d.values()], default=0) for d in delta_dict.values()), default=1)
-                global_max_delta = max(global_max_delta, max_d)
+        outline = Wedge((xpos, ypos), radius, 0, 360, facecolor="none", edgecolor="black", linewidth=0.5, zorder=101)
+        ax.add_patch(outline)
 
-        for i, ax in enumerate(axes):
-            if i >= len(plot_targets):
-                ax.set_visible(False)
-                continue
+    def _draw_bars(self, ax, mix, xpos, ypos, y_limit, is_delta=False, chart_scale=1.0):
+        width_m = 250_000 * chart_scale
+        height_m = 250_000 * chart_scale
 
-            target_idx = plot_targets[i]
-            target_sol = self.noptima[target_idx] if self.mhmga else self.solution
+        keys = sorted(mix.keys())
+        values = [mix[k] for k in keys]
+        colors = [self._get_color(k) for k in keys]
+        hatches = [self._get_hatch(k) for k in keys]
 
-            # i==0 in atlas mode is the reference absolute plot.
-            # Otherwise, if delta is True, it's a delta plot.
-            is_delta_axis = delta and ((atlas and i > 0) or not atlas)
+        bar_width = width_m / (len(keys) + 1)
+        x_start = xpos - (width_m / 2)
+        baseline_y = ypos if is_delta else ypos - (height_m / 2)
 
-            if is_delta_axis:
-                comp_data = (
-                    self._aggregate_solution_energy_by_node(
-                        target_sol, kwargs.get("curtailment", False), kwargs.get("energy_mode", "generation")
-                    )
-                    if data_type == "energy"
-                    else self._aggregate_solution_capacity_by_node(target_sol, kwargs.get("build", "all"))
-                )
-                delta_dict = self._calculate_delta_dict(ref_data, comp_data)
-
-                self._draw_delta_on_axis(ax, delta_dict, global_max_delta, **kwargs)
-                ax.set_title(f"Delta: Alt {target_idx} - Alt {ref_idx}")
-            else:
-                self._draw_solution_on_axis(ax, target_sol, data_type, **kwargs)
-                ax.set_title(f"Absolute: Alt {target_idx}")
-
-        build_info = f" - Capacity: {kwargs.get('build', 'all')}" if data_type == "capacity" else ""
-        fig.suptitle(f"{data_type.capitalize()} Mix{build_info}", fontsize=self.large_fontsize)
-
-        if kwargs.get("save_path"):
-            plt.savefig(kwargs.get("save_path"), dpi=self.dpi, bbox_inches="tight")
-
-        return axes if atlas else axes[0]
-
-    def _draw_delta_on_axis(self, ax, delta_dict, global_max_delta, **kwargs):
-        """Worker method to draw delta bars and legend on a specific axis."""
-        chart_scale = kwargs.get("chart_scale", 1.0)
-
-        for node_name, mix in delta_dict.items():
-            if node_name not in self.centroids:
-                continue
-
-            filtered_mix = {k: v for k, v in mix.items() if abs(v) > kwargs.get("threshold", 1e-3)}
-            if not filtered_mix:
-                continue
-
-            x_coord, y_coord = self.centroids[node_name]
-            self._draw_bars(
-                ax, filtered_mix, x_coord, y_coord, global_max_delta, is_delta=True, chart_scale=chart_scale
+        for i, val in enumerate(values):
+            h = (val / y_limit) * (height_m / (2 if is_delta else 1))
+            bar_x = x_start + (i + 0.5) * bar_width
+            rect = plt.Rectangle(
+                (bar_x - bar_width / 2, baseline_y),
+                bar_width * 0.8,
+                h,
+                facecolor=colors[i],
+                hatch=hatches[i],
+                edgecolor="black",
+                linewidth=0.5,
+                zorder=110,
             )
+            ax.add_patch(rect)
 
-        if kwargs.get("legend", True):
-            self._add_legend(ax, delta_dict)
+        ax.plot([x_start, x_start + width_m], [baseline_y, baseline_y], color="black", lw=0.8, zorder=111)
 
-    def _calculate_delta_dict(self, dict_a, dict_b):
-        """Helper to subtract two node-tech dictionaries."""
+    # --------------------------------------------------------------------------
+    # Map, Solution I/O & Styling Helpers
+    # --------------------------------------------------------------------------
+
+    def _format_single_map_ax(self, ax: plt.Axes):
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.axis("off")
+        ax.set_aspect("equal")
+        self.map_data.plot(ax=ax, edgecolor="black", facecolor="#eeeeee", zorder=1)
+
+        minx, miny, maxx, maxy = self.map_data.total_bounds
+        margin = 200_000
+        ax.set_xlim(minx - margin, maxx + margin)
+        ax.set_ylim(miny - margin, maxy + margin)
+
+    def _setup_map_axis(self, nrows=1, ncols=1, figsize=None):
+        if figsize is None:
+            figsize = (8 * ncols, 8 * nrows)
+        fig, axes = plt.subplots(nrows, ncols, figsize=figsize, dpi=self.style.dpi, squeeze=False)
+        axes_flat = axes.flatten()
+        for ax in axes_flat:
+            self._format_single_map_ax(ax)
+        return fig, axes_flat
+
+    @staticmethod
+    def _calculate_delta_dict(dict_a: dict, dict_b: dict) -> dict:
         delta = {}
-        all_nodes = set(dict_a.keys()) | set(dict_b.keys())
-        for n in all_nodes:
-            delta[n] = {}
-            node_a = dict_a.get(n, {})
-            node_b = dict_b.get(n, {})
-            all_techs = set(node_a.keys()) | set(node_b.keys())
-            for t in all_techs:
-                delta[n][t] = node_b.get(t, 0.0) - node_a.get(t, 0.0)
+        for n in set(dict_a.keys()) | set(dict_b.keys()):
+            node_a, node_b = dict_a.get(n, {}), dict_b.get(n, {})
+            delta[n] = {t: node_b.get(t, 0.0) - node_a.get(t, 0.0) for t in set(node_a.keys()) | set(node_b.keys())}
         return delta
-
-    def _get_delta_color(self, tech, value):
-        """
-        Placeholder - may Returns a modified version of the tech color:
-        Slightly brighter/redder for positive, darker/bluer for negative?
-        Currently no difference
-        """
-        base_color = self._get_color(tech)
-        if value >= 0:
-            return base_color
-        else:
-            return base_color
-
-    def _draw_solution_on_axis(self, ax, solution, data_type, **kwargs):
-        """
-        Unified worker that switches between _draw_pie and _draw_bars.
-        """
-        chart_type = kwargs.get("chart_type", "pie")
-        chart_scale = kwargs.get("chart_scale", 1.0)
-
-        # Data aggregation
-        if data_type == "energy":
-            node_data = self._aggregate_solution_energy_by_node(
-                solution, kwargs.get("curtailment", False), kwargs.get("energy_mode", "generation")
-            )
-            flow_type = "energy"
-        else:
-            node_data = self._aggregate_solution_capacity_by_node(solution, kwargs.get("build", "all"))
-            flow_type = "capacity"
-
-        # Scaling logic
-        max_total = kwargs.get("max_scale", max((sum(d.values()) for d in node_data.values()), default=1))
-
-        for node_name, mix in node_data.items():
-            if node_name not in self.centroids:
-                raise RuntimeError(f"Node {node_name} not found in map centroids.")
-
-            # Filter zero-valued entries for bars to keep the x-axis dynamic
-            filtered_mix = {k: v for k, v in mix.items() if abs(v) > kwargs.get("threshold", 1e-5)}
-            if not filtered_mix:
-                continue
-
-            x, y = self.centroids[node_name]
-
-            if chart_type == "bar":
-                # For non-delta plots, y_limit is the max_total of the node
-                # or a global max for consistency.
-                self._draw_bars(ax, filtered_mix, x, y, max_total, chart_scale=chart_scale)
-            else:
-                radius = 100_000 * chart_scale * np.sqrt(sum(mix.values()) / max_total)
-                keys = sorted(mix.keys())
-                values = [mix[k] for k in keys]
-                colors = [self._get_color(k) for k in keys]
-                hatches = [self._get_hatch(k) for k in keys]
-                self._draw_pie(ax, values, x, y, radius, colors, hatches)
-
-        self._draw_solution_transmission(solution, ax, flow_type=flow_type, build=kwargs.get("build"))
-
-        if kwargs.get("legend", True):
-            self._add_legend(ax, node_data)
 
     def _construct_solution(self, x):
         return Solution(
@@ -709,231 +1052,35 @@ class Display:
         noptima_df = pd.read_csv(filepath)
         noptima_x = [row.to_numpy() for _, row in noptima_df.iloc[:, 3:].iterrows()]
         self.noptima = [self._construct_solution(x.astype(npfloat)) for x in noptima_x]
-        [evaluate(sol) for sol in self.noptima]
-        # first noptimum is optimum
+        for sol in self.noptima:
+            evaluate(sol)
         self.solution = self.noptima[0]
 
-    def _load_map_data(self, filepath: str) -> gpd.GeoDataFrame:
-        self.map_data = gpd.read_file(filepath)
-        self.map_data = self.map_data.to_crs(epsg=3035)
-        # Calculate centroids for node placement
-        # Assumes the 'name' column in GeoJSON matches node.name in the Solution
+    def _load_map_data(self, filepath: str):
+        self.map_data = gpd.read_file(filepath).to_crs(epsg=3035)
         self.centroids = self._calculate_centroids()
 
     def _calculate_centroids(self) -> Dict[str, Tuple[float, float]]:
-        """
-        Matches network nodes to map geometries and calculates centroids.
-        """
         centroids = {}
-        # Calculate centroids directly on the projected map
         map_cents = self.map_data.geometry.centroid
         for node in self.solution.network.nodes.values():
-            # Match ISO3 or Name
-            # Ensure your GeoJSON column name matches (e.g. 'ISO3', 'id', 'name')
             match_indices = self.map_data.index[self.map_data["ISO3"].str.lower() == node.name.lower()]
-
             if not match_indices.empty:
-                idx = match_indices[0]
-                pt = map_cents[idx]
+                pt = map_cents[match_indices[0]]
                 centroids[node.name] = (pt.x, pt.y)
             else:
-                print(f"Warning: No map geometry found for node {node.name}.")
-                centroids[node.name] = (0, 0)
+                warnings.warn(f"No map geometry found for node {node.name}.", UserWarning, 3)
+                centroids[node.name] = (0.0, 0.0)
         return centroids
 
-    def _draw_pie(self, ax, dist, xpos, ypos, radius, colors, hatches):
-        """
-        Draws a pie chart using Wedge patches which respect data coordinates.
-        Replaces ax.scatter to fix the 'exploding wedge' distortion.
-        """
-        if sum(dist) == 0:
-            return
-        # Normalize distribution for slice angles
-        data = np.array(dist)
-        data = data / data.sum()
-        start_angle = 90
-
-        for i, val in enumerate(data):
-            if val == 0:
-                continue
-
-            deg = val * 360
-            end_angle = start_angle + deg
-
-            w = Wedge((xpos, ypos), radius, start_angle, end_angle,
-                      facecolor=colors[i], hatch=hatches[i], zorder=100, edgecolor="none")
-            ax.add_patch(w)
-            start_angle = end_angle
-
-        # Outline
-        outline = Wedge((xpos, ypos), radius, 0, 360, facecolor="none", edgecolor="black", linewidth=0.5, zorder=101)
-        ax.add_patch(outline)
-
-    def _draw_bars(self, ax, mix, xpos, ypos, y_limit, is_delta=False, chart_scale=1.0):
-        # Dimensions in map units (EPSG:3035 meters)
-        width_m = 250_000 * chart_scale
-        height_m = 250_000 * chart_scale
-
-        keys = sorted(mix.keys())
-        values = [mix[k] for k in keys]
-        colors = [self._get_color(k) for k in keys]
-        hatches = [self._get_hatch(k) for k in keys]
-
-        num_bars = len(keys)
-        bar_width = width_m / (num_bars + 1)
-        x_start = xpos - (width_m / 2)
-
-        # Baseline: For absolute plots, baseline is bottom. For delta, it's center.
-        baseline_y = ypos if is_delta else ypos - (height_m / 2)
-
-        # Optional: draw a faint background box for the chart area
-        # ax.add_patch(plt.Rectangle((x_start, ypos - height_m/2), width_m, height_m, ...))
-
-        for i, val in enumerate(values):
-            # Scale height. If delta, height can be negative.
-            # If absolute, val/y_limit scales 0 to 1.
-            h_ratio = val / y_limit
-            h = h_ratio * (height_m / (2 if is_delta else 1))
-
-            bar_x = x_start + (i + 0.5) * bar_width
-
-            rect = plt.Rectangle(
-                (bar_x - bar_width / 2, baseline_y),
-                bar_width * 0.8,
-                h,
-                facecolor=colors[i],
-                hatch=hatches[i],
-                edgecolor="black",
-                linewidth=0.5,
-                zorder=110,
-            )
-            ax.add_patch(rect)
-
-        # Draw a horizontal line at the baseline
-        ax.plot([x_start, x_start + width_m], [baseline_y, baseline_y], color="black", lw=0.8, zorder=111)
-
-    def _setup_map_axis(self, nrows=1, ncols=1, figsize=None):
-        """Handles single and multi-axis creation with background maps."""
-        if figsize is None:
-            figsize = (8 * ncols, 8 * nrows)
-
-        fig, axes = plt.subplots(nrows, ncols, figsize=figsize, dpi=self.dpi, squeeze=False)
-        axes_flat = axes.flatten()
-
-        for ax in axes_flat:
-            ax.set_xticks([])
-            ax.set_yticks([])
-            ax.axis("off")
-            ax.set_aspect("equal")
-            self.map_data.plot(ax=ax, edgecolor="black", facecolor="#eeeeee", zorder=1)
-
-            # Set Limits
-            minx, miny, maxx, maxy = self.map_data.total_bounds
-            margin = 200_000  # 200 km margin
-            ax.set_xlim(minx - margin, maxx + margin)
-            ax.set_ylim(miny - margin, maxy + margin)
-
-        return fig, axes_flat
-
-    def _draw_solution_transmission(self, solution, ax, flow_type="capacity", build=None):
-        """
-        Draws transmission lines with dynamic width scaling.
-        """
-        MAX_LINE_WIDTH = 5.0
-        MIN_LINE_WIDTH = 0.3
-
-        lines_data = []
-        max_val = 0.0
-        accessor = self._get_accessor(solution)
-
-        for line in accessor.get_assets("major_lines").values():
-            n_start = line.node_start.name
-            n_end = line.node_end.name
-            if n_start not in self.centroids:
-                raise RuntimeError(f"Line node {n_start} not found in map centroids.")
-            if n_end not in self.centroids:
-                raise RuntimeError(f"Line node {n_end} not found in map centroids.")
-
-            if flow_type == "capacity":
-                val = self._get_build_power_capacity(accessor, line, build)
-            elif flow_type == "energy":
-                val = accessor.get_line_use_gross(line)
-            else:
-                raise ValueError(f'Invalid \'flow_type\'. Expected "capacity" or "energy". Got {flow_type}')
-
-            max_val = max(max_val, val)
-            lines_data.append((self.centroids[n_start], self.centroids[n_end], val))
-
-        if max_val == 0:
-            return
-
-        color = "red" if flow_type == "capacity" else "blue"
-        alpha = 0.7 if flow_type == "capacity" else 0.5
-
-        for p1, p2, val in lines_data:
-            scaled_width = (val / max_val) * MAX_LINE_WIDTH
-            final_width = max(scaled_width, MIN_LINE_WIDTH)
-            ax.plot(
-                [p1[0], p2[0]],
-                [p1[1], p2[1]],
-                color=color,
-                linewidth=final_width,
-                zorder=50,
-                alpha=alpha,
-            )
-
-    def _aggregate_solution_energy_by_node(self, solution, curtailment=False, energy_mode="generation"):
-        """
-        Scans fleet generators and storages to sum energy (GWh) by node and tech.
-        """
-        data = {}
-        accessor = self._get_accessor(solution)
-        metric = "post_curtailment_power" if curtailment else "dispatch"
-
-        for asset_class in ("generators", "storages"):
-            for asset in accessor.get_assets(asset_class).values():
-                n = asset.node.name
-                tech = self.scenario.identify_tech(asset.name)
-
-                if n not in data:
-                    data[n] = {}
-                dictsafe_check(data[n], tech)
-                data[n][tech] += accessor.get_gross(metric, asset)
-
-        return data
-
-    def _aggregate_solution_capacity_by_node(self, solution, build=None):
-        """
-        Scans fleet to sum capacity (GW) by node and tech.
-        """
-        data = {}
-        accessor = self._get_accessor(solution)
-
-        for asset_class in ("generators", "storages"):
-            for asset in accessor.get_assets(asset_class).values():
-                n = asset.node.name
-                tech = self.scenario.identify_tech(asset.name)
-
-                if n not in data:
-                    data[n] = {}
-                dictsafe_check(data[n], tech)
-                data[n][tech] += self._get_build_power_capacity(accessor, asset, build)
-
-        return data
-
-    def _get_display_label(self, asset):
-        """Standardizes display names for assets, resolving sub-types."""
-        base = self.scenario.identify_tech(asset.name)
+    def _get_display_label(self, asset) -> str:
+        base = self.scenario.identify_tech(asset.name) if getattr(asset, "object_class", "") != "line" else ""
         raw_type = str(getattr(asset, "unit_type", "")).lower()
 
-        if base in ["Biomass", "Biogas"]:
+        if base in ("Biomass", "Biogas"):
             return "Bioenergy"
 
-        if (
-            asset.object_class == "storage"
-            and base not in ["Hydro", "Pondage", "Run of River"]
-            and raw_type not in ["hydro", "pond", "ror"]
-        ):
+        if is_rechargeable_storage(asset, base):
             if raw_type == "nphes":
                 return "New PHES"
             if raw_type == "clphes":
@@ -943,7 +1090,7 @@ class Display:
             if "bess" in raw_type or raw_type == "battery":
                 return "Battery"
 
-        if asset.object_class == "line":
+        if getattr(asset, "object_class", "") == "line":
             tx_map = {
                 "ac_ohl_transmission": "AC OHL",
                 "ac_ohl_mountain_transmission": "AC OHL (Mountain)",
@@ -954,172 +1101,36 @@ class Display:
 
         return base
 
-    def _aggregate_fleet_summary_data(self, solution, energy_type="both"):
-        """Extracts and formats the 3x3 datasets for a specific solution."""
-        accessor = self._get_accessor(solution)
-        to_twh_yr = 1.0 / (self.scenario.static.year_count * 1000.0)
-
-        row1 = {"Generation (Power)": {}, "Transmission (Power)": {}, "Rechargeable Storage (Power)": {}}
-        row2 = {"Hydro (Energy Cap)": {}, "Rechargeable Storage (Energy Cap)": {}, "Rechargeable Storage (Sources)": {}}
-        row3 = {"Generation (Energy Mix)": {}, "Transmission (Flows)": {}, "Rechargeable Storage (Discharge)": {}}
-
-        # 1. Generators
-        for asset in accessor.get_assets("generators").values():
-            label = self._get_display_label(asset)
-            dictsafe_check(row1["Generation (Power)"], label)
-            row1["Generation (Power)"][label] += accessor.get_power_capacity(asset)
-
-            dictsafe_check(row3["Generation (Energy Mix)"], label)
-            row3["Generation (Energy Mix)"][label] += accessor.get_dispatch_gross(asset) * to_twh_yr
-
-        # 2. Storages
-        for asset in accessor.get_assets("storages").values():
-            base_tech = self.scenario.identify_tech(asset.name)
-            raw_type = str(getattr(asset, "unit_type", "")).lower()
-
-            # Retain hydro storage classification as generation
-            if base_tech in ["Hydro", "Pondage", "Run of River"] or raw_type in ["hydro", "pond", "ror"]:
-                label = base_tech
-                dictsafe_check(row1["Generation (Power)"], label)
-                dictsafe_check(row2["Hydro (Energy Cap)"], label)
-                row1["Generation (Power)"][label] += accessor.get_power_capacity(asset)
-                row2["Hydro (Energy Cap)"][label] += accessor.get_energy_capacity(asset)
-
-                dictsafe_check(row3["Generation (Energy Mix)"], label)
-                row3["Generation (Energy Mix)"][label] += accessor.get_dispatch_gross(asset) * to_twh_yr
-
-            else:
-                label = self._get_display_label(asset)
-                dictsafe_check(row1["Rechargeable Storage (Power)"], label)
-                dictsafe_check(row2["Rechargeable Storage (Energy Cap)"], label)
-                row1["Rechargeable Storage (Power)"][label] += accessor.get_power_capacity(asset)
-                row2["Rechargeable Storage (Energy Cap)"][label] += accessor.get_energy_capacity(asset)
-
-                dictsafe_check(row3["Rechargeable Storage (Discharge)"], label)
-                row3["Rechargeable Storage (Discharge)"][label] += accessor.get_discharge_gross(asset) * to_twh_yr
-
-                if energy_type == "both":
-                    dictsafe_check(row3["Rechargeable Storage (Discharge)"], "Losses")
-                    dictsafe_check(row3["Rechargeable Storage (Discharge)"], "Spillage")
-                    row3["Rechargeable Storage (Discharge)"]["Losses"] += (
-                        accessor.get_storage_loss_gross(asset) * to_twh_yr
-                    )
-                    row3["Rechargeable Storage (Discharge)"]["Spillage"] += (
-                        accessor.get_spillage_gross(asset) * to_twh_yr
-                    )
-
-                if raw_type in ["clphes", "olphes", "nphes", "bess2h", "bess4h"]:
-                    elec_label = f"{label} (Electrical)"
-                    dictsafe_check(row2["Rechargeable Storage (Sources)"], elec_label)
-                    row2["Rechargeable Storage (Sources)"][elec_label] += (
-                        abs(accessor.get_charge_gross(asset)) * to_twh_yr
-                    )
-
-                    if accessor.has_inflows(asset):
-                        inflow_label = f"{label} (Inflows)"
-                        dictsafe_check(row2["Rechargeable Storage (Sources)"], inflow_label)
-                        row2["Rechargeable Storage (Sources)"][inflow_label] += (
-                            accessor.get_inflow_gross(asset) * to_twh_yr
-                        )
-
-        # 3. Transmission
-        for asset in accessor.get_assets("major_lines").values():
-            label = self._get_display_label(asset)
-            dictsafe_check(row1["Transmission (Power)"], label)
-            row1["Transmission (Power)"][label] += accessor.get_power_capacity(asset)
-
-            energy_in_yr = accessor.get_line_use_gross(asset) * to_twh_yr
-            losses_yr = accessor.get_line_loss_gross(asset) * to_twh_yr
-            energy_out_yr = energy_in_yr - losses_yr
-
-            dictsafe_check(row3["Transmission (Flows)"], label)
-            row3["Transmission (Flows)"][label] += energy_out_yr
-
-            if energy_type == "both":
-                dictsafe_check(row3["Transmission (Flows)"], "Losses")
-                row3["Transmission (Flows)"]["Losses"] += losses_yr
-
-        # 4. System Curtailment
-        if energy_type == "both":
-            row3["Generation (Energy Mix)"]["Curtailment"] = accessor.get_curtail_gross("system") * to_twh_yr
-
-        return row1, row2, row3
-
-    def _draw_summary_pie_row(self, data_dict, row_axes, units):
-        """Worker method to draw a single row of pie charts."""
-        unit_maxes = {}
-        for mix, unit in zip(data_dict.values(), units):
-            total = sum(v for v in mix.values() if v > 0)
-            unit_maxes[unit] = max(unit_maxes.get(unit, 1), total)
-
-        items = list(data_dict.items())
-
-        for i, ax in enumerate(row_axes):
-            if i >= len(items):
-                ax.axis("off")
-                continue
-
-            category, mix = items[i]
-            unit = units[i]
-            clean_mix = {k: v for k, v in mix.items() if v > 1e-6}
-            total = sum(clean_mix.values())
-
-            if total <= 0:
-                ax.axis("off")
-                continue
-
-            radius = np.sqrt(total / unit_maxes[unit])
-            labels = list(clean_mix.keys())
-            values = list(clean_mix.values())
-            colors = [self._get_color(label) for label in labels]
-
-            wedges, _ = ax.pie(
-                values, radius=radius, colors=colors, wedgeprops={"linewidth": 0.5, "edgecolor": "black"}
-            )
-
-            ax.set_title(f"{category}\nTotal: {total:,.1f} {unit}", pad=10)
-            ax.set_aspect("equal")
-            ax.legend(wedges, labels, loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
-
     def _init_colors(self):
         self.tech_colors = {
-            # --- Solar (Gold / Bright Yellow) ---
             "Utility Solar": "#F59E0B",
             "Rooftop Solar": "#FEF08A",
-            # --- Wind (Sky Blue / Royal Blue) ---
             "Onshore Wind": "#60A5FA",
             "Offshore Wind": "#1D4ED8",
-            # --- Hydroelectric (Emerald Teal / Aqua / Mint) ---
             "Hydro": "#0D9488",
             "Pondage": "#2DD4BF",
             "Run of River": "#99F6E4",
-            # --- Bioenergy & Geothermal (Forest Greens & Crimson) ---
             "Bioenergy": "#16A34A",
             "Biomass": "#15803D",
             "Biogas": "#86EFAC",
             "Geothermal": "#B91C1C",
-            # --- Thermal / Nuclear (Rose Red, Warm Taupe, Charcoal) ---
             "Nuclear": "#E11D48",
             "Fossil Gas": "#78716C",
             "Coal": "#27272A",
-            # --- Rechargeable Storage (Distinct Purple / Magenta / Indigo family) ---
-            "Battery": "#A855F7",  # Vivid Purple
-            "Closed-loop PHES": "#EC4899",  # Hot Rose / Magenta
-            "Open-loop PHES": "#6366F1",  # Medium Indigo
-            "New PHES": "#3730A3",  # Deep Violet-Indigo
-            "Legacy PHES": "#818CF8",  # Soft Periwinkle (fallback)
-            "PHES": "#6366F1",  # Fallback
-            # --- Transmission (Copper/Terracotta for AC, Petrol/Slate for DC) ---
-            "AC OHL": "#9A3412",  # Deep Rust / Copper
-            "AC OHL (Mountain)": "#EA580C",  # Terracotta Orange (distinct from Solar Gold)
-            "DC Subsea": "#0E7490",  # Deep Cyan / Petrol
-            "DC Underground": "#1E293B",  # Dark Slate Navy
-            # --- Secondary / System Balance Metrics ---
-            "Curtailment": "#E5E7EB",  # Light Silver-Gray
-            "Losses": "#9CA3AF",  # Medium Neutral Gray
-            "Spillage": "#BAE6FD",  # Pale Ice Blue
+            "Battery": "#A855F7",
+            "Closed-loop PHES": "#EC4899",
+            "Open-loop PHES": "#6366F1",
+            "New PHES": "#3730A3",
+            "Legacy PHES": "#818CF8",
+            "PHES": "#6366F1",
+            "AC OHL": "#9A3412",
+            "AC OHL (Mountain)": "#EA580C",
+            "DC Subsea": "#0E7490",
+            "DC Underground": "#1E293B",
+            "Curtailment": "#E5E7EB",
+            "Losses": "#9CA3AF",
+            "Spillage": "#BAE6FD",
         }
-
         self.tech_hatches = {
             "Curtailment": "xx",
             "Losses": "--",
@@ -1127,35 +1138,19 @@ class Display:
         }
 
     def _get_color(self, tech: str) -> str:
-        """
-        Returns the hex color for a technology.
-        Automatically maps '(Electrical)' and '(Inflows)' storage sources
-        to their parent storage technology's color.
-        """
         base_tech = tech.removesuffix(" (Electrical)").removesuffix(" (Inflows)")
         return self.tech_colors.get(tech, self.tech_colors.get(base_tech, "#6B7280"))
 
     def _get_hatch(self, tech: str) -> str | None:
-        """
-        Returns the hatch pattern for a technology or energy state:
-            - '//' for electrical charging inputs
-            - '..' for natural inflow inputs
-            - Specific patterns for Curtailment ('xx'), Losses ('--'), and Spillage ('oo')
-        """
         if tech.endswith(" (Electrical)"):
             return "//"
         if tech.endswith(" (Inflows)"):
             return ".."
         return self.tech_hatches.get(tech, None)
 
-    def _add_legend(self, ax, data_dict):
-        """Dynamically creates legend based on present technologies."""
-        present_techs = set()
-        for mix in data_dict.values():
-            present_techs.update(mix.keys())
-
-        handles = []
-        labels = []
+    def _add_legend(self, ax: plt.Axes, data_dict: dict):
+        present_techs = {tech for mix in data_dict.values() for tech in mix.keys()}
+        handles, labels = [], []
         for tech in sorted(present_techs):
             handles.append(
                 plt.Rectangle(
@@ -1170,45 +1165,9 @@ class Display:
             )
             labels.append(tech)
 
-        ax.legend(
-            handles,
-            labels,
-            loc="upper right",
-            title="Technology",
-            frameon=False,
-        )
-
-    def set_dpi(self, dpi: int):
-        self.dpi = dpi
-
-    def set_base_fontsize(self, size: int):
-        self.base_fontsize = size
-
-        # Apply globally to all matplotlib plots generated by this instance
-        plt.rcParams.update({'font.size': self.base_fontsize})
-
-    def set_large_fontsize(self, size: int):
-        self.large_fontsize = size
-
-    def set_small_fontsize(self, size: int):
-        self.small_fontsize = size
-        plt.rcParams.update({
-            'legend.fontsize': self.small_fontsize,
-            'legend.title_fontsize': self.small_fontsize,
-            'axes.titlesize': self.small_fontsize  # Applies to subplot titles
-        })
+        ax.legend(handles, labels, loc="upper right", title="Technology", frameon=False)
 
     @staticmethod
     def _sort_mix_items(mix: dict) -> list[tuple[str, float]]:
-        """
-        Sorts technology dictionary items deterministically by name,
-        placing secondary metrics ('Curtailment', 'Losses', 'Spillage') last.
-        """
         secondary = {"Curtailment", "Losses", "Spillage"}
         return sorted(mix.items(), key=lambda item: (item[0] in secondary, item[0]))
-
-
-def dictsafe_check(d, key, val=0.0):
-    """ Check whether a label is present and add it if not """
-    if key not in d:
-        d[key] = val
