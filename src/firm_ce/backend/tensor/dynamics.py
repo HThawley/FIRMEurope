@@ -10,11 +10,52 @@ def UpdateUnbalancedt(solution, t):
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
+def GetHydroMinGen(solution, t, n, h):
+    """Must-run power floor (MW) for hydro asset h when inflow exceeds reservoir capacity."""
+    res = solution.static.resolution
+    prev_soc = (
+        solution.operations.Mreservoir_init[n, h] if t == 0
+        else solution.operations.Mreservoir[t - 1, n, h]
+    )
+    inflow_e = solution.static.TShyd_inflow[t, n, h]
+    excess_p = (prev_soc + inflow_e - solution.assets.ChydE[n, h]) / res
+    return max(0.0, min(solution.assets.ChydP[n, h], excess_p))
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
+def GetPhesMinGen(solution, t, n):
+    """Must-run power floor (MW) for open-loop PHES (s=0) when inflow exceeds storage capacity."""
+    res = solution.static.resolution
+    prev_soc = (
+        solution.operations.Mstorage_init[n, 0] if t == 0
+        else solution.operations.Mstorage[t - 1, n, 0]
+    )
+    inflow_e = solution.static.TSphes_inflow[t, n]
+    excess_p = (
+        (prev_soc + inflow_e - solution.assets.CstorageE[n, 0])
+        * solution.static.storage_discha_eff[0] / res
+    )
+    return max(0.0, min(solution.assets.CstorageP[n, 0], excess_p))
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
 def GetNaiveCurtailDeficit(solution, t):
     has_deficit = False
     has_curtail = False
     for n in range(solution.static.nodes):
         unbal = solution.operations.Munbalanced[t, n]
+
+        # Lock in must-run hydro generation floor
+        for h in range(solution.static.nhyd):
+            min_hyd = GetHydroMinGen(solution, t, n, h)
+            solution.operations.Mhydro[t, n, h] = min_hyd
+            unbal -= min_hyd
+
+        # Lock in must-run open-loop PHES (s=0) generation floor
+        min_phes = GetPhesMinGen(solution, t, n)
+        solution.operations.Mdischarge[t, n, 0] = min_phes
+        unbal -= min_phes
+
         if unbal > TOLERANCE:
             solution.operations.Mdeficit[t, n] = unbal
             solution.operations.Mcurtail[t, n] = 0.0
@@ -39,6 +80,14 @@ def UpdateLocalCharge(solution, t):
 
     for n in range(solution.static.nodes):
         unbal = solution.operations.Munbalanced[t, n]
+
+        # Account for active generation (must-run floors and any prior stage discharges)
+        for h in range(solution.static.nhyd):
+            unbal -= solution.operations.Mhydro[t, n, h]
+        for s in range(solution.static.nstor):
+            unbal -= solution.operations.Mdischarge[t, n, s]
+        for k in range(solution.static.npeak):
+            unbal -= solution.operations.Mpeak[t, n, k]
 
         # Wipe local arrays to allow safe recalculation from scratch
         for s in range(solution.static.nstor):
@@ -76,6 +125,7 @@ def UpdateLocalCharge(solution, t):
 def UpdateLocalDischarge(solution, t):
     res = solution.static.resolution
     has_deficit = False
+    has_curtail = False
 
     for n in range(solution.static.nodes):
         unbal = solution.operations.Munbalanced[t, n]
@@ -84,11 +134,17 @@ def UpdateLocalDischarge(solution, t):
         for s in range(solution.static.nstor):
             unbal += solution.operations.Mcharge[t, n, s]
 
-        # Wipe discharge arrays
-        for s in range(solution.static.nstor):
+        # Initialize discharge arrays to their must-run floors and deduct from unbal
+        min_phes = GetPhesMinGen(solution, t, n)
+        solution.operations.Mdischarge[t, n, 0] = min_phes
+        unbal -= min_phes
+        for s in range(1, solution.static.nstor):
             solution.operations.Mdischarge[t, n, s] = 0.0
+
         for h in range(solution.static.nhyd):
-            solution.operations.Mhydro[t, n, h] = 0.0
+            min_hyd = GetHydroMinGen(solution, t, n, h)
+            solution.operations.Mhydro[t, n, h] = min_hyd
+            unbal -= min_hyd
 
         if unbal > TOLERANCE:
             # Pondage (h=0)
@@ -98,9 +154,10 @@ def UpdateLocalDischarge(solution, t):
                 else solution.operations.Mreservoir[t - 1, n, h]
             )
             inflow_e = solution.static.TShyd_inflow[t, n, h]
-            discharge_cap = (prev_soc + inflow_e) / res
-            discharge_amt = max(0.0, min(unbal, solution.assets.ChydP[n, h], discharge_cap))
-            solution.operations.Mhydro[t, n, h] = discharge_amt
+            rem_p = solution.assets.ChydP[n, h] - solution.operations.Mhydro[t, n, h]
+            rem_e = (prev_soc + inflow_e) / res - solution.operations.Mhydro[t, n, h]
+            discharge_amt = max(0.0, min(unbal, rem_p, rem_e))
+            solution.operations.Mhydro[t, n, h] += discharge_amt
             unbal -= discharge_amt
 
             # Storage (s=0 to 3)
@@ -112,9 +169,13 @@ def UpdateLocalDischarge(solution, t):
                 if s == 0:
                     prev_soc += solution.static.TSphes_inflow[t, n]
 
-                discharge_cap = prev_soc * solution.static.storage_discha_eff[s] / res
-                discharge_amt = max(0.0, min(unbal, solution.assets.CstorageP[n, s], discharge_cap))
-                solution.operations.Mdischarge[t, n, s] = discharge_amt
+                rem_p = solution.assets.CstorageP[n, s] - solution.operations.Mdischarge[t, n, s]
+                rem_e = (
+                    prev_soc * solution.static.storage_discha_eff[s] / res
+                    - solution.operations.Mdischarge[t, n, s]
+                )
+                discharge_amt = max(0.0, min(unbal, rem_p, rem_e))
+                solution.operations.Mdischarge[t, n, s] += discharge_amt
                 unbal -= discharge_amt
 
             # Reservoir (h=1)
@@ -124,9 +185,10 @@ def UpdateLocalDischarge(solution, t):
                 else solution.operations.Mreservoir[t - 1, n, h]
             )
             inflow_e = solution.static.TShyd_inflow[t, n, h]
-            discharge_cap = (prev_soc + inflow_e) / res
-            discharge_amt = max(0.0, min(unbal, solution.assets.ChydP[n, h], discharge_cap))
-            solution.operations.Mhydro[t, n, h] = discharge_amt
+            rem_p = solution.assets.ChydP[n, h] - solution.operations.Mhydro[t, n, h]
+            rem_e = (prev_soc + inflow_e) / res - solution.operations.Mhydro[t, n, h]
+            discharge_amt = max(0.0, min(unbal, rem_p, rem_e))
+            solution.operations.Mhydro[t, n, h] += discharge_amt
             unbal -= discharge_amt
 
             # peak deduction
@@ -135,13 +197,21 @@ def UpdateLocalDischarge(solution, t):
 
             if unbal > TOLERANCE:
                 solution.operations.Mdeficit[t, n] = unbal
+                solution.operations.Mcurtail[t, n] = 0.0
                 has_deficit = True
             else:
                 solution.operations.Mdeficit[t, n] = 0.0
+                solution.operations.Mcurtail[t, n] = 0.0
+        elif unbal < -TOLERANCE:
+            solution.operations.Mdeficit[t, n] = 0.0
+            solution.operations.Mcurtail[t, n] = -unbal
+            has_curtail = True
         else:
             solution.operations.Mdeficit[t, n] = 0.0
+            solution.operations.Mcurtail[t, n] = 0.0
 
     solution.operations.has_deficit_t = has_deficit
+    solution.operations.has_curtail_t = has_curtail
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")

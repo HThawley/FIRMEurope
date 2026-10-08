@@ -88,14 +88,14 @@ def ForwardPassRenewables(solution):  # noqa: C901
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-def ForwardPassPeak(solution):  # noqa: C901
+def ForwardPassPeak(solution):
     for t in range(solution.static.intervals):
         for k in range(solution.static.npeak):
-            if solution.operations.has_deficit_t:
-                LocalDispatchPeakTier(solution, t, k)
+            if not (solution.operations.Mdeficit[t] > TOLERANCE).any():
+                break
+            LocalDispatchPeakTier(solution, t, k)
             NetworkDispatchPeakTier(solution, t, k)
         UpdateUnbalancedt(solution, t)
-    UpdateSOCt(solution, t)
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
@@ -108,15 +108,17 @@ def GetForwardStorageHeadroom(solution, t, n):
         prev_soc = solution.operations.Mstorage_init[n, s] if t == 0 else solution.operations.Mstorage[t - 1, n, s]
         if s == 0:
             prev_soc += solution.static.TSphes_inflow[t, n]
-            prev_soc = min(solution.assets.CstorageE[n, s], prev_soc)
 
         current_energy_change = res * (
             solution.operations.Mcharge[t, n, s] * solution.static.storage_charge_eff[s]
             - solution.operations.Mdischarge[t, n, s] / solution.static.storage_discha_eff[s]
         )
 
-        max_e_power = (solution.assets.CstorageE[n, s] - (prev_soc + current_energy_change)
-                       ) / solution.static.storage_charge_eff[s] / res
+        max_e_power = (
+            (solution.assets.CstorageE[n, s] - (prev_soc + current_energy_change))
+            / solution.static.storage_charge_eff[s]
+            / res
+        )
         available_power = solution.assets.CstorageP[n, s] - solution.operations.Mcharge[t, n, s]
 
         headroom += max(0.0, min(available_power, max_e_power))
