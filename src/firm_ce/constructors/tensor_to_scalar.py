@@ -140,7 +140,8 @@ def map_tensor_to_scalar(
         sto.lt_costs.annualised_build_p = ann_build_p * sto.power_capacity
         sto.lt_costs.annualised_build_e = ann_build_e * sto.energy_capacity
         sto.lt_costs.fom = fom * sto.power_capacity
-        sto.lt_costs.vom = vom * sto.dispatch_power.sum()  # res and years already in `vom`
+
+        sto.lt_costs.vom = vom * np.maximum(0, sto.dispatch_power).sum()  # res and years already in `vom`
 
     # Update Major Lines
     for line in solution.network.major_lines.values():

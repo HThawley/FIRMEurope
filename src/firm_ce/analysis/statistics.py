@@ -59,11 +59,9 @@ class Statistics:
             # first, if a 'solution' is provided, use it
             self.solution = solution
             self.solutionTensor = solutionTensor
-
             if not getattr(self.solution, "evaluated", False):
                 self._evaluate_solution()
             # solutionTensor not directly used so does not need to be evaluated (indeed, may be None)
-
         elif (not solT_is_None):
             # next, if a 'solutionTensor' is provided, use it
             self.solutionTensor = solutionTensor
@@ -107,7 +105,6 @@ class Statistics:
         print(f"{self.scenario.name} LCOE: {self.solutionTensor.lcoe} [$/MWh], " f"Penalties: {self.solutionTensor.penalties}")
 
     def _write_temporal_parquet(self) -> None:
-        """Writes temporal trace data directly to Parquet via PyArrow."""
         self.temporal_file_path = os.path.join(self.statistics_dir, "temporal_data.parquet")
         if os.path.exists(self.temporal_file_path):
             os.remove(self.temporal_file_path)
@@ -187,7 +184,7 @@ class Statistics:
         """Constructs static asset and nodal metadata directly as a Polars DataFrame."""
         static_data = []
         asset_classes = ["nodes", "generators", "storages", "major_lines"]
-        meta_data_names = ("Asset ID", "Asset Name", "Asset Type", "Asset Class", "Unit Type", "Node")
+        meta_data_names = ("Asset ID", "Asset Name", "Asset Type", "Asset Class", "Unit Type", "Node", "Node_A", "Node_B")
         power_build_types = ("Existing Power", "New Build Power", "Min Build Power", "Max Build Power")
         energy_build_types = ("Existing Energy", "New Build Energy", "Min Build Energy", "Max Build Energy")
 
@@ -202,6 +199,8 @@ class Statistics:
                     asset_class,
                     getattr(asset, "unit_type", "node" if is_node else None),
                     asset.node.name if hasattr(asset, "node") else (asset.name if is_node else None),
+                    asset.node_start.name if hasattr(asset, "node_start") else None,
+                    asset.node_end.name if hasattr(asset, "node_end") else None
                 )
                 row = dict(zip(meta_data_names, meta_data))
                 row.update(self.accessor.get_all_costs(asset, errors="coerce"))
@@ -211,7 +210,7 @@ class Statistics:
                 row.update(dict(zip(energy_build_types, self.accessor.get_build_energy(asset, errors="coerce"))))
                 static_data.append(row)
 
-        df_static = pl.DataFrame(static_data)
+        df_static = pl.DataFrame(static_data, infer_schema_length=None)
 
         if not df_static.is_empty():
             sum_cols = [
@@ -228,13 +227,7 @@ class Statistics:
                 .agg([pl.col(c).fill_null(0.0).sum().alias(f"{c}_nodal") for c in sum_cols])
             )
 
-            # Join nodal aggregates back to Node rows
-            df_static = df_static.join(
-                nodal_sums,
-                left_on="Asset Name",
-                right_on="Node",
-                how="left"
-            )
+            df_static = df_static.join(nodal_sums, left_on="Asset Name", right_on="Node", how="left")
 
             override_exprs = [
                 pl.when(pl.col("Asset Class") == "nodes")
@@ -247,6 +240,18 @@ class Statistics:
             df_static = df_static.with_columns(override_exprs).drop([f"{c}_nodal" for c in sum_cols])
 
         return df_static
+
+    def _split_lines_to_nodes(self, df_lines: pl.DataFrame, split_cols: list[str]) -> pl.DataFrame:
+        """Splits line values 50/50 between start and end nodes based on static metadata."""
+        df_A = df_lines.with_columns([
+            pl.col("Node_A").alias("Node"),
+            *[(pl.col(c) / 2.0).alias(c) for c in split_cols]
+        ])
+        df_B = df_lines.with_columns([
+            pl.col("Node_B").alias("Node"),
+            *[(pl.col(c) / 2.0).alias(c) for c in split_cols]
+        ])
+        return pl.concat([df_A, df_B]).drop(["Node_A", "Node_B"])
 
     def _ensure_master_tables(self) -> None:
         """Ensures temporal Parquet side effects are written and static data is built."""
@@ -278,14 +283,17 @@ class Statistics:
             "nodal_capacity_matrix": self._view_nodal_capacity_matrix,
             "summary_ASSETS": self._view_summary_assets,
             "summary_NODES": self._view_summary_nodes,
+            "summary_UNIT_TYPES": self._view_summary_unit_types,
             "capacities_ASSETS": self._view_capacities_assets,
             "capacities_NODES": self._view_capacities_nodes,
             "capacities_UNIT_TYPES": self._view_capacities_unit_types,
             "components_ASSETS": self._view_component_costs_assets,
             "components_NODES": self._view_component_costs_nodes,
+            "components_UNIT_TYPES": self._view_component_costs_unit_types,
             "levelised_cost_ASSETS": self._view_levelised_cost_assets,
             "levelised_cost_NODES": self._view_levelised_cost_nodes,
-            "energy_balance_NETWORK": self._view_energy_balance_network,
+            "levelised_cost_UNIT_TYPES": self._view_levelised_cost_unit_types,
+            "energy_balance_SYSTEM": self._view_energy_balance_system,
             "energy_balance_NODES": self._view_energy_balance_nodes,
             # "energy_balance_ASSETS": self._view_energy_balance_assets,
         }
@@ -304,10 +312,8 @@ class Statistics:
     def write_results(self) -> None:
         if not self.statistics_generated:
             raise RuntimeError("Statistics must be generated before writing results.")
-
         for result_file in self.result_files.values():
             result_file.write()
-
         return None
 
     def _apply_standard_sort(
@@ -353,7 +359,6 @@ class Statistics:
             }).with_columns(pl.col("_var_sort").cast(pl.UInt32))
 
             lf = lf.join(mapping_lf, on="Variable", how="left").with_columns(pl.col("_var_sort").fill_null(9999))
-
             sort_by.append("_var_sort")
             drop_cols.append("_var_sort")
 
@@ -365,10 +370,8 @@ class Statistics:
 
             # Extract current schema names directly from the computation graph
             current_cols = lf.collect_schema().names()
-
             ordered_vars = [v for v in var_order if v in current_cols] + \
                            [v for v in current_cols if v not in var_order and v not in index_cols]
-
             lf = lf.select(index_cols + ordered_vars)
 
         return lf if is_lazy else lf.collect()
@@ -378,9 +381,11 @@ class Statistics:
         gwh_cols = ["Energy Capacity"]
 
         df_gen_stor = self._get_base_capacity_df(["Node", "Asset Type", "Unit Type"], gw_cols + gwh_cols)
-        df_lines = self._get_lines_capacity_df("double_counted", gw_cols, gwh_cols)
+        
+        df_lines = self.df_static.filter(pl.col("Asset Type") == "Line").select(["Asset Type", "Unit Type", "Node_A", "Node_B"] + gw_cols + gwh_cols).fill_null(0.0)
+        df_lines = self._split_lines_to_nodes(df_lines, gw_cols + gwh_cols)
 
-        df_all = pl.concat([df_gen_stor, df_lines], how="vertical")
+        df_all = pl.concat([df_gen_stor, df_lines.select(df_gen_stor.columns)], how="vertical")
 
         df_agg = df_all.group_by("Node").agg([
             pl.when(pl.col("Asset Type") == "Generator"
@@ -396,27 +401,24 @@ class Statistics:
         df_pivot = df_all.pivot(values="Power Capacity", index="Node", on="Unit Type", aggregate_function="sum").fill_null(0.0)
         df_matrix = df_agg.join(df_pivot, on="Node", how="left").fill_null(0.0)
 
-        gen_units = sorted([u for u in df_all.filter(pl.col("Asset Type") == "Generator"
-                                                     ).select("Unit Type").unique().to_series().to_list() if u])
-        stor_units = sorted([u for u in df_all.filter(pl.col("Asset Type") == "Storage"
-                                                      ).select("Unit Type").unique().to_series().to_list() if u])
-        line_units = sorted([u for u in df_all.filter(pl.col("Asset Type") == "Line"
-                                                      ).select("Unit Type").unique().to_series().to_list() if u])
+        gen_units = sorted([u for u in df_all.filter(pl.col("Asset Type") == "Generator").select("Unit Type").unique().to_series().to_list() if u])
+        stor_units = sorted([u for u in df_all.filter(pl.col("Asset Type") == "Storage").select("Unit Type").unique().to_series().to_list() if u])
+        line_units = sorted([u for u in df_all.filter(pl.col("Asset Type") == "Line").select("Unit Type").unique().to_series().to_list() if u])
 
         agg_cols = ["Generation (GW)", "Storage Power (GW)", "Storage Energy (GWh)", "Transmission (GW)"]
         ordered_cols = ["Node"] + agg_cols + gen_units + stor_units + line_units
         df_matrix = df_matrix.select(ordered_cols).sort("Node")
 
-        network_row = df_matrix.select([
-            pl.lit("Network").alias("Node"),
+        # Because lines are apportioned 50/50, summing the nodes yields the exact system total
+        system_row = df_matrix.select([
+            pl.lit("System").alias("Node"),
             pl.col("Generation (GW)").sum(),
             pl.col("Storage Power (GW)").sum(),
             pl.col("Storage Energy (GWh)").sum(),
-            (pl.col("Transmission (GW)").sum() / 2).alias("Transmission (GW)")
-        ] + [pl.col(u).sum() for u in gen_units + stor_units]
-          + [(pl.col(u).sum() / 2).alias(u) for u in line_units])
+            pl.col("Transmission (GW)").sum()
+        ] + [pl.col(u).sum() for u in gen_units + stor_units + line_units])
 
-        df_matrix = pl.concat([network_row, df_matrix], how="vertical")
+        df_matrix = pl.concat([system_row, df_matrix], how="vertical")
 
         return ResultFile("nodal_capacity_matrix", self.statistics_dir, df_matrix.lazy(), decimals=3)
 
@@ -425,17 +427,22 @@ class Statistics:
 
     def _view_capacities_nodes(self):
         return self._view_capacities(aggregation="nodes")
+        
+    def _view_capacities_unit_types(self):
+        return self._view_capacities(aggregation="unit_types")
 
     def _view_capacities(self, aggregation="assets") -> ResultFile:
         gw_cols = ["Power Capacity", "Existing Power", "New Build Power", "Min Build Power", "Max Build Power"]
         gwh_cols = ["Energy Capacity", "Existing Energy", "New Build Energy", "Min Build Energy", "Max Build Energy"]
         all_numeric = gw_cols + gwh_cols
 
+        df_lines = self.df_static.filter(pl.col("Asset Type") == "Line").select(["Asset Name", "Asset Type", "Unit Type", "Node_A", "Node_B"] + all_numeric).fill_null(0.0)
+
         if aggregation == "nodes":
             index_cols = ["Node", "Asset Type", "Unit Type"]
             df_gen_stor = self._get_base_capacity_df(index_cols, all_numeric)
-            df_lines = self._get_lines_capacity_df("double_counted", gw_cols, gwh_cols)
-            df_all = pl.concat([df_gen_stor, df_lines], how="vertical")
+            df_lines = self._split_lines_to_nodes(df_lines, all_numeric)
+            df_all = pl.concat([df_gen_stor, df_lines.select(df_gen_stor.columns)], how="vertical")
 
             agg_exprs = []
             for c in all_numeric:
@@ -454,58 +461,39 @@ class Statistics:
 
             df = df_all.group_by("Node").agg(agg_exprs)
 
-            network_exprs = [pl.lit("Network").alias("Node")]
-            for c in all_numeric:
-                unit = "(GW)" if c in gw_cols else "(GWh)"
-                tot_col = f"Total {c} {unit}"
-                if c in gw_cols:
-                    network_exprs.append((pl.col(tot_col).sum() - (pl.col(f"Transmission {c} (GW)").sum() / 2)).alias(tot_col))
-                else:
-                    network_exprs.append(pl.col(tot_col).sum().alias(tot_col))
+            # System Row using pure summation
+            system_exprs = [pl.lit("System").alias("Node")]
+            for col in df.columns:
+                if col != "Node":
+                    system_exprs.append(pl.col(col).sum().alias(col))
 
-            for c in gw_cols: network_exprs.append(pl.col(f"Generation {c} (GW)").sum().alias(f"Generation {c} (GW)"))
-            for c in all_numeric:
-                unit = "(GW)" if c in gw_cols else "(GWh)"
-                network_exprs.append(pl.col(f"Storage {c} {unit}").sum().alias(f"Storage {c} {unit}"))
-            for c in gw_cols: network_exprs.append((pl.col(f"Transmission {c} (GW)").sum() / 2).alias(f"Transmission {c} (GW)"))
-
-            network_row = df.select(network_exprs).select(df.columns)
-            df = pl.concat([network_row, df], how="vertical")
+            system_row = df.select(system_exprs)
+            df = pl.concat([system_row, df], how="vertical")
+            
+        elif aggregation == "unit_types":
+            index_cols = ["Asset Type", "Unit Type"]
+            df_gen_stor = self._get_base_capacity_df(index_cols, all_numeric)
+            df_all = pl.concat([df_gen_stor, df_lines.select(index_cols + all_numeric)], how="vertical")
+            df = df_all.group_by("Unit Type").agg([pl.col(c).sum() for c in all_numeric])
+            
         else:
             index_cols = ["Asset Name", "Asset Type", "Unit Type", "Node"]
-            df = self._get_base_capacity_df(index_cols, all_numeric)
+            df_gen_stor = self._get_base_capacity_df(index_cols, all_numeric)
+            df_lines_clean = df_lines.drop(["Node_A", "Node_B"]).with_columns(pl.lit(None).alias("Node"))
+            df = pl.concat([df_gen_stor, df_lines_clean.select(df_gen_stor.columns)], how="vertical")
 
         rename_map = None
-        if aggregation == "assets":
+        if aggregation in ("assets", "unit_types"):
             rename_map = {c: f"{c} (GW)" for c in gw_cols}
             rename_map.update({c: f"{c} (GWh)" for c in gwh_cols})
 
         return self._format_and_transpose_view(
             df,
             aggregation,
-            index_cols=["Node"] if aggregation == "nodes" else index_cols,
+            index_cols=["Node"] if aggregation == "nodes" else (["Unit Type"] if aggregation == "unit_types" else index_cols),
             header_name="Metric",
             file_name=f"capacities_{aggregation.upper()}",
             rename_mapping=rename_map,
-        )
-
-    def _view_capacities_unit_types(self) -> ResultFile:
-        gw_cols = ["Power Capacity", "Existing Power", "New Build Power", "Min Build Power", "Max Build Power"]
-        gwh_cols = ["Energy Capacity", "Existing Energy", "New Build Energy", "Min Build Energy", "Max Build Energy"]
-        all_numeric = gw_cols + gwh_cols
-
-        df_gen_stor = self._get_base_capacity_df(["Asset Type", "Unit Type"], all_numeric)
-        df_lines = self._get_lines_capacity_df("single_counted", gw_cols, gwh_cols)
-
-        df = pl.concat([df_gen_stor, df_lines], how="vertical")
-        df = df.group_by("Unit Type").agg([pl.col(c).sum() for c in all_numeric])
-
-        rename_map = {c: f"{c} (GW)" for c in gw_cols}
-        rename_map.update({c: f"{c} (GWh)" for c in gwh_cols})
-
-        return self._format_and_transpose_view(
-            df, aggregation="unit_types", index_cols=["Unit Type"],
-            header_name="Metric", file_name="capacities_UNIT_TYPES", rename_mapping=rename_map
         )
 
     def _view_component_costs_assets(self):
@@ -513,6 +501,9 @@ class Statistics:
 
     def _view_component_costs_nodes(self):
         return self._view_component_costs(aggregation="nodes")
+        
+    def _view_component_costs_unit_types(self):
+        return self._view_component_costs(aggregation="unit_types")
 
     def _view_component_costs(self, aggregation) -> ResultFile:
         cost_cols = ["Annualised Build", "Fixed O&M", "Variable O&M", "Fuel Cost"]
@@ -522,35 +513,29 @@ class Statistics:
             if c not in df_assets.columns:
                 df_assets = df_assets.with_columns(pl.lit(0.0).alias(c))
 
+        if aggregation in ("assets", "unit_types"):
+            intervals_count = self.intervals_count
+            df_temporal = pl.scan_parquet(self.temporal_file_path).filter(
+                pl.col("Variable").is_in(["Dispatch", "Flow"])
+            ).group_by(["Asset Name", "Unit Type", "Asset Type"]).agg(
+                (pl.col("Value").abs().sum() / intervals_count).alias("Mean_Power_GW")
+            ).collect()
+            
+            df_assets = df_assets.join(df_temporal, on=["Asset Name", "Unit Type", "Asset Type"], how="left").fill_null(0.0)
+
         if aggregation == "nodes":
-            # 1. Base Generation and Storage
             df_gen_stor = df_assets.filter(
                 pl.col("Asset Type").is_in(["Generator", "Storage"]) & pl.col("Node").is_not_null()
             ).select(["Node", "Asset Type", "Power Capacity"] + cost_cols).fill_null(0.0)
 
-            # 2. Extract and apportion Lines 50/50
-            line_rows = []
-            for line in self.accessor.get_assets("major_lines").values():
-                cap = self.accessor.get_power_capacity(line, errors="coerce")
-                if pd.isna(cap): cap = 0.0
+            df_lines = df_assets.filter(pl.col("Asset Type") == "Line").select(["Node_A", "Node_B", "Asset Type", "Power Capacity"] + cost_cols).fill_null(0.0)
+            df_lines = self._split_lines_to_nodes(df_lines, cost_cols + ["Power Capacity"])
 
-                costs = self.accessor.get_all_costs(line, errors="coerce")
-
-                row_base = {"Asset Type": "Line", "Power Capacity": cap / 2.0}
-                for c in cost_cols:
-                    val = costs.get(c, 0.0)
-                    row_base[c] = (0.0 if pd.isna(val) else val) / 2.0
-
-                line_rows.append({**row_base, "Node": line.node_start.name})
-                line_rows.append({**row_base, "Node": line.node_end.name})
-
-            df_lines = pl.DataFrame(line_rows, schema=df_gen_stor.schema)
-            df_all = pl.concat([df_gen_stor, df_lines], how="vertical")
+            df_all = pl.concat([df_gen_stor, df_lines.select(df_gen_stor.columns)], how="vertical")
             df_all = df_all.with_columns(pl.sum_horizontal(cost_cols).alias("Total Cost"))
 
             all_cost_cols = ["Total Cost"] + cost_cols
 
-            # 3. Build Aggregation Expressions
             agg_exprs = []
             for c in all_cost_cols:
                 agg_exprs.append(pl.col(c).sum().alias(f"Total {c}"))
@@ -565,9 +550,7 @@ class Statistics:
 
             df = df_all.group_by("Node").agg(agg_exprs).sort("Node")
 
-            # 4. Calculate Network Row (System Total)
-            # Since lines were apportioned 50/50, summing the nodes directly yields the correct system total
-            network_exprs = [pl.lit("Network").alias("Node")]
+            network_exprs = [pl.lit("System").alias("Node")]
             for col in df.columns:
                 if col != "Node":
                     network_exprs.append(pl.col(col).sum().alias(col))
@@ -575,7 +558,6 @@ class Statistics:
             network_row = df.select(network_exprs)
             df = pl.concat([network_row, df], how="vertical")
 
-            # 5. Format to M$ and $/kW/year across the duplicated blocks
             final_exprs = [pl.col("Node")]
             prefixes = ["Total", "Generation", "Storage Power", "Transmission"]
 
@@ -584,7 +566,6 @@ class Statistics:
                     base_col = f"{p} {c}"
                     cap_col = f"{p} Power Capacity"
 
-                    # Clean up the naming so "Total Total Cost" becomes just "Total Cost"
                     out_col = base_col.replace("Total Total Cost", "Total Cost")
 
                     final_exprs.append((pl.col(base_col) / 1e6).alias(f"{out_col} (M$/year)"))
@@ -600,10 +581,39 @@ class Statistics:
             return self._format_and_transpose_view(
                 df, aggregation="nodes", index_cols=["Node"], header_name="Metric", file_name="components_NODES"
             )
+            
+        elif aggregation == "unit_types":
+            index_cols = ["Unit Type"]
+            df = df_assets.select(index_cols + cost_cols + ["Power Capacity", "Mean_Power_GW"]).fill_null(0.0)
+            df = df.with_columns(pl.sum_horizontal(cost_cols).alias("Total Cost"))
+            df = df.group_by(index_cols).sum()
 
-        else:
+            all_numeric = ["Total Cost"] + cost_cols
+            df = df.with_columns([(pl.col(c) / 1e6).alias(f"{c} (M$/year)") for c in all_numeric])
+            df = df.with_columns([
+                pl.when(pl.col("Power Capacity") > 1e-6)
+                  .then(pl.col(f"{c} (M$/year)") / pl.col("Power Capacity"))
+                  .otherwise(0.0)
+                  .alias(f"{c} ($/kW/year)") for c in all_numeric
+            ])
+
+            # Calculate CF
+            df = df.with_columns(
+                pl.when(pl.col("Power Capacity") > 1e-6)
+                  .then((pl.col("Mean_Power_GW") / pl.col("Power Capacity")) * 100.0)
+                  .otherwise(0.0).alias("Capacity Factor (%)")
+            )
+
+            # Filter out non-existent assets, but retain 0-cost assets if they generated power
+            df = df.filter((pl.col("Total Cost (M$/year)") > 1e-6) | (pl.col("Capacity Factor (%)") > 1e-6)).drop(["Power Capacity", "Mean_Power_GW"])
+
+            return self._format_and_transpose_view(
+                df, aggregation, index_cols, header_name="Metric", file_name="components_UNIT_TYPES"
+            )
+
+        else:  # aggregation == "assets":
             index_cols = ["Asset Name", "Asset Type", "Unit Type", "Node"]
-            df = df_assets.select(index_cols + cost_cols + ["Power Capacity"]).fill_null(0.0)
+            df = df_assets.select(index_cols + cost_cols + ["Power Capacity", "Mean_Power_GW"]).fill_null(0.0)
             df = df.with_columns(pl.sum_horizontal(cost_cols).alias("Total Cost"))
             all_numeric = ["Total Cost"] + cost_cols
 
@@ -615,7 +625,15 @@ class Statistics:
                   .alias(f"{c} ($/kW/year)") for c in all_numeric
             ])
 
-            df = df.filter(pl.col("Total Cost (M$/year)") > 1e-6).drop("Power Capacity")
+            # Calculate CF
+            df = df.with_columns(
+                pl.when(pl.col("Power Capacity") > 1e-6)
+                  .then((pl.col("Mean_Power_GW") / pl.col("Power Capacity")) * 100.0)
+                  .otherwise(0.0).alias("Capacity Factor (%)")
+            )
+
+            # Filter out non-existent assets, but retain 0-cost assets if they generated power
+            df = df.filter((pl.col("Total Cost (M$/year)") > 1e-6) | (pl.col("Capacity Factor (%)") > 1e-6)).drop(["Power Capacity", "Mean_Power_GW"])
 
             return self._format_and_transpose_view(
                 df, aggregation, index_cols, header_name="Metric", file_name="components_ASSETS"
@@ -627,8 +645,8 @@ class Statistics:
     def _view_energy_balance_nodes(self) -> ResultFile:
         return self._view_energy_balance("nodes")
 
-    def _view_energy_balance_network(self) -> ResultFile:
-        return self._view_energy_balance("network")
+    def _view_energy_balance_system(self) -> ResultFile:
+        return self._view_energy_balance("system")
 
     def _view_energy_balance(self, aggregation: str) -> ResultFile:
         aggregation = aggregation.lower()
@@ -675,43 +693,18 @@ class Statistics:
             lf_base_n = lf_base.group_by(["Time_Step", "Node", "Variable"]).agg(pl.col("Value").sum()).with_columns(node_meta)
             lf_fuel_n = lf_fuel.group_by(["Time_Step", "Node", "Variable"]).agg(pl.col("Value").sum()).with_columns(node_meta)
 
-            # Define a strict 32-bit float zero
-            zero_f32 = pl.lit(0.0, dtype=pl.Float32)
-
-            # Positive f_val: A -> B. Node A exports (-f_val), Node B imports (+f_val * effs)
-            # Negative f_val: B -> A. Node B exports (f_val), Node A imports (-f_val * effs)
-            lf_exp_A = lf_flow.with_columns(
-                pl.col("Node_A").alias("Node"),
-                pl.lit("Net_Exports").alias("Variable"),
-                pl.when(pl.col("Value") > 0).then(-pl.col("Value")).otherwise(zero_f32).alias("Value"))
-            lf_imp_B = lf_flow.with_columns(
-                pl.col("Node_B").alias("Node"),
-                pl.lit("Net_Imports").alias("Variable"),
-                pl.when(pl.col("Value") > 0).then(pl.col("Value") * pl.col("Eff")).otherwise(zero_f32).alias("Value")
-            )
-            lf_exp_B = lf_flow.with_columns(
-                pl.col("Node_B").alias("Node"),
-                pl.lit("Net_Exports").alias("Variable"),
-                pl.when(pl.col("Value") < 0).then(pl.col("Value")).otherwise(zero_f32).alias("Value")
-            )
-            lf_imp_A = lf_flow.with_columns(
-                pl.col("Node_A").alias("Node"),
-                pl.lit("Net_Imports").alias("Variable"),
-                pl.when(pl.col("Value") < 0).then(-pl.col("Value") * pl.col("Eff")).otherwise(zero_f32).alias("Value")
-            )
-
             lf_flow_n = (
-                pl.concat([lf_exp_A, lf_imp_B, lf_exp_B, lf_imp_A])
+                self._split_directional_flows(lf_flow)
                   .group_by(["Time_Step", "Node", "Variable"])
                   .agg(pl.col("Value").sum()).with_columns(node_meta)
             )
 
             lf_main = pl.concat([lf_base_n, lf_flow_n, lf_fuel_n])
 
-        elif aggregation.lower() == "network":
-            net_meta = [pl.lit("Network").alias("Asset Name"),
-                        pl.lit("Network").alias("Asset Type"),
-                        pl.lit("Network").alias("Unit Type"),
+        elif aggregation.lower() == "system":
+            net_meta = [pl.lit("System").alias("Asset Name"),
+                        pl.lit("System").alias("Asset Type"),
+                        pl.lit("System").alias("Unit Type"),
                         pl.lit("System").alias("Node")
                         ]
 
@@ -734,7 +727,6 @@ class Statistics:
         else:
             raise ValueError(f"Unknown aggregation: {aggregation}")
 
-        # 4. Extract and Sort Column Blueprints
         lf_meta = lf_main.select(index_cols + ["Variable"]).unique()
         df_meta = self._apply_standard_sort(
             lf_meta,
@@ -747,7 +739,6 @@ class Statistics:
                           + [pl.col("Variable")], separator="|").alias("_col")
         ).collect().get_column("_col").to_list()
 
-        # 5. Pack metadata in the main dataframe and Pivot
         lf_main = lf_main.with_columns(
             pl.concat_str([pl.col(c).cast(pl.String).fill_null("None") for c in index_cols]
                           + [pl.col("Variable")], separator="|").alias("_col")
@@ -757,10 +748,9 @@ class Statistics:
             values="Value",
             index="Time_Step",
             on="_col",
-            aggregate_function="sum",  # aggregates identical assets
+            aggregate_function="sum",
         ).fill_null(0.0)
 
-        # 6. Apply strictly ordered columns and drop unneeded strings
         df_main = (
             df_main
             .select(["Time_Step"] + [c for c in df_meta if c in df_main.columns])
@@ -780,6 +770,9 @@ class Statistics:
 
     def _view_summary_nodes(self):
         return self._view_summary(aggregation="nodes")
+        
+    def _view_summary_unit_types(self):
+        return self._view_summary(aggregation="unit_types")
 
     def _view_summary(self, aggregation="assets") -> ResultFile:
         resolution = self.solution.static.resolution
@@ -798,6 +791,21 @@ class Statistics:
             lf_base_n = lf_base.group_by(["Node", "Variable"]).agg(pl.col("Value").abs().sum()).with_columns(node_meta)
             lf_flow_n = lf_flow_split.group_by(["Node", "Variable"]).agg(pl.col("Value").abs().sum()).with_columns(node_meta)
             summary_lf = pl.concat([lf_base_n, lf_flow_n])
+            
+            sys_meta = [
+                pl.lit("System").alias("Node"), 
+                pl.lit("System").alias("Asset Name"), 
+                pl.lit("System").alias("Asset Type"), 
+                pl.lit("System").alias("Unit Type")
+            ]
+            lf_sys = summary_lf.group_by(["Variable"]).agg(pl.col("Value").sum()).with_columns(sys_meta)
+            summary_lf = pl.concat([summary_lf, lf_sys.select(summary_lf.collect_schema().names())])
+            
+        elif aggregation == "unit_types":
+            index_cols = ["Unit Type"]
+            lf_flow_assets = lf_flow_split.drop(["Node_A", "Node_B", "Eff"])
+            summary_lf = pl.concat([lf_base, lf_flow_assets]).group_by(["Unit Type", "Variable"]).agg(pl.col("Value").abs().sum())
+            
         else:
             lf_flow_assets = lf_flow_split.drop(["Node_A", "Node_B", "Eff"])
             summary_lf = pl.concat([lf_base, lf_flow_assets]).group_by(index_cols + ["Variable"]).agg(pl.col("Value").abs().sum())
@@ -824,12 +832,15 @@ class Statistics:
 
     def _view_levelised_cost_assets(self):
         return self._view_levelised_cost(aggregation="assets")
+        
+    def _view_levelised_cost_unit_types(self):
+        return self._view_levelised_cost(aggregation="unit_types")
 
     def _view_levelised_cost(self, aggregation: str = "assets") -> ResultFile:
         resolution = self.solution.static.resolution
         year_count = self.solution.static.year_count
 
-        string_cols = ["Asset ID", "Asset Name", "Asset Type", "Asset Class", "Unit Type", "Node"]
+        string_cols = ["Asset ID", "Asset Name", "Asset Type", "Asset Class", "Unit Type", "Node", "Node_A", "Node_B"]
         cost_cols = ["Annualised Build", "Fixed O&M", "Variable O&M", "Fuel Cost"]
 
         lf_all = pl.scan_parquet(self.temporal_file_path)
@@ -852,7 +863,6 @@ class Statistics:
             .fill_null(pl.lit(0.0))
         )
 
-        # Native Polars dataframe integration
         df_costs = self.df_static
         for c in cost_cols:
             if c not in df_costs.columns:
@@ -862,10 +872,8 @@ class Statistics:
             (pl.col(c) / 1e6).alias(f"{c} [M$/yr]") for c in cost_cols
         ]).select(string_cols + [f"{c} [M$/yr]" for c in cost_cols])
 
-        # Missing initialization restored here:
         df_merged = df_costs.join(df_totals, on=["Asset Name", "Unit Type"], how="left").fill_null(0.0)
 
-        # Ensure required temporal columns exist before mapping
         for v in ["Dispatch", "Inflows", "Curtailment", "Flow"]:
             if v not in df_merged.columns:
                 df_merged = df_merged.with_columns(pl.lit(0.0).alias(v))
@@ -889,7 +897,7 @@ class Statistics:
         df_merged = df_merged.with_columns(pl.sum_horizontal(mapped_costs).alias("Total Cost [M$/yr]"))
 
         def calc_lco(cost_col, energy_col):
-            # Helper to calculate Levelised Cost ($/MWh = M$ * 1000 / GWh)
+            """Helper to calculate Levelised Cost ($/MWh = M$ * 1000 / GWh)"""
             return (
                 pl.when(pl.col(energy_col) > 1e-6)
                   .then((pl.col(cost_col) * year_count * 1000) / pl.col(energy_col))
@@ -906,8 +914,8 @@ class Statistics:
         cols_to_sum = mapped_costs + ["Generation [GWh]", "Storage [GWh]", "Transmission [GWh]",
                                       "Curtailment [GWh]", "Total Cost [M$/yr]"]
 
-        # Base math logic for weighted averages
         def weighted_lco(lco_col, energy_col):
+            """Base math logic for weighted averages"""
             total_weighted_cost = (pl.col(lco_col) * pl.col(energy_col)).sum()
             total_energy = pl.col(energy_col).sum()
             return (total_weighted_cost / total_energy).fill_nan(0.0)
@@ -915,66 +923,71 @@ class Statistics:
         df_lines = df_merged.filter(pl.col("Asset Class").str.to_lowercase() == "major_lines")
         df_base = df_merged.filter(pl.col("Asset Class").str.to_lowercase() != "major_lines")
 
-        df_lines_A = df_lines.with_columns([
-            pl.col("Asset Name").str.split("-").list.get(0).alias("Node"),
-            *[(pl.col(c) / 2.0).alias(c) for c in cols_to_sum]
-        ])
-
-        df_lines_B = df_lines.with_columns([
-            pl.col("Asset Name").str.split("-").list.get(1).alias("Node"),
-            *[(pl.col(c) / 2.0).alias(c) for c in cols_to_sum]
-        ])
-
-        df_nodal_pool = pl.concat([df_base, df_lines_A, df_lines_B])
-
-        df_nodes = (
-            df_nodal_pool.filter(pl.col("Node").is_not_null()
-                                 & (pl.col("Node").str.to_lowercase() != "system")
-                                 & (pl.col("Node").str.to_lowercase() != "network"))
-            .group_by("Node").agg([
-                pl.sum(c) for c in cols_to_sum
-            ] + [
-                weighted_lco("LCOG [$/MWh]", "Generation [GWh]").alias("LCOG [$/MWh]"),
-                weighted_lco("LCOS [$/MWh]", "Storage [GWh]").alias("LCOS [$/MWh]"),
-                weighted_lco("LCOT [$/MWh]", "Transmission [GWh]").alias("LCOT [$/MWh]"),
-            ]).with_columns([
-                pl.col("Node").alias("Asset Name"), pl.lit("Node").alias("Asset Type"), pl.lit("Node").alias("Unit Type")
-            ])
-        )
-
-        df_nodes = df_nodes.join(df_nodal_demand, on="Node", how="left").fill_null(0.0)
-        df_nodes = df_nodes.with_columns([
-            pl.when(pl.col("Nodal_Demand_MWh") > 1e-6)
-              .then((pl.col("Total Cost [M$/yr]") * 1e6 * year_count) / pl.col("Nodal_Demand_MWh"))
-              .otherwise(0.0).alias("LCOE [$/MWh]")
-        ]).drop("Nodal_Demand_MWh")
-
-        sys_lcoe = (pl.col("Total Cost [M$/yr]").sum() * 1e6 * year_count / total_demand_mwh)
-
-        df_system = (
-            df_merged.select([
-                pl.sum(c) for c in cols_to_sum
-            ] + [
-                weighted_lco("LCOG [$/MWh]", "Generation [GWh]").alias("LCOG [$/MWh]"),
-                weighted_lco("LCOS [$/MWh]", "Storage [GWh]").alias("LCOS [$/MWh]"),
-                weighted_lco("LCOT [$/MWh]", "Transmission [GWh]").alias("LCOT [$/MWh]")
-            ]).with_columns([
-                pl.lit("System").alias("Asset Name"), pl.lit("System").alias("Asset Type"),
-                pl.lit("System").alias("Unit Type"), pl.lit("System").alias("Node"),
-                sys_lcoe.alias("LCOE [$/MWh]")
-            ])
-        )
-
-        df_assets = df_merged.filter(pl.col("Asset Class").str.to_lowercase() != "nodes")
-
         keep_cols = ["Asset Name", "Asset Type", "Unit Type", "Node", "Total Cost [M$/yr]"] + mapped_costs + [
             "Generation [GWh]", "Storage [GWh]", "Transmission [GWh]", "Curtailment [GWh]",
             "LCOG [$/MWh]", "LCOS [$/MWh]", "LCOT [$/MWh]", "LCOE [$/MWh]"
         ]
 
         if aggregation == "nodes":
+            df_lines_split = self._split_lines_to_nodes(df_lines, cols_to_sum)
+            df_base_clean = df_base.drop(["Node_A", "Node_B"])
+            df_nodal_pool = pl.concat([df_base_clean, df_lines_split.select(df_base_clean.columns)], how="vertical")
+
+            df_nodes = (
+                df_nodal_pool.filter(pl.col("Node").is_not_null()
+                                     & (pl.col("Node").str.to_lowercase() != "system"))
+                .group_by("Node").agg([
+                    pl.sum(c) for c in cols_to_sum
+                ] + [
+                    weighted_lco("LCOG [$/MWh]", "Generation [GWh]").alias("LCOG [$/MWh]"),
+                    weighted_lco("LCOS [$/MWh]", "Storage [GWh]").alias("LCOS [$/MWh]"),
+                    weighted_lco("LCOT [$/MWh]", "Transmission [GWh]").alias("LCOT [$/MWh]"),
+                ]).with_columns([
+                    pl.col("Node").alias("Asset Name"), pl.lit("Node").alias("Asset Type"), pl.lit("Node").alias("Unit Type")
+                ])
+            )
+
+            df_nodes = df_nodes.join(df_nodal_demand, on="Node", how="left").fill_null(0.0)
+            df_nodes = df_nodes.with_columns([
+                pl.when(pl.col("Nodal_Demand_MWh") > 1e-6)
+                  .then((pl.col("Total Cost [M$/yr]") * 1e6 * year_count) / pl.col("Nodal_Demand_MWh"))
+                  .otherwise(0.0).alias("LCOE [$/MWh]")
+            ]).drop("Nodal_Demand_MWh")
+
+            sys_lcoe = (pl.col("Total Cost [M$/yr]").sum() * 1e6 * year_count / total_demand_mwh)
+
+            df_system = (
+                df_merged.select([
+                    pl.sum(c) for c in cols_to_sum
+                ] + [
+                    weighted_lco("LCOG [$/MWh]", "Generation [GWh]").alias("LCOG [$/MWh]"),
+                    weighted_lco("LCOS [$/MWh]", "Storage [GWh]").alias("LCOS [$/MWh]"),
+                    weighted_lco("LCOT [$/MWh]", "Transmission [GWh]").alias("LCOT [$/MWh]")
+                ]).with_columns([
+                    pl.lit("System").alias("Asset Name"), pl.lit("System").alias("Asset Type"),
+                    pl.lit("System").alias("Unit Type"), pl.lit("System").alias("Node"),
+                    sys_lcoe.alias("LCOE [$/MWh]")
+                ])
+            )
             df_final = pl.concat([df_system.select(keep_cols), df_nodes.select(keep_cols)], how="vertical")
+            
+        elif aggregation == "unit_types":
+            df_unit_types = (
+                df_merged.filter(pl.col("Unit Type").is_not_null())
+                .group_by("Unit Type").agg([
+                    pl.sum(c) for c in cols_to_sum
+                ] + [
+                    weighted_lco("LCOG [$/MWh]", "Generation [GWh]").alias("LCOG [$/MWh]"),
+                    weighted_lco("LCOS [$/MWh]", "Storage [GWh]").alias("LCOS [$/MWh]"),
+                    weighted_lco("LCOT [$/MWh]", "Transmission [GWh]").alias("LCOT [$/MWh]"),
+                ]).with_columns([
+                    pl.col("Unit Type").alias("Asset Name"), pl.lit("Unit Type").alias("Asset Type"), pl.lit("System").alias("Node"), pl.lit(0.0).alias("LCOE [$/MWh]")
+                ])
+            )
+            df_final = df_unit_types.select(keep_cols)
+            
         else:
+            df_assets = df_merged.filter(pl.col("Asset Class").str.to_lowercase() != "nodes")
             df_final = df_assets.select(keep_cols)
 
         index_cols = ["Asset Name", "Asset Type", "Unit Type", "Node"]
@@ -994,54 +1007,14 @@ class Statistics:
         )
 
     def _get_base_capacity_df(self, index_cols: list[str], numeric_cols: list[str]) -> pl.DataFrame:
-        """Extracts Generator and Storage assets for capacity aggregations."""
         df_base = self.df_static.filter(pl.col("Asset Type").is_in(["Generator", "Storage"]))
-
         if "Node" in index_cols:
             df_base = df_base.filter(pl.col("Node").is_not_null())
 
         df_base = df_base.select(index_cols + numeric_cols).fill_null(0.0)
-        return df_base.with_columns([pl.col(c).cast(pl.Float64) for c in numeric_cols])
-
-    def _get_lines_capacity_df(
-        self,
-        mode: str,
-        gw_cols: list[str],
-        gwh_cols: list[str]
-    ) -> pl.DataFrame:
-        """Extracts transmission lines and formats them for single or double-counted capacity aggregation."""
-        line_rows = []
-        for line in self.accessor.get_assets("major_lines").values():
-            base_p = self.accessor.get_power_capacity(line, errors="coerce")
-            b_limits = self.accessor.get_build_power(line, errors="coerce")
-            vals = [0.0 if pd.isna(x) else x for x in [base_p] + list(b_limits)]
-
-            row = {"Asset Type": "Line", "Unit Type": getattr(line, "unit_type", "transmission")}
-            for col, val in zip(gw_cols, vals):
-                row[col] = val
-            for col in gwh_cols:
-                row[col] = 0.0
-
-            if mode == "double_counted":
-                line_rows.append({**row, "Node": line.node_start.name})
-                line_rows.append({**row, "Node": line.node_end.name})
-            elif mode == "single_counted":
-                line_rows.append(row)
-
-        schema = {}
-        if mode == "double_counted":
-            schema["Node"] = pl.String
-
-        schema["Asset Type"] = pl.String
-        schema["Unit Type"] = pl.String
-
-        for c in gw_cols + gwh_cols:
-            schema[c] = pl.Float64
-
-        return pl.DataFrame(line_rows, schema=schema)
+        return df_base
 
     def _get_lines_flow_lf(self) -> pl.LazyFrame:
-        """Extracts metadata for transmission lines to join with temporal flow traces."""
         line_data = []
         for a in self.accessor.get_assets('major_lines').values():
             line_data.append({
@@ -1054,7 +1027,6 @@ class Statistics:
         return pl.LazyFrame(line_data, schema_overrides={"Eff": pl.Float32})
 
     def _split_directional_flows(self, lf_flow: pl.LazyFrame) -> pl.LazyFrame:
-        """Splits bidirectional line flows into stacked Net_Imports and Net_Exports."""
         zero_f32 = pl.lit(0.0, dtype=pl.Float32)
         lf_exp_A = lf_flow.with_columns(
             pl.col("Node_A").alias("Node"), pl.lit("Net_Exports").alias("Variable"),
@@ -1084,7 +1056,6 @@ class Statistics:
         sort_variable_columns: bool = False,
         rename_mapping: dict = None,
     ) -> ResultFile:
-        """Centralized formatter for sorting, unit renaming, string-concatenation, and transposing final views."""
         if aggregation == "assets":
             df = self._apply_standard_sort(df, index_cols=index_cols, sort_variable_columns=sort_variable_columns)
             df = df.with_columns(
@@ -1092,7 +1063,7 @@ class Statistics:
             ).drop(index_cols)
             col_names = "_col_string"
         elif aggregation == "nodes":
-            df = df.with_columns(pl.col("Node").cast(pl.String).fill_null("Network")).sort("Node")
+            df = df.with_columns(pl.col("Node").cast(pl.String).fill_null("System")).sort("Node")
             col_names = "Node"
         elif aggregation == "unit_types":
             df = df.sort("Unit Type")
@@ -1104,7 +1075,6 @@ class Statistics:
             df = df.rename(rename_mapping)
 
         df = df.transpose(include_header=True, header_name=header_name, column_names=col_names)
-
         return ResultFile(file_name, self.statistics_dir, df.lazy(), decimals=3, write_kwargs={"multiindex_delimiter": "|"})
 
     def generate_x_abs_file(self) -> ResultFile:

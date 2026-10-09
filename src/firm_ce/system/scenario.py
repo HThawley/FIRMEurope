@@ -559,7 +559,6 @@ class Scenario:
             EvaluateTensor(solutionTensor)
             prep_solution_for_postprocessing(solutionTensor)
             solution = map_tensor_to_scalar(self, solutionTensor)
-            solution = solution
 
         elif self.config.backend == "scalar":
             from firm_ce.backend.scalar.solution import Solution, evaluate
@@ -575,7 +574,6 @@ class Scenario:
             )
             evaluate(solution)
             solutionTensor = None
-            solution = solution
         else:
             raise ValueError(f"Unknown config.backend. Got: '{self.config.backend}'")
         if retain:
