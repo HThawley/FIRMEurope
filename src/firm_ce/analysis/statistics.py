@@ -132,7 +132,7 @@ class Statistics:
                 ("Dispatch", "power", None),
             ],
             "storages": [
-                ("Dispatch", "power", None),
+                ("Dispatch", "dispatch", None),
                 ("Stored_Energy", "storage_level", None),
                 ("Charge", "charge", None),
                 ("Discharge", "discharge", None),
