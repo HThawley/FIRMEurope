@@ -62,7 +62,7 @@ def build_capacity(
 
     # if parameterisation == "relative", then new_build_x_val is a relative value and must be scaled
     # otherwise, it is an absolute value and .relative_scaler == 1.0
-    new_build_power_capacity = new_build_x_val * generator_instance.relative_scaler
+    new_build_power_capacity = new_build_x_val * generator_instance.node.relative_scaler
 
     generator_instance.capacity += new_build_power_capacity
     generator_instance.new_build += new_build_power_capacity

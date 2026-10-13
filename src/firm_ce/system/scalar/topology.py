@@ -28,6 +28,7 @@ if JIT_ENABLED:
         ("name", unicode_type),
         ("data_status", boolean),
         ("mean_demand", nbfloat),
+        ("relative_scaler", nbfloat),
         ("internal_loss", nbfloat),
         ("data", nbfloat[:]),
         ("residual_load", nbfloat[:]),
@@ -146,6 +147,7 @@ class Node:
         self.data_status = False
         self.data = np.empty((0,), dtype=npfloat)
         self.mean_demand = 0.0
+        self.relative_scaler = 1.0
         self.internal_loss = internal_loss
 
         self.residual_load = np.empty((0,), dtype=npfloat)

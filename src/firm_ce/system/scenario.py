@@ -218,16 +218,8 @@ class Scenario:
 
     def set_relative_scalers(self) -> None:
         if self.config.parameterisation == "relative":
-            for gen in self.fleet.generators.values():
-                idx = gen.candidate_x_idx
-                if idx != -1:
-                    gen.relative_scaler = self.abs_rel_scaler[idx]
-
-            for sto in self.fleet.storages.values():
-                idx_p = sto.candidate_p_x_idx
-                if idx_p != -1:
-                    sto.relative_scaler = self.abs_rel_scaler[idx_p]
-                # energy uses the same scaler
+            for node in self.network.nodes.values():
+                node.relative_scaler = node.mean_demand
 
             for line in self.network.major_lines.values():
                 idx = line.candidate_x_idx
@@ -235,15 +227,10 @@ class Scenario:
                     line.relative_scaler = self.abs_rel_scaler[idx]
 
         elif self.config.parameterisation == "absolute":
-            for gen in self.fleet.generators.values():
-                idx = gen.candidate_x_idx
-                if idx != -1:
-                    gen.relative_scaler = 1.0
+            for node in self.network.nodes.values():
+                node.relative_scaler = 1.0
 
             for sto in self.fleet.storages.values():
-                idx_p = sto.candidate_p_x_idx
-                if idx_p != -1:
-                    sto.relative_scaler_p = 1.0
                 sto.relative_energy = False
 
             for line in self.network.major_lines.values():

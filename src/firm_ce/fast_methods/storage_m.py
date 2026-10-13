@@ -67,7 +67,7 @@ def build_capacity(
     if storage_instance.static_instance:
         raise_static_modification_error()
     if capacity_type == "power":
-        new_build_capacity = x_val_capacity * storage_instance.relative_scaler
+        new_build_capacity = x_val_capacity * storage_instance.node.relative_scaler
 
         storage_instance.power_capacity += new_build_capacity
         storage_instance.new_build_p += new_build_capacity
@@ -79,7 +79,7 @@ def build_capacity(
             storage_instance.new_build_e += new_build_capacity * storage_instance.duration
 
     if capacity_type == "energy" and storage_instance.duration == 0:
-        new_build_capacity = x_val_capacity * storage_instance.relative_scaler
+        new_build_capacity = x_val_capacity * storage_instance.node.relative_scaler
         storage_instance.energy_capacity += new_build_capacity
         storage_instance.new_build_e += new_build_capacity
     return None
