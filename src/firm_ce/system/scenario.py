@@ -447,8 +447,34 @@ class Scenario:
     def assign_unit_type_idx(self) -> None:
         """
         Calculates exact memory requirements for operational data and assigns
-        1D array offsets to each asset based on its unit type.
+        1D array offsets to each asset/unit_type based on the active backend.
         """
+        backend = getattr(self.config, "backend", "scalar").lower()
+
+        if backend == "tensor":
+            # Canonical unit_type names matching the tensor details layout
+            tensor_unit_types = [
+                "nuclear",
+                "nuclear_lte",
+                "nphes",
+                "biomass",
+                "biogas",
+                "ccgt",
+                # -- Zero-VOM technologies in current model --
+                # "pv_fixed",
+                # "pv_track",
+                # "offw",
+                # "onsw",
+                # "bess4h",
+                # "bess2h",
+                # "lines",
+            ]
+            # Reserve 0 for lcoe, 1 for penalties
+            self.unit_type_idx = {ut: idx for idx, ut in enumerate(tensor_unit_types, start=2)}
+            self.details_length = 2 + len(tensor_unit_types)
+            return
+
+        # --- Scalar Backend ---
         # Extract unique types deterministically
         gen_types = sorted(list(set(g.unit_type for g in self.fleet.generators.values())))
         sto_types = sorted(list(set(s.unit_type for s in self.fleet.storages.values())))
@@ -477,7 +503,7 @@ class Scenario:
 
         self.details_length = current_idx
 
-        # Assign to instances
+        # Assign to scalar jitclass instances
         for g in self.fleet.generators.values():
             g.unit_type_idx = self.unit_type_idx[g.unit_type]
         for s in self.fleet.storages.values():

@@ -30,6 +30,83 @@ from firm_ce.backend.scalar.broad_optimum import (
 )
 
 
+def convert_binary_logs_to_csv(
+    out_dir: str,
+    pop_cols: Optional[int] = None,
+    details_cols: Optional[int] = None,
+    chunk_rows: int = 50_000,
+    dtype=npfloat,
+) -> None:
+    """
+    Converts binary optimisation logs (`population.bin`, `latest_population.npy`,
+    `details.bin`, `latest_details.npy`) in `out_dir` to `.csv` files for downstream
+    processes.
+
+    Can be called automatically at the end of `evaluate()` or manually from a script/REPL
+    if an optimisation was terminated early. If `pop_cols` or `details_cols` are not
+    provided, they are inferred automatically from `latest_population.npy` /
+    `latest_details.npy` or `mhmga_config.json`.
+    """
+    dtype = np.dtype(dtype)
+
+    # 1. Convert latest_*.npy snapshots first & infer column counts if needed
+    latest_pop_npy = os.path.join(out_dir, "latest_population.npy")
+    if os.path.exists(latest_pop_npy):
+        arr = np.load(latest_pop_npy)
+        if pop_cols is None:
+            pop_cols = arr.shape[1]
+        np.savetxt(os.path.join(out_dir, "latest_population.csv"), arr, delimiter=",", fmt="%.7g")
+
+    latest_det_npy = os.path.join(out_dir, "latest_details.npy")
+    if os.path.exists(latest_det_npy):
+        arr = np.load(latest_det_npy)
+        if details_cols is None:
+            details_cols = arr.shape[1]
+        np.savetxt(os.path.join(out_dir, "latest_details.csv"), arr, delimiter=",", fmt="%.7g")
+
+    # Fallback column inference from mhmga_config.json if latest_*.npy wasn't written yet
+    config_json = os.path.join(out_dir, "mhmga_config.json")
+    if (pop_cols is None or details_cols is None) and os.path.exists(config_json):
+        with open(config_json, "r") as f:
+            meta = json.load(f)
+        if pop_cols is None and "pop_cols" in meta:
+            pop_cols = meta["pop_cols"]
+        elif pop_cols is None and "ndim" in meta:
+            pop_cols = meta["ndim"] + 3
+        if details_cols is None and "details_cols" in meta:
+            details_cols = meta["details_cols"]
+
+    # 2. Stream-convert append-only .bin files using memmap in chunks
+    def _stream_bin_to_csv(bin_path: str, csv_path: str, n_cols: Optional[int]) -> None:
+        if not os.path.exists(bin_path) or os.path.getsize(bin_path) == 0:
+            return
+        if n_cols is None:
+            raise ValueError(
+                f"Cannot infer column count for '{bin_path}'. Please pass `pop_cols` / `details_cols` explicitly."
+            )
+        total_floats = os.path.getsize(bin_path) // dtype.itemsize
+        n_rows = total_floats // n_cols
+        if n_rows == 0:
+            return
+
+        mmap_arr = np.memmap(bin_path, dtype=dtype, mode="r", shape=(n_rows, n_cols))
+        with open(csv_path, "w", newline="") as f_csv:
+            for start in range(0, n_rows, chunk_rows):
+                end = min(start + chunk_rows, n_rows)
+                np.savetxt(f_csv, mmap_arr[start:end], delimiter=",", fmt="%.7g")
+
+    _stream_bin_to_csv(
+        os.path.join(out_dir, "population.bin"),
+        os.path.join(out_dir, "population.csv"),
+        pop_cols,
+    )
+    _stream_bin_to_csv(
+        os.path.join(out_dir, "details.bin"),
+        os.path.join(out_dir, "details.csv"),
+        details_cols,
+    )
+
+
 class BaseSolver(ABC):
     """Abstract base class for all optimisation strategies"""
 
@@ -56,15 +133,14 @@ class BaseSolver(ABC):
         os.makedirs(out_dir, exist_ok=True)
 
         if not self.config.restart_optimisation:
-            files = ["callback"]
-            if SAVE_POPULATION:
-                files.extend(["latest_population", "population"])
-                if self.config.save_details:
-                    files.extend(["latest_details", "details"])
+            with open(os.path.join(out_dir, "callback.csv"), "w", newline="") as csvfile:
+                csv.writer(csvfile)
 
-            for file in files:
-                with open(os.path.join(out_dir, f"{file}.csv"), "w", newline="") as csvfile:
-                    csv.writer(csvfile)
+            if SAVE_POPULATION:
+                # Truncate binary append files
+                open(os.path.join(out_dir, "population.bin"), "wb").close()
+                if getattr(self.config, "save_details", False):
+                    open(os.path.join(out_dir, "details.bin"), "wb").close()
 
 
 class DeSolverBase(BaseSolver):
@@ -83,17 +159,14 @@ class DeSolverBase(BaseSolver):
             writer.writerow([intermediate_result.fun, "", *intermediate_result.x])
 
         if SAVE_POPULATION:
-            combined_block = np.column_stack((intermediate_result.population,
-                                              intermediate_result.population_energies))
+            combined_block = np.column_stack((
+                intermediate_result.population,
+                intermediate_result.population_energies,
+            )).astype(npfloat, copy=False)
 
-            with open(os.path.join(out_dir, "population.csv"), "a", newline="") as f_all, \
-                 open(os.path.join(out_dir, "latest_population.csv"), "w", newline="") as f_latest:
-
-                writer_all = csv.writer(f_all)
-                writer_latest = csv.writer(f_latest)
-
-                writer_all.writerows(combined_block)
-                writer_latest.writerows(combined_block)
+            with open(os.path.join(out_dir, "population.bin"), "ab") as f_all:
+                combined_block.tofile(f_all)
+            np.save(os.path.join(out_dir, "latest_population.npy"), combined_block)
 
     def run_differential_evolution(self, objective_function, fargs) -> OptimizeResult:
         result = differential_evolution(
@@ -128,6 +201,11 @@ class SingleTimeSolver(DeSolverBase):
         self.scenario.logger.info("[Single Time] Starting evaluation")
         self.initialise_callback()
         self.run_differential_evolution(self.objective_function, self.fargs)
+        if SAVE_POPULATION:
+            convert_binary_logs_to_csv(
+                self.scenario.solution_dir,
+                pop_cols=len(self.scenario.lower_bounds) + 1,
+            )
         self.scenario.logger.info("[Single Time] Optimisation complete")
         return None
 
@@ -279,7 +357,6 @@ class MhmgaSolverBase(BaseSolver):
         mhmga_config = {}
         for key, value in self.config.__dict__.items():
             if key.startswith("mga_"):
-                # Convert numpy arrays to lists for JSON serialization
                 if isinstance(value, np.ndarray):
                     mhmga_config[key] = value.tolist()
                 else:
@@ -287,14 +364,55 @@ class MhmgaSolverBase(BaseSolver):
 
         mhmga_config["parameterisation"] = self.config.parameterisation
 
-        # Inject structural data possibly relevant for loading populations later
-        mhmga_config["ndim"] = len(self.scenario.lower_bounds)
+        ndim = len(self.scenario.lower_bounds)
+        mhmga_config["ndim"] = ndim
+        mhmga_config["pop_cols"] = ndim + 3
+        if getattr(self.config, "save_details", False):
+            mhmga_config["details_cols"] = int(self.details.shape[-1])
         mhmga_config["lower_bounds"] = self.scenario.lower_bounds.tolist()
         mhmga_config["upper_bounds"] = self.scenario.upper_bounds.tolist()
         mhmga_config["unit_type_idxs"] = self.scenario.unit_type_idx
 
         with open(summary_path, "w") as f:
             json.dump(mhmga_config, f, indent=4)
+
+    def _log_population_and_details(self, population: Population) -> None:
+        """Fast binary logging of population and details arrays."""
+        out_dir = self.scenario.solution_dir
+
+        obj_flat = population.raw_objectives.reshape(-1)
+        viol_flat = population.violations.reshape(-1)
+        fit_flat = population.fitnesses.reshape(-1)
+        pts_flat = population.points.reshape(-1, population.points.shape[-1])
+
+        # Shape: (total_pop, 3 + ndim), cast to npfloat (float32)
+        combined_block = np.column_stack((obj_flat, viol_flat, fit_flat, pts_flat)).astype(npfloat, copy=False)
+
+        with open(os.path.join(out_dir, "population.bin"), "ab") as f_all:
+            combined_block.tofile(f_all)
+        np.save(os.path.join(out_dir, "latest_population.npy"), combined_block)
+
+        if getattr(self.config, "save_details", False):
+            num_niches, pop_size, _ = population.points.shape
+            details_flat = np.ascontiguousarray(
+                self.details[:num_niches, :pop_size].reshape(num_niches * pop_size, -1),
+                dtype=npfloat,
+            )
+            with open(os.path.join(out_dir, "details.bin"), "ab") as f_all:
+                details_flat.tofile(f_all)
+            np.save(os.path.join(out_dir, "latest_details.npy"), details_flat)
+
+    def _finalise_csv_logs(self) -> None:
+        """Converts binary logs to .csv at the end of an MHMGA run."""
+        if SAVE_POPULATION:
+            pop_cols = len(self.scenario.lower_bounds) + 3
+            details_cols = int(self.details.shape[-1]) if getattr(self.config, "save_details", False) else None
+            convert_binary_logs_to_csv(
+                self.scenario.solution_dir,
+                pop_cols=pop_cols,
+                details_cols=details_cols,
+                dtype=npfloat,
+            )
 
     def get_approximate_jacobian(self) -> NDArray[np.float64]:
         """Calculates approximate dC/dx for all assets in the x vector."""
@@ -371,12 +489,6 @@ class MhmgaSolverBase(BaseSolver):
         Used for hyperparameter tuning.
         """
         self.scenario.logger.info("[MHMGA] Initialising MGA algorithm for recombination inspection.")
-        # jacobian = self.get_approximate_jacobian()
-
-        # jacobian = abs(jacobian)
-        # with open("results/temp/jacobian.csv", "w") as f:
-        #     writer = csv.writer(f)
-        #     writer.writerow(jacobian)
 
         algorithm = self.instantiate_algorithm(log_path=None, init_callback=False)
         algorithm.add_niches(num_niches=1)
@@ -396,7 +508,6 @@ class MhmgaSolverBase(BaseSolver):
             noptimal_rel=self.config.mga_noptimal_rel[0],
             noptimal_abs=self.config.mga_noptimal_abs[0],
             violation_factor=PENALTY_MULTIPLIER,
-            # mutation_scaler=np.abs(jacobian),
             mutation_scaler='bounds',
             objective_scaler=1.0,
         )
@@ -440,19 +551,24 @@ class MhmgaSolver(MhmgaSolverBase):
             else:
                 pop_dir = self.scenario.solution_dir
 
-            import pandas as pd
             ndim = len(self.scenario.lower_bounds)
-            if not os.path.exists(os.path.join(pop_dir, "latest_population.csv")):
+            npy_path = os.path.join(pop_dir, "latest_population.npy")
+            csv_path = os.path.join(pop_dir, "latest_population.csv")
+
+            if os.path.exists(npy_path):
+                previous = np.load(npy_path)[:, 3:ndim + 3].astype(float)
+            elif os.path.exists(csv_path):
+                previous = pd.read_csv(
+                    csv_path,
+                    header=None,
+                    dtype=float,
+                    usecols=range(3, ndim + 3),
+                ).to_numpy()
+            else:
                 raise FileNotFoundError(
-                    f"No population file found for restarting. Expected at {os.path.join(pop_dir, 'latest_population.csv')}"
+                    f"No population file found for restarting. Expected at {npy_path} or {csv_path}"
                 )
 
-            previous = pd.read_csv(
-                os.path.join(pop_dir, "latest_population.csv"),
-                header=None,
-                dtype=float,
-                usecols=range(3, ndim+3)
-            ).to_numpy()
             num_niches = self.config.mga_start_niches + self.config.mga_new_niches[0]
             previous = previous.reshape(num_niches, self.config.mga_pop_size[0], ndim)
             x0 = previous[0]
@@ -484,7 +600,7 @@ class MhmgaSolver(MhmgaSolverBase):
         algorithm.starting_points = previous
 
         if init_callback:
-            # callback inited after "results/temp/latest_population.csv" is loaded (if restarting from temp)
+            # callback inited after latest_population is loaded (if restarting from temp)
             self.initialise_callback()
 
         return algorithm
@@ -530,42 +646,11 @@ class MhmgaSolver(MhmgaSolverBase):
             ])
 
         if SAVE_POPULATION:
-            # Vectorized flattening: reshape(-1) turns (num_niches, pop_size) into (total_pop,)
-            # reshape(-1, ndim) turns (num_niches, pop_size, ndim) into (total_pop, ndim)
-            obj_flat = population.raw_objectives.reshape(-1)
-            viol_flat = population.violations.reshape(-1)
-            fit_flat = population.fitnesses.reshape(-1)
-            pts_flat = population.points.reshape(-1, population.points.shape[-1])
-
-            # Combine everything into one matrix: [Obj, Viol, Fit, X0, X1, ...]
-            # Shape: (total_pop, 3 + ndim)
-            combined_block = np.column_stack((obj_flat, viol_flat, fit_flat, pts_flat))
-
-            with open(os.path.join(out_dir, "population.csv"), "a", newline="") as f_all, \
-                 open(os.path.join(out_dir, "latest_population.csv"), "w", newline="") as f_latest:
-
-                writer_all = csv.writer(f_all)
-                writer_latest = csv.writer(f_latest)
-
-                writer_all.writerows(combined_block)
-                writer_latest.writerows(combined_block)
-
-            num_niches, pop_size, ndim = population.points.shape
-
-            if self.config.save_details:
-                details_flat = self.details[:num_niches, :pop_size].reshape(num_niches * pop_size, -1)
-                with open(os.path.join(out_dir, "details.csv"), "a", newline="") as f_all, \
-                     open(os.path.join(out_dir, "latest_details.csv"), "w", newline="") as f_latest:
-                    writer_all = csv.writer(f_all)
-                    writer_latest = csv.writer(f_latest)
-
-                    writer_all.writerows(details_flat)
-                    writer_latest.writerows(details_flat)
+            self._log_population_and_details(population)
 
     def evaluate(self) -> None:
         self.scenario.logger.info("[MHMGA] Initialising MGA algorithm.")
 
-        # jacobian = self.get_approximate_jacobian()
         path_name = os.path.join(self.mga_log_dir, "mga")
 
         self._write_mhmga_config_summary()
@@ -614,8 +699,10 @@ class MhmgaSolver(MhmgaSolverBase):
             results = algorithm.get_results()
             self.save_results(results)
 
-            self.scenario.logger.info("[MHMGA] MGA complete. Results saved.")
+            self.scenario.logger.info("[MHMGA] MGA step complete. Results saved.")
 
+        self._finalise_csv_logs()
+        self.scenario.logger.info("[MHMGA] Binary logs converted to CSV.")
         self.result = algorithm.population.optima_points[0]
 
 
@@ -645,7 +732,7 @@ class MhmgaExtremaSolver(MhmgaSolverBase):
             log_freq=self.config.mga_log_freq,
             random_seed=None,
             parallelize=False,  # we implement parallelisation independently
-            callback=self.mga_extrema_callback,
+            callback=self.callback,
             include_obj_in_fitness=True,
         )
 
@@ -656,22 +743,23 @@ class MhmgaExtremaSolver(MhmgaSolverBase):
         return algorithm
 
     def find_starting_points_in_population(self, weighting):
-        # from firm_ce.optimisation.mhmga_extrema import apply_new_weighting
+        pop_bin_path = os.path.join(self.scenario.solution_dir, "population.bin")
+        pop_csv_path = os.path.join(self.scenario.solution_dir, "population.csv")
+        det_bin_path = os.path.join(self.scenario.solution_dir, "details.bin")
+        det_csv_path = os.path.join(self.scenario.solution_dir, "details.csv")
 
-        pop_path = os.path.join(self.scenario.solution_dir, "population.csv")
-        det_path = os.path.join(self.scenario.solution_dir, "details.csv")
-        pop_exists = os.path.exists(pop_path)
-        det_exists = os.path.exists(det_path)
+        pop_exists = os.path.exists(pop_bin_path) or os.path.exists(pop_csv_path)
+        det_exists = os.path.exists(det_bin_path) or os.path.exists(det_csv_path)
         if not pop_exists or not det_exists:
             raise FileNotFoundError(
-                f"[MHMGA-E] Could not find '{'population.csv' if not pop_exists else ''}'"
-                f"{' and ' if not pop_exists and not det_exists else ''}"
-                f"{'details.csv' if not det_exists else ''}'. "
-                f"Expected in '{self.scenario.solution_dir}'"
+                f"[MHMGA-E] Could not find population or details files in '{self.scenario.solution_dir}'"
             )
 
-        pop = pd.read_csv(pop_path, header=None).to_numpy()
-        # det = pd.read_csv(det_path, header=None).to_numpy()
+        if os.path.exists(pop_bin_path):
+            pop_cols = len(self.scenario.lower_bounds) + 3
+            pop = np.fromfile(pop_bin_path, dtype=npfloat).reshape(-1, pop_cols)
+        else:
+            pop = pd.read_csv(pop_csv_path, header=None).to_numpy()
 
         optimal_lcoe = pop[pop[:, 1] == 0, 0].min()  # best objective among feasible solutions
         noptimal_rel = self.config.mga_noptimal_rel[0]
@@ -692,38 +780,8 @@ class MhmgaExtremaSolver(MhmgaSolverBase):
         return max_points, min_points, noptimal_lcoe
 
     def callback(self, population: Population) -> None:
-        out_dir = self.scenario.solution_dir
-
         if SAVE_POPULATION:
-            # Vectorized flattening: reshape(-1) turns (num_niches, pop_size) into (total_pop,)
-            # reshape(-1, ndim) turns (num_niches, pop_size, ndim) into (total_pop, ndim)
-            obj_flat = population.raw_objectives.reshape(-1)
-            viol_flat = population.violations.reshape(-1)
-            fit_flat = population.fitnesses.reshape(-1)
-            pts_flat = population.points.reshape(-1, population.points.shape[-1])
-
-            combined_block = np.column_stack((obj_flat, viol_flat, fit_flat, pts_flat))
-
-            with open(os.path.join(out_dir, "population.csv"), "a", newline="") as f_all, \
-                 open(os.path.join(out_dir, "latest_population.csv"), "w", newline="") as f_latest:
-
-                writer_all = csv.writer(f_all)
-                writer_latest = csv.writer(f_latest)
-
-                writer_all.writerows(combined_block)
-                writer_latest.writerows(combined_block)
-
-            num_niches, pop_size, ndim = population.points.shape
-            details_flat = self.details[:num_niches, :pop_size].reshape(num_niches * pop_size, ndim)
-
-            if self.config.save_details:
-                with open(os.path.join(out_dir, "details.csv"), "a", newline="") as f_all, \
-                     open(os.path.join(out_dir, "latest_details.csv"), "w", newline="") as f_latest:
-                    writer_all = csv.writer(f_all)
-                    writer_latest = csv.writer(f_latest)
-
-                    writer_all.writerows(details_flat)
-                    writer_latest.writerows(details_flat)
+            self._log_population_and_details(population)
 
     def evaluate(self):
         self.scenario.logger.info("[MHMGA-E] Starting extrema generation.")
@@ -740,7 +798,7 @@ class MhmgaExtremaSolver(MhmgaSolverBase):
 
         for w, weighting in enumerate(weightings):
             print(f"[MHMGA-E] Starting extremum generation for extremum {w+1}/{nweight}.")
-            max_points, min_points, noptimal_lcoe, = self.find_starting_points_in_population(weighting)
+            max_points, min_points, noptimal_lcoe = self.find_starting_points_in_population(weighting)
 
             for maximize, points in zip((True, False), (max_points, min_points)):
                 algorithm = self.instantiate_algorithm(
@@ -783,21 +841,19 @@ class MhmgaExtremaSolver(MhmgaSolverBase):
                                 maximize=maximize,
                                 attribute="current_optimum",
                                 attribute_in_population=True,
-                            ),  # terminate on reaching theoretical max/min of the weighted sum objective
+                            ),
                             mgat.GradientStagnation(
                                 window=10,
                                 improvement=0.01*abs_max,
                                 maximize=maximize,
                                 attribute="current_optimum",
                                 attribute_in_population=True,
-                            )  # terminate if less than 1% of theoretic max improvement in 10 iterations
+                            )
                         ]
                     )
 
-        #       log population - dedicated callback func?
-        #   log extremum
-
-        # second pass?
+        self._finalise_csv_logs()
+        self.scenario.logger.info("[MHMGA-E] Binary logs converted to CSV.")
 
 
 def get_solver(
@@ -829,7 +885,6 @@ def get_solver(
 def construct_variable_weightings(scenario):
     weightings = []
     for i in range(len(scenario.lower_bounds)):
-        # min/max each decision variable
         weighting = np.zeros(scenario.lower_bounds.shape, dtype=npfloat)
         weighting[i] = 1.0
         weightings.append(weighting)
@@ -838,7 +893,6 @@ def construct_variable_weightings(scenario):
 
 
 def construct_unit_type_weightings(scenario):
-    # min/max each collection of unit types
     unit_type_w = {}
     unit_type_group_map = {
         'pv_fixed': 'solar',
@@ -854,11 +908,9 @@ def construct_unit_type_weightings(scenario):
         'biogas': 'bioenergy',
         'biomass': 'bioenergy',
     }
-    # custom groupings
     unit_type_w['solar'] = np.zeros(scenario.lower_bounds.shape, dtype=npfloat)
     unit_type_w['wind'] = np.zeros(scenario.lower_bounds.shape, dtype=npfloat)
     unit_type_w['nuclear_all'] = np.zeros(scenario.lower_bounds.shape, dtype=npfloat)
-    # unit_type_w['hydro'] = np.zeros(scenario.lower_bounds.shape, dtype=npfloat)  # only newphes expansion
     unit_type_w['transm'] = np.zeros(scenario.lower_bounds.shape, dtype=npfloat)
     unit_type_w['bioe'] = np.zeros(scenario.lower_bounds.shape, dtype=npfloat)
 
@@ -895,7 +947,7 @@ def construct_unit_type_weightings(scenario):
             if ut in unit_type_group_map:
                 unit_type_w[unit_type_group_map[ut]][line.candidate_x_idx] = 1.0
 
-    return [w for w in unit_type_w.values() if w.sum() > 1]  # only return group weightings that have more than 1 member
+    return [w for w in unit_type_w.values() if w.sum() > 1]
 
 
 def construct_node_weightings(scenario):
@@ -919,4 +971,4 @@ def construct_node_weightings(scenario):
         if sto.candidate_e_x_idx != -1:
             node_w[node][sto.candidate_e_x_idx] = 1.0
 
-    return [w for w in node_w.values() if w.sum() > 1]  # only return group weightings that have more than 1 member
+    return [w for w in node_w.values() if w.sum() > 1]

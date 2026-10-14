@@ -5,39 +5,45 @@ from firm_ce.common.constants import FASTMATH, BOUNDSCHECK, NUM_THREADS
 from firm_ce.common.jit_overload import njit, prange, get_thread_id
 from firm_ce.common.typing import nbfloat, npfloat, TypedList
 from firm_ce.system.tensor.static import StaticTensorType
-from firm_ce.backend.tensor.solution import SolutionTensor, EvaluateTensor, ResetSolution
+from firm_ce.backend.tensor.solution import (
+    SolutionTensor,
+    EvaluateTensor,
+    ResetSolution,
+    ExtractDetailsTensor,
+)
 
-# @njit(parallel=True, fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
-# def mga_wrapper_with_details(
-#     xs: nbfloat[:, :],
-#     static: StaticTensorType,
-#     details: nbfloat[:, :, :],
-# ) -> tuple[nbfloat[:], nbfloat[:]]:
-#     """
-#     """
-#     # TODO: Rewrite this legacy scalar code to use tensor
-#     xs = xs.astype(nbfloat)
-#     n_points = xs.shape[0]
-#     lcoe = np.zeros(n_points, dtype=npfloat)
-#     penalties = np.zeros(n_points, dtype=npfloat)
-#     # scaled_points = np.zeros(xs.shape, dtype=npfloat)
 
-#     pop_size = details.shape[1]
+@njit(parallel=True, fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
+def mga_tensor_wrapper_with_details(
+    xs: nbfloat[:, :],
+    static: StaticTensorType,
+    details: nbfloat[:, :, :],
+) -> tuple[nbfloat[:], nbfloat[:]]:
 
-#     for j in prange(n_points):
-#         xj = xs[j]
-#         solution = Solution(xj, static, fleet, network, balancing_type, fixed_costs_threshold)
-#         evaluate(solution)
+    xs = xs.astype(nbfloat)
+    n_points = xs.shape[0]
+    lcoe = np.zeros(n_points, dtype=npfloat)
+    penalties = np.zeros(n_points, dtype=npfloat)
 
-#         lcoe[j] = solution.lcoe
-#         penalties[j] = solution.penalties
-#         # scaled_points[j] = get_scaled_points(solution)
+    pop_size = details.shape[1]
 
-#         niche_idx = j // pop_size
-#         indiv_idx = j % pop_size
-#         extract_details(solution, details[niche_idx, indiv_idx])
+    n_workers = min(NUM_THREADS, n_points)
+    pool = TypedList()
+    for _ in range(n_workers):
+        pool.append(SolutionTensor(xs[0], static))
 
-#     return lcoe, penalties
+    for j in prange(n_points):
+        sol = pool[get_thread_id()]  # each thread owns its slot
+        ResetSolution(sol, xs[j])
+        EvaluateTensor(sol)
+        lcoe[j] = sol.lcoe
+        penalties[j] = sol.penalties
+
+        niche_idx = j // pop_size
+        indiv_idx = j % pop_size
+        ExtractDetailsTensor(sol, details[niche_idx, indiv_idx])
+
+    return lcoe, penalties
 
 
 @njit(parallel=True, fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
@@ -58,7 +64,7 @@ def mga_tensor_wrapper(
         pool.append(SolutionTensor(xs[0], static))
 
     for j in prange(n_points):
-        sol = pool[get_thread_id()]   # each thread owns its slot
+        sol = pool[get_thread_id()]  # each thread owns its slot
         ResetSolution(sol, xs[j])
         EvaluateTensor(sol)
         lcoe[j] = sol.lcoe

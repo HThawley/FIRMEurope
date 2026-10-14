@@ -2,17 +2,19 @@
 import numpy as np
 from typing import Callable, Tuple, Any
 
+from firm_ce.common.typing import npfloat
 from firm_ce.backend.scalar.single_time import evaluate_vectorised_xs as default_st_obj
 from firm_ce.backend.scalar.mhmga import mga_wrapper as default_mga_obj
 from firm_ce.backend.scalar.mhmga import mga_wrapper_with_details
 
-# TODO: Import alternative backend implementations here
-# from firm_ce.backends.fast_c import fast_single_time as c_st_obj
-from firm_ce.backend.tensor.mhmga import mga_tensor_wrapper
+from firm_ce.backend.tensor.mhmga import (
+    mga_tensor_wrapper,
+    mga_tensor_wrapper_with_details,
+)
 
 
 def _get_default_args(scenario, config) -> Tuple:
-    """Standard argument packing for the default backend."""
+    """Standard argument packing for the default scalar backend."""
     return (
         scenario.static,
         scenario.fleet,
@@ -22,19 +24,23 @@ def _get_default_args(scenario, config) -> Tuple:
     )
 
 
-def _get_mga_details_args(scenario, config) -> Tuple:
-    """Appends the pre-allocated details array for MHMGA."""
-
-    # Logic extracted from the old get_mhmga_args
-    details = np.empty(
+def _allocate_details_array(scenario, config) -> np.ndarray:
+    return np.empty(
         (
-            config.mga_start_niches + sum(config.mga_new_niches),    # max niches
+            config.mga_start_niches + sum(config.mga_new_niches),  # max niches
             max(config.mga_pop_size),
             scenario.details_length,
         ),
-        dtype=np.float64
+        dtype=npfloat,
     )
-    return (*_get_default_args(scenario, config), details)
+
+
+def _get_scalar_mga_details_args(scenario, config) -> Tuple:
+    return (*_get_default_args(scenario, config), _allocate_details_array(scenario, config))
+
+
+def _get_tensor_mga_details_args(scenario, config) -> Tuple:
+    return (scenario.staticTensor, _allocate_details_array(scenario, config))
 
 
 def build_objective(scenario, config) -> Tuple[Callable, Tuple[Any, ...]]:
@@ -60,13 +66,12 @@ def build_objective(scenario, config) -> Tuple[Callable, Tuple[Any, ...]]:
     elif opt_type.startswith("mhmga"):
         if backend == "scalar":
             if save_details:
-                return mga_wrapper_with_details, _get_mga_details_args(scenario, config)
+                return mga_wrapper_with_details, _get_scalar_mga_details_args(scenario, config)
             return default_mga_obj, _get_default_args(scenario, config)
 
         elif backend == "tensor":
-            # TODO: new objective for details
             if save_details:
-                return mga_tensor_wrapper, _get_mga_details_args(scenario, config)
+                return mga_tensor_wrapper_with_details, _get_tensor_mga_details_args(scenario, config)
             return mga_tensor_wrapper, (scenario.staticTensor,)
 
         else:

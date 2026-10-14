@@ -11,6 +11,27 @@ from firm_ce.system.tensor.assets import AssetTensor, AssetTensorType
 from firm_ce.system.tensor.operations import OperationTensor, OperationTensorType, reset_operations
 from firm_ce.system.tensor.static import StaticTensorType
 
+# Dynamic definition of tensor details columns.
+TENSOR_DETAILS_COLUMNS = (
+    "lcoe",
+    "penalties",
+    "nuke",
+    "nlte",
+    "nph",
+    "biom",
+    "biog",
+    "gas",
+    # -- Zero-VOM technologies in current model --
+    # "pfix",
+    # "psat",
+    # "offw",
+    # "onsw",
+    # "b4",
+    # "b2",
+    # "lines",
+)
+TENSOR_DETAILS_LENGTH = len(TENSOR_DETAILS_COLUMNS)
+
 if JIT_ENABLED:
     from numba import set_num_threads
     set_num_threads(int(NUM_THREADS))
@@ -141,6 +162,142 @@ def CalculateCost(
 
     solution.total_annual_cost = cost
     solution.lcoe = cost / solution.static.mean_annual_demand_mwh
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
+def ExtractDetailsTensor(
+    solution: SolutionTensorType,
+    details_slice: nbfloat[:],
+) -> None:
+    """
+    Aggregates operational dispatch by unit_type across the system into a 1D slice.
+    Matches the column order defined in TENSOR_DETAILS_COLUMNS.
+    """
+    a = solution.assets
+    o = solution.operations
+    s = solution.static
+
+    details_slice[:] = npfloat(0.0)
+    details_slice[0] = solution.lcoe
+    details_slice[1] = solution.penalties
+
+    _Mnuke_ratio = o.Mnuke.sum(axis=0)
+    safe_divide_array(_Mnuke_ratio, a.Cnuke, out=_Mnuke_ratio)
+
+    _Mnphes_ratio = o.Mdischarge[:, :, 0].sum(axis=0)
+    safe_divide_array(_Mnphes_ratio, a.CstorageP[:, 0], out=_Mnphes_ratio)
+
+    nuke_gen = npfloat(0.0)
+    nlte_gen = npfloat(0.0)
+    nph_gen = npfloat(0.0)
+
+    for n in range(s.nodes):
+        nuke_gen += _Mnuke_ratio[n] * (a.Cnuke[n] - a.Cnlte[n])
+        nlte_gen += _Mnuke_ratio[n] * a.Cnlte[n]
+        nph_gen += _Mnphes_ratio[n] * a.CnphP[n]
+
+    biom_gen = npfloat(0.0)
+    biog_gen = npfloat(0.0)
+    gas_gen = npfloat(0.0)
+
+    # -- Zero-VOM accumulators --
+    # pfix_gen = npfloat(0.0)
+    # psat_gen = npfloat(0.0)
+    # offw_gen = npfloat(0.0)
+    # onsw_gen = npfloat(0.0)
+    # b4_gen = npfloat(0.0)
+    # b2_gen = npfloat(0.0)
+    # lines_flow = npfloat(0.0)
+
+    for t in range(s.intervals):
+        for n in range(s.nodes):
+            biom_gen += o.Mpeak[t, n, 0]
+            biog_gen += o.Mpeak[t, n, 1]
+            gas_gen += o.Mpeak[t, n, 2]
+
+            # -- Zero-VOM technologies in current model --
+            # pfix_gen += s.TSpfix[t, n] * a.Cpfix[n]
+            # psat_gen += s.TSpsat[t, n] * a.Cpsat[n]
+            # offw_gen += s.TSoffw[t, n] * a.Coffw[n]
+            # onsw_gen += s.TSonsw[t, n] * a.Consw[n]
+            # b4_gen += o.Mdischarge[t, n, 1]
+            # b2_gen += o.Mdischarge[t, n, 2]
+            # lines_flow += np.abs(o.Tnetflow[t, n])
+
+    details_slice[2] = nuke_gen
+    details_slice[3] = nlte_gen
+    details_slice[4] = nph_gen
+    details_slice[5] = biom_gen
+    details_slice[6] = biog_gen
+    details_slice[7] = gas_gen
+
+    # -- Zero-VOM assignments --
+    # details_slice[8] = pfix_gen
+    # details_slice[9] = psat_gen
+    # details_slice[10] = offw_gen
+    # details_slice[11] = onsw_gen
+    # details_slice[12] = b4_gen
+    # details_slice[13] = b2_gen
+    # details_slice[14] = lines_flow
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
+def EvaluateTensorFromDetails(
+    x: nbfloat[:],
+    static: StaticTensorType,
+    details_slice: nbfloat[:],
+) -> tuple[nbfloat, nbfloat]:
+    """
+    Reconstructs total annual cost and LCOE from decision vector `x`, `static` (potentially
+    with updated cost assumptions), and `details_slice` WITHOUT allocating SolutionTensor
+    or OperationTensor.
+
+    Assumes variable costs are spatially uniform across nodes per unit type (indexing node 0).
+    Returns (lcoe, penalties).
+    """
+    a = AssetTensor(x, static)
+    c = static.costs
+    cost = static.legacy_costs
+
+    # Fixed Costs
+    for n in range(static.nodes):
+        cost += a.Cpfix[n] * c.Fpfix[n]
+        cost += a.Cpsat[n] * c.Fpsat[n]
+        cost += a.Coffw[n] * c.Foffw[n]
+        cost += a.Consw[n] * c.Fonsw[n]
+        cost += a.Cpeak[n, 1] * c.Fbiog[n]
+        cost += a.Cpeak[n, 0] * c.Fbiom[n]
+        cost += a.Cpeak[n, 2] * c.Fgas[n]
+        cost += (a.Cnuke[n] - a.Cnlte[n]) * c.Fnuke[n]
+        cost += a.Cnlte[n] * c.Fnlte[n]
+        cost += a.CnphP[n] * c.FphP[n]
+        cost += a.CnphE[n] * c.FphE[n]
+        cost += a.CstorageP[n, 1] * c.Fb4P[n]
+        cost += a.CstorageP[n, 2] * c.Fb2P[n]
+
+    for n in range(static.nhvi):
+        cost += a.Clines[n] * c.Flines[n]
+
+    # Variable Costs (aggregated by unit type, using uniform cost at index 0)
+    cost += details_slice[2] * c.Vnuke[0]
+    cost += details_slice[3] * c.Vnlte[0]
+    cost += details_slice[4] * c.Vph[0]
+    cost += details_slice[5] * c.Vbiom[0]
+    cost += details_slice[6] * c.Vbiog[0]
+    cost += details_slice[7] * c.Vgas[0]
+
+    # -- Zero-VOM technologies in current model --
+    # cost += details_slice[8] * c.Vpfix[0]
+    # cost += details_slice[9] * c.Vpsat[0]
+    # cost += details_slice[10] * c.Voffw[0]
+    # cost += details_slice[11] * c.Vonsw[0]
+    # cost += details_slice[12] * c.Vb4[0]
+    # cost += details_slice[13] * c.Vb2[0]
+    # cost += details_slice[14] * c.Vlines[0]
+
+    lcoe = cost / static.mean_annual_demand_mwh
+    penalties = details_slice[1]
+    return lcoe, penalties
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
