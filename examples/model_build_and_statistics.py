@@ -11,12 +11,14 @@ Alternative filepaths for the config and data folders can be provided as argumen
 import time
 import os
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 
 from firm_ce.model import Model
 from firm_ce.analysis.statistics import Statistics
 from firm_ce.analysis.validate import Validation, ValidationTensor
-from firm_ce.analysis.display import Display
-from firm_ce.analysis.display import MetricSpec, is_rechargeable_storage
+from firm_ce.analysis.display import Display, MetricSpec, is_rechargeable_storage
+from firm_ce.analysis.space_display import SpacePlotter
 from firm_ce.common.typing import npfloat
 
 
@@ -62,7 +64,7 @@ def try_read_evolution(scenario):
     return xs
 
 
-def run_statistics(scenario, run_mode, x_loc=None, x0_fallback=True):
+def load_scenario(scenario, run_mode, x_loc=None, x0_fallback=True):
     scenario.load_datafiles()
 
     if scenario.config.type == "single_time":
@@ -117,25 +119,32 @@ def run_statistics(scenario, run_mode, x_loc=None, x0_fallback=True):
         # TODO: verify absolute/relative parameterisation -> fail noisily
         scenario.build_and_evaluate_noptima(xs)
 
+
+def unload_scenario(scenario):
+    scenario.unload_datafiles()
+
+
+def validate_scenario(scenario, write=True):
     print(f"Validating solution {scenario.name}")
-    if scenario.solutionTensor is not None:
+    if scenario.config.backend == "tensor":
         scenario.validation = ValidationTensor(scenario.solutionTensor, scenario.solution_dir, scenario)
-        scenario.validation.validate(verbose=True)
-        scenario.validation.dump_logs()
     else:
         scenario.validation = Validation(scenario.solution, scenario.solution_dir)
-        scenario.validation.validate(verbose=True)
+
+    scenario.validation.validate(verbose=True)
+
+    if write:
         scenario.validation.dump_logs()
 
+
+def run_statistics(scenario, write=True):
     scenario.statistics = Statistics(scenario)
 
     print(f"Generating statistics for scenario {scenario.name}")
     scenario.statistics.generate_result_files(write=True, delete=True)
-    print(f"Writing statistics results for scenario {scenario.name}")
-    # scenario.statistics.write_results()
 
-    # raise KeyboardInterrupt
 
+def display_graphs(scenario):
     if model.config.type == "single_time":
         print(f"Generating single_time plots {scenario.name}")
         scenario.display = Display(scenario, model.config, solution=scenario.solution)
@@ -143,6 +152,19 @@ def run_statistics(scenario, run_mode, x_loc=None, x0_fallback=True):
         scenario.display.plot_summary("energy_balance", solutions=0, chart_type="stacked_bar", normalize=False)
         scenario.display.plot_summary("power_capacity", solutions=0, chart_type="treemap")
         scenario.display.plot_summary("power_capacity", solutions=0, chart_type="stacked_bar", normalize=False)
+
+        # "system_overview" contains [Power Capacity (GW), Annual Energy Mix (TWh/yr)]
+        fig, axes = scenario.display.plot_summary(
+            specs="system_overview_with_losses",
+            solutions=0,
+            chart_type="stacked_bar",
+            normalize=True,  # Forces 100% stacked bars
+        )
+
+        ax = axes[0]
+        ax.set_yticks(np.arange(0, 101, 10))
+        ax.yaxis.grid(True, linestyle="--", alpha=0.5, color="gray", zorder=0)
+        ax.set_axisbelow(True)  # Keeps gridlines behind the bars
 
         # Custom Ad-Hoc Map Spec (e.g., plot ONLY new-build rechargeable storage power capacity by sub-tech)
         custom_map_spec = MetricSpec(
@@ -159,6 +181,45 @@ def run_statistics(scenario, run_mode, x_loc=None, x0_fallback=True):
     if model.config.type == "mhmga":
         print(f"Generating mhmga plots {scenario.name}")
         scenario.display = Display(scenario, model.config, noptima=scenario.noptima)
+
+        # 1. Initialization
+        # Reads the full historical population (population.csv) and aggregates variables via the scenario's tech_map
+        plotter = SpacePlotter(scenario, precision=1)
+
+        # 2. Bivariate Footprint with Isolines
+        # Shows the flat density envelope of solutions under a 1.05 threshold, overlaid with 
+        # contour isolines mapping the physical expansion limits at 1.01, 1.03, and 1.05 LCOE thresholds.
+        fig, ax = plt.subplots(figsize=(8, 6))
+        plotter.plot_bivariate_footprint(
+            x_var="Utility Solar",
+            y_var="Onshore Wind",
+            threshold=1.05,
+            isoline_thresholds=[1.01, 1.03, 1.05],
+            ax=ax
+        )
+
+        # 3. Threshold Area Expansion
+        # Replicates compare_near_optimal_area.py to show how available capacity slack widens 
+        # as the optimality threshold relaxes from 1.0 to 1.10.
+        fig = plotter.plot_threshold_areas(
+            techs=["Utility Solar", "Onshore Wind", "Battery Power (GW)"],
+            max_threshold=1.10,
+            steps=20
+        )
+
+        # 4. Boxen Distributions
+        # Displays the statistical shape of technology deployment purely for configurations 
+        # that successfully sit within the 1.02 near-optimal valley.
+        fig, ax = plt.subplots(figsize=(10, 5))
+        plotter.plot_boxen_distributions(threshold=1.02, ax=ax)
+
+        # 5. Structural Pairwise Matrix
+        # Compares purely structural trade-offs (excluding LCOE) inside the 1.03 threshold,
+        # identifying the spatial frontiers where technologies directly cannibalize each other.
+        fig = plotter.plot_pairwise_structure(
+            structural_vars=["Utility Solar", "Onshore Wind", "Battery Power (GW)"],
+            threshold=1.03
+        )
 
         scenario.display.plot_summary("energy_balance", solutions=0, chart_type="stacked_bar", normalize=False)
         scenario.display.plot_summary("power_capacity", solutions=0, chart_type="treemap")
@@ -191,14 +252,13 @@ def run_statistics(scenario, run_mode, x_loc=None, x0_fallback=True):
         scenario.noptima_summary = df
         print(df)
 
-    # scenario.unload_datafiles()
     return None
 
 
 if __name__ == "__main__":
 
     # RUN_MODE = "latest"
-    RUN_MODE = "results/firmeur_10yr_20260726_074409"
+    RUN_MODE = "results/firmeur_10yr_20260922_093328 (copy)"
 
     start_time = time.time()
     model = Model(model_location=RUN_MODE)
@@ -207,5 +267,10 @@ if __name__ == "__main__":
 
     for name in ("7percent",):
         scenario = model.scenarios[name]
-        model.config.type = 'single_time'
-        run_statistics(scenario, RUN_MODE)  # x_loc="latest_population.csv")
+        # model.config.type = 'single_time'
+        load_scenario(scenario, RUN_MODE)
+        # validate_scenario(scenario)
+        # run_statistics(scenario)
+        display_graphs(scenario)
+
+        # unload_scenario(scenario)
