@@ -406,6 +406,12 @@ class Scenario:
             "biomass": 0.02 / 0.2,
             "nuclear": 0.1 / 0.9,
             "nuclear_lte": np.inf,
+            # storage
+            "bess2h": 0.33,
+            "bess4h": 0.33,
+            "nphes": 0.33,
+            # supply < 0.25 > of average load for < 64 > hours
+            "nphes_e": 0.25 * 64,
         }
 
         for gen in self.fleet.generators.values():
@@ -418,13 +424,15 @@ class Scenario:
 
         for sto in self.fleet.storages.values():
             idx_p = sto.candidate_p_x_idx
+            unit_type = sto.unit_type
             if idx_p != -1:
-                heuristic_x_rel[idx_p] = 0.33
+                heuristic_x_rel[idx_p] = factors[unit_type]
 
             idx_e = sto.candidate_e_x_idx
+            ut_e = unit_type + '_e'
             if idx_e != -1:
-                # supply < 0.25 > of average load for < 64 > hours
-                heuristic_x_rel[idx_e] = 0.25 * 64  # only applies to phes
+                # only applies to phes
+                heuristic_x_rel[idx_e] = factors[ut_e]
 
         for line in self.network.major_lines.values():
             idx = line.candidate_x_idx

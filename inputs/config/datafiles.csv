@@ -10,4 +10,4 @@ id,scenarios,filename,datafile_type,units
 8,all,ol-phes_inflows.csv,inflow,MWh
 9,all,nuclear.csv,generation,CF
 10,"test,base,7percent",fuel_constraints_base.csv,fuel_constraint,GWh
-11,zerocarbon,fuel_constraints_zc.csv,fuel_constraint,GWh
+11,"zerocarbon,7pczc",fuel_constraints_zc.csv,fuel_constraint,GWh

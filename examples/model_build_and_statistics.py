@@ -148,39 +148,32 @@ def display_graphs(scenario):
     if model.config.type == "single_time":
         print(f"Generating single_time plots {scenario.name}")
         scenario.display = Display(scenario, model.config, solution=scenario.solution)
+        scenario.display.set_annotation_format(lambda v: scenario.display.format_sigfigs(v, 2))
 
-        scenario.display.plot_summary("energy_balance", solutions=0, chart_type="stacked_bar", normalize=False)
-        scenario.display.plot_summary("power_capacity", solutions=0, chart_type="treemap")
-        scenario.display.plot_summary("power_capacity", solutions=0, chart_type="stacked_bar", normalize=False)
+        scenario.display.plot_summary("system_overview_with_losses", chart_type="stacked_bar", normalize=True)
 
-        # "system_overview" contains [Power Capacity (GW), Annual Energy Mix (TWh/yr)]
-        fig, axes = scenario.display.plot_summary(
-            specs="system_overview_with_losses",
-            solutions=0,
-            chart_type="stacked_bar",
-            normalize=True,  # Forces 100% stacked bars
-        )
-
-        ax = axes[0]
-        ax.set_yticks(np.arange(0, 101, 10))
-        ax.yaxis.grid(True, linestyle="--", alpha=0.5, color="gray", zorder=0)
-        ax.set_axisbelow(True)  # Keeps gridlines behind the bars
+        scenario.display.plot_summary("energy_balance", chart_type="stacked_bar", normalize=False)
+        scenario.display.plot_summary("energy_balance", chart_type="treemap", normalize=False)
+        scenario.display.plot_summary("power_capacity", chart_type="treemap")
+        scenario.display.plot_summary("power_capacity", chart_type="stacked_bar", normalize=False)
 
         # Custom Ad-Hoc Map Spec (e.g., plot ONLY new-build rechargeable storage power capacity by sub-tech)
-        custom_map_spec = MetricSpec(
-            title="New Storage Energy Capacity",
-            unit="GWh",
-            assets=("storages",),
-            metric="power_capacity",
-            build="new_build",
-            asset_filter=is_rechargeable_storage,
-            group_by="subtech",
-        )
-        scenario.display.plot_map(node_spec=custom_map_spec, line_spec=None)
+        # custom_map_spec = MetricSpec(
+        #     title="New Storage Energy Capacity",
+        #     unit="GWh",
+        #     assets=("storages",),
+        #     metric="power_capacity",
+        #     build="new_build",
+        #     asset_filter=is_rechargeable_storage,
+        #     group_by="subtech",
+        # )
+        # scenario.display.plot_map(node_spec=custom_map_spec, line_spec=None)
+        scenario.display.plot_map("energy")
 
     if model.config.type == "mhmga":
         print(f"Generating mhmga plots {scenario.name}")
         scenario.display = Display(scenario, model.config, noptima=scenario.noptima)
+        scenario.display.set_annotation_format(lambda v: scenario.display.format_sigfigs(v, 2))
 
         # 1. Initialization
         # Reads the full historical population (population.csv) and aggregates variables via the scenario's tech_map
