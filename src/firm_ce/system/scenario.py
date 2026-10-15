@@ -79,7 +79,7 @@ class Scenario:
 
         self.statistics = None
         self.assign_unit_type_idx()
-        self.self.build_capacity_space_scaler()()
+        self.build_capacity_space_scaler()
         self.relative_space_constructed = False
 
     def __repr__(self):
