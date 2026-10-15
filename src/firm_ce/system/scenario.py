@@ -79,7 +79,6 @@ class Scenario:
 
         self.statistics = None
         self.assign_unit_type_idx()
-        self.build_capacity_space_scaler()
         self.relative_space_constructed = False
 
     def __repr__(self):
@@ -269,7 +268,8 @@ class Scenario:
     def deconstruct_tensors(
         self,
     ) -> None:
-        del self.staticTensor
+        if hasattr(self, "staticTensor"):
+            del self.staticTensor
 
     def load_datafiles(
         self,
@@ -319,6 +319,7 @@ class Scenario:
         self.data_status = True
 
         self.construct_relative_space()
+        self.projection_matrix = self.build_capacity_space_scaler()
         self.set_relative_scalers()
 
         if self.x0_abs.size == 0:
@@ -351,7 +352,12 @@ class Scenario:
         return None
 
     def reset_static(self) -> None:
-        self.static = construct_ScenarioParameters_object(self.scenario_data, len(self.network.nodes))
+        self.static = construct_ScenarioParameters_object(
+            self.scenario_data,
+            len(self.network.nodes),
+            self.config.limit_timesteps,
+            self.config.interval_aggregation,
+        )
         return None
 
     def get_scenario_dicts(self, imported_dict: Dict[str, Dict[str, str]]) -> Dict[str, str]:
@@ -518,6 +524,8 @@ class Scenario:
         Returns 1D array of total horizon energy demand (in model units, e.g. GWh)
         for each node in canonical node order.
         """
+        if not self.data_status:
+            raise RuntimeError("Load datafiles before querying nodal demand totals.")
         n_nodes = len(self.network.nodes)
         totals = np.zeros(n_nodes, dtype=npfloat)
         hours = self.static.intervals_count * self.static.resolution
