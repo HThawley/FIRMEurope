@@ -130,7 +130,7 @@ def CalculateCost(
             E[n, 9] += o.Mdischarge[t, n, 0]
             E[n, 10] += o.Mdischarge[t, n, 1]
             E[n, 11] += o.Mdischarge[t, n, 2]
-            E[n, 12] += np.abs(o.Tcurtail[t, n])
+            E[n, 12] += np.abs(o.Mcurtail[t, n])
 
     cost = s.legacy_costs
 

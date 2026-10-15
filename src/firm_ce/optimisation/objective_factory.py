@@ -31,6 +31,7 @@ class ObjectiveBundle:
     fargs: Tuple[Any, ...]
     return_scaled: bool = False
     space_scaler: Optional[np.ndarray] = None
+    scaled_ndim: Optional[int] = None
     details: Optional[np.ndarray] = None
 
 
@@ -64,17 +65,17 @@ def _resolve_energy_space_dims(scenario, config, n_components: int) -> Tuple[npi
 
     if agg_str == "unit_type":
         agg_code = AGG_UNIT_TYPE
-        scaled_dim = n_components
+        scaled_ndim = n_components
     elif agg_str == "node":
         agg_code = AGG_NODE
-        scaled_dim = n_nodes
+        scaled_ndim = n_nodes
     elif agg_str == "none":
         agg_code = AGG_NONE
-        scaled_dim = n_nodes * n_components
+        scaled_ndim = n_nodes * n_components
     else:
         raise ValueError(f"Unknown mga_space_agg '{agg_str}'.")
 
-    return npintp(norm_code), npintp(agg_code), npintp(scaled_dim)
+    return npintp(norm_code), npintp(agg_code), npintp(scaled_ndim)
 
 
 def build_objective_bundle(scenario, config) -> ObjectiveBundle:
@@ -134,21 +135,17 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
         elif space_basis == "energy":
             nodal_demand_totals = scenario.get_nodal_demand_totals()
             det_arg = details_buf if save_details else np.empty((1, 1, 1), dtype=npfloat)
-            n_vars = len(scenario.lower_bounds)
 
             if backend == "tensor":
-                norm_code, agg_code, scaled_dim = _resolve_energy_space_dims(
+                norm_code, agg_code, scaled_ndim = _resolve_energy_space_dims(
                     scenario, config, N_ENERGY_COMPONENTS
                 )
-                # Pass a 2D dummy space_scaler so mga sets population.scaled_points to scaled_dim columns
-                dummy_space_scaler = np.empty((n_vars, int(scaled_dim)), dtype=npfloat)
-
                 fargs = (
                     scenario.staticTensor,
                     nodal_demand_totals,
                     norm_code,
                     agg_code,
-                    scaled_dim,
+                    scaled_ndim,
                     bool(save_details),
                     det_arg,
                 )
@@ -156,20 +153,19 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
                     func=mga_tensor_wrapper_scaled,
                     fargs=fargs,
                     return_scaled=True,
-                    space_scaler=dummy_space_scaler,
+                    space_scaler=None,
+                    scaled_ndim=scaled_ndim,
                     details=details_buf,
                 )
 
             elif backend == "scalar":
                 n_gen_types = len({g.unit_type for g in scenario.fleet.generators.values()})
                 n_sto_types = len({s.unit_type for s in scenario.fleet.storages.values()})
-                n_energy_types = n_gen_types + n_sto_types + 1  # +1 for curtailment
+                n_energy_types = n_gen_types + n_sto_types + 1
 
-                norm_code, agg_code, scaled_dim = _resolve_energy_space_dims(
+                norm_code, agg_code, scaled_ndim = _resolve_energy_space_dims(
                     scenario, config, n_energy_types
                 )
-                dummy_space_scaler = np.empty((n_vars, int(scaled_dim)), dtype=npfloat)
-
                 fargs = (
                     *_get_default_args(scenario, config),
                     nodal_demand_totals,
@@ -177,7 +173,7 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
                     agg_code,
                     npintp(n_gen_types),
                     npintp(n_energy_types),
-                    scaled_dim,
+                    scaled_ndim,
                     bool(save_details),
                     det_arg,
                 )
@@ -185,7 +181,8 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
                     func=mga_scalar_wrapper_scaled,
                     fargs=fargs,
                     return_scaled=True,
-                    space_scaler=dummy_space_scaler,  # <-- Corrected
+                    space_scaler=None,
+                    scaled_ndim=scaled_ndim,
                     details=details_buf,
                 )
 
@@ -196,6 +193,5 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
 
 
 def build_objective(scenario, config) -> Tuple[Callable, Tuple[Any, ...]]:
-    """Backwards-compatible 2-tuple wrapper around build_objective_bundle."""
     bundle = build_objective_bundle(scenario, config)
     return bundle.func, bundle.fargs

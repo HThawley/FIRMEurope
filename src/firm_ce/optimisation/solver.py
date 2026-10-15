@@ -677,8 +677,6 @@ class MhmgaSolver(MhmgaSolverBase):
                 self.scenario.logger.info(f"[MHMGA] Adding {self.config.mga_new_niches[step]} niches.")
                 algorithm.add_niches(num_niches=self.config.mga_new_niches[step])
 
-            space_scaler = self.obj_bundle.space_scaler if not self.obj_bundle.return_scaled else None
-
             algorithm.update_hyperparameters(
                 max_iter=self.config.mga_iter[step],
                 pop_size=self.config.mga_pop_size[step],
@@ -694,7 +692,7 @@ class MhmgaSolver(MhmgaSolverBase):
                 noptimal_abs=self.config.mga_noptimal_abs[step],
                 violation_factor=PENALTY_MULTIPLIER,
                 mutation_scaler=np.ones_like(self.scenario.lower_bounds),
-                space_scaler=space_scaler,
+                space_scaler=self.obj_bundle.space_scaler,
                 objective_scaler=1.0,
                 fitness_method=self.config.mga_fitness[step],
             )
