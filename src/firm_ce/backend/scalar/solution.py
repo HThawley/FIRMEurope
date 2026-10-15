@@ -3,7 +3,7 @@ import numpy as np
 
 from firm_ce.common.constants import JIT_ENABLED, NUM_THREADS, FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import jitclass, njit, prange
-from firm_ce.common.typing import boolean, nbfloat, unicode_type, TypedDict, nbintp
+from firm_ce.common.typing import boolean, nbfloat, unicode_type, TypedDict, nbintp, npfloat
 from firm_ce.fast_methods import fleet_m, generator_m, line_m, network_m, static_m, storage_m, ltcosts_m
 from firm_ce.backend.scalar.balancing import balance_for_period
 from firm_ce.system.scalar.components import Fleet_InstanceType
@@ -546,3 +546,81 @@ def build_eval_and_return_solutions(
         evaluate(solutions[j])
 
     return solutions
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
+def extract_energy_space_scalar(
+    solution: Solution_InstanceType,
+    nodal_demand_totals: nbfloat[:],
+    norm_mode: nbintp,
+    agg_mode: nbintp,
+    n_gen_types: nbintp,
+    n_energy_types: nbintp,
+    scaled_slice: nbfloat[:],
+) -> None:
+    """
+    Extracts gross generation + storage discharge + curtailment into `scaled_slice`
+    according to (norm_mode, agg_mode) for the scalar backend.
+
+    Slot mapping (length = n_energy_types = n_gen_types + n_sto_types + 1):
+      - Generators: slot = (gen.unit_type_idx - 2) // 2       -> [0 .. n_gen_types - 1]
+      - Storages:   slot = sto.unit_type_idx - 2 - n_gen_types -> [n_gen_types .. n_gen_types + n_sto_types - 1]
+      - Curtail:    slot = n_energy_types - 1
+    """
+    scaled_slice[:] = npfloat(0.0)
+    n_nodes = len(nodal_demand_totals)
+    sys_demand = np.sum(nodal_demand_totals)
+    inv_sys = npfloat(1.0) / sys_demand if sys_demand > 0.0 else npfloat(1.0)
+    inv_nodes = npfloat(1.0) / npfloat(n_nodes)
+    res = solution.static.resolution
+
+    # 1. Generators (gross generation)
+    for gen in solution.fleet.generators.values():
+        n = gen.node.order
+        slot = (gen.unit_type_idx - 2) // 2
+        if gen.is_flexible:
+            e_gwh = gen.lt_generation
+        else:
+            e_gwh = np.sum(gen.data) * gen.capacity * res
+
+        if agg_mode == 1:  # AGG_UNIT_TYPE
+            w = (inv_nodes / nodal_demand_totals[n]) if norm_mode == 0 else inv_sys
+            scaled_slice[slot] += e_gwh * w
+        elif agg_mode == 2:  # AGG_NODE
+            w = (npfloat(1.0) / nodal_demand_totals[n]) if norm_mode == 0 else inv_sys
+            scaled_slice[n] += e_gwh * w
+        else:  # AGG_NONE
+            w = (npfloat(1.0) / nodal_demand_totals[n]) if norm_mode == 0 else inv_sys
+            scaled_slice[n * n_energy_types + slot] += e_gwh * w
+
+    # 2. Storages (gross discharge)
+    for sto in solution.fleet.storages.values():
+        n = sto.node.order
+        slot = sto.unit_type_idx - 2 - n_gen_types
+        e_gwh = sto.lt_generation
+
+        if agg_mode == 1:  # AGG_UNIT_TYPE
+            w = (inv_nodes / nodal_demand_totals[n]) if norm_mode == 0 else inv_sys
+            scaled_slice[slot] += e_gwh * w
+        elif agg_mode == 2:  # AGG_NODE
+            w = (npfloat(1.0) / nodal_demand_totals[n]) if norm_mode == 0 else inv_sys
+            scaled_slice[n] += e_gwh * w
+        else:  # AGG_NONE
+            w = (npfloat(1.0) / nodal_demand_totals[n]) if norm_mode == 0 else inv_sys
+            scaled_slice[n * n_energy_types + slot] += e_gwh * w
+
+    # 3. Nodal Curtailment
+    curt_slot = n_energy_types - 1
+    for node in solution.network.nodes.values():
+        n = node.order
+        curt_gwh = np.sum(np.abs(node.curtail)) * res
+
+        if agg_mode == 1:  # AGG_UNIT_TYPE
+            w = (inv_nodes / nodal_demand_totals[n]) if norm_mode == 0 else inv_sys
+            scaled_slice[curt_slot] += curt_gwh * w
+        elif agg_mode == 2:  # AGG_NODE
+            w = (npfloat(1.0) / nodal_demand_totals[n]) if norm_mode == 0 else inv_sys
+            scaled_slice[n] += curt_gwh * w
+        else:  # AGG_NONE
+            w = (npfloat(1.0) / nodal_demand_totals[n]) if norm_mode == 0 else inv_sys
+            scaled_slice[n * n_energy_types + curt_slot] += curt_gwh * w

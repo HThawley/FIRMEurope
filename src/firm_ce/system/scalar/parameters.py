@@ -114,9 +114,24 @@ class ModelConfig:
         if self.type == "mhmga":
             self.mga_steps = int(config.get("mga_steps", 1))  # default: 1
 
-            for param_name in expected_mga_hyperparameters.keys():
+            # 3-Axis MGA Fitness Space Configuration
+            # basis: "capacity" (linear x projection via space_scaler) or "energy" (non-linear via return_scaled=True)
+            self.mga_space_basis = str(config.get("mga_space_basis", "capacity")).lower()
+            # norm: "relative" (normalised by nodal demand) or "absolute" (physical / system-wide)
+            self.mga_space_norm = str(config.get("mga_space_norm", self.parameterisation)).lower()
+            # agg: "unit_type" (grouped by tech), "node" (grouped by node), or "none" (unaggregated)
+            self.mga_space_agg = str(config.get("mga_space_agg", "unit_type")).lower()
 
-                setattr(self, param_name, config[param_name])
+            if self.mga_space_basis not in ("capacity", "energy"):
+                raise ValueError(f"Invalid mga_space_basis '{self.mga_space_basis}'. Expected 'capacity' or 'energy'.")
+            if self.mga_space_norm not in ("relative", "absolute"):
+                raise ValueError(f"Invalid mga_space_norm '{self.mga_space_norm}'. Expected 'relative' or 'absolute'.")
+            if self.mga_space_agg not in ("unit_type", "node", "none"):
+                raise ValueError(f"Invalid mga_space_agg '{self.mga_space_agg}'. Expected 'unit_type', 'node', or 'none'.")
+
+            for param_name, spec in expected_mga_hyperparameters.items():
+                default = spec["default"]
+                setattr(self, param_name, config.get(param_name, default))
 
     def update(self, new_params: dict) -> None:
         for key, value in new_params.items():

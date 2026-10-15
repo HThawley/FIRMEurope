@@ -79,7 +79,7 @@ class Scenario:
 
         self.statistics = None
         self.assign_unit_type_idx()
-        self.get_unit_type_projection_matrix()
+        self.self.build_capacity_space_scaler()()
         self.relative_space_constructed = False
 
     def __repr__(self):
@@ -513,41 +513,110 @@ class Scenario:
         for line in self.network.minor_lines.values():
             line.unit_type_idx = self.unit_type_idx[line.unit_type]
 
-    def get_unit_type_projection_matrix(self) -> np.ndarray:
+    def get_nodal_demand_totals(self) -> np.ndarray:
         """
-        Constructs an (N, K) projection matrix for space_scaler, mapping N decision
-        variables to K aggregate unit types.
+        Returns 1D array of total horizon energy demand (in model units, e.g. GWh)
+        for each node in canonical node order.
         """
-        # allows safe append in a single line without checking if the key exists first
-        groups = defaultdict(list)
+        n_nodes = len(self.network.nodes)
+        totals = np.zeros(n_nodes, dtype=npfloat)
+        hours = self.static.intervals_count * self.static.resolution
+        for node in self.network.nodes.values():
+            totals[node.order] = npfloat(node.mean_demand * hours)
+        return totals
 
-        for gen in self.fleet.generators.values():
-            if gen.candidate_x_idx != -1:
-                groups[gen.unit_type].append(gen.candidate_x_idx)
-
-        for sto in self.fleet.storages.values():
-            if sto.candidate_p_x_idx != -1:
-                groups[f"{sto.unit_type}_power"].append(sto.candidate_p_x_idx)
-            if sto.candidate_e_x_idx != -1:
-                groups[f"{sto.unit_type}_energy"].append(sto.candidate_e_x_idx)
-
-        for line in self.network.major_lines.values():
-            if line.candidate_x_idx != -1:
-                groups[line.unit_type].append(line.candidate_x_idx)
+    def build_capacity_space_scaler(
+        self,
+        space_norm: str | None = None,
+        space_agg: str | None = None,
+    ) -> np.ndarray:
+        """
+        Constructs the linear `space_scaler` matrix mapping the decision vector `x`
+        (in `self.config.parameterisation`) to the requested (space_norm, space_agg)
+        capacity space for MHMGA fitness evaluation.
+        """
+        space_norm = (space_norm or getattr(self.config, "mga_space_norm", self.config.parameterisation)).lower()
+        space_agg = (space_agg or getattr(self.config, "mga_space_agg", "unit_type")).lower()
+        param_mode = self.config.parameterisation.lower()
 
         n_vars = len(self.lower_bounds_abs)
-        k_dims = len(groups)
 
-        # Build the (N, K) matrix
-        projection_matrix = np.zeros((n_vars, k_dims), dtype=npfloat)
+        # Row-wise conversion factor if target space_norm differs from x's parameterisation
+        if param_mode == space_norm:
+            row_scale = np.ones(n_vars, dtype=npfloat)
+        elif param_mode == "relative" and space_norm == "absolute":
+            row_scale = self.abs_rel_scaler.astype(npfloat)
+        elif param_mode == "absolute" and space_norm == "relative":
+            row_scale = (1.0 / self.abs_rel_scaler).astype(npfloat)
+        else:
+            raise ValueError(f"Unknown norm/parameterisation combination: {param_mode} -> {space_norm}")
 
-        for k, (_, indices) in enumerate(groups.items()):
-            # space is the mean of each unit type
-            # TODO: parameterise this choice
-            projection_matrix[indices, k] = 1.0/len(indices)
+        # 1. Unaggregated ("none"): 1D or diagonal scaling vector of length n_vars
+        if space_agg == "none":
+            return row_scale if not np.allclose(row_scale, 1.0) else np.ones(n_vars, dtype=npfloat)
 
-        self.projection_groups = groups
-        self.projection_matrix = projection_matrix
+        # 2. Aggregated by Unit Type ("unit_type"): (n_vars, K_unit_types) matrix
+        if space_agg == "unit_type":
+            groups = defaultdict(list)
+            for gen in self.fleet.generators.values():
+                if gen.candidate_x_idx != -1:
+                    groups[gen.unit_type].append(gen.candidate_x_idx)
+            for sto in self.fleet.storages.values():
+                if sto.candidate_p_x_idx != -1:
+                    groups[f"{sto.unit_type}_power"].append(sto.candidate_p_x_idx)
+                if sto.candidate_e_x_idx != -1:
+                    groups[f"{sto.unit_type}_energy"].append(sto.candidate_e_x_idx)
+            for line in self.network.major_lines.values():
+                if line.candidate_x_idx != -1:
+                    groups[line.unit_type].append(line.candidate_x_idx)
+
+            k_dims = len(groups)
+            proj = np.zeros((n_vars, k_dims), dtype=npfloat)
+            for k, (_, indices) in enumerate(groups.items()):
+                # Under relative norm, take the mean across nodes in the unit type;
+                # under absolute norm, take the sum across nodes.
+                weight = (1.0 / len(indices)) if space_norm == "relative" else 1.0
+                proj[indices, k] = row_scale[indices] * weight
+
+            self.projection_groups = groups
+            return proj
+
+        # 3. Aggregated by Node ("node"): (n_vars, n_nodes) matrix
+        if space_agg == "node":
+            n_nodes = len(self.network.nodes)
+            proj = np.zeros((n_vars, n_nodes), dtype=npfloat)
+            node_var_counts = np.zeros(n_nodes, dtype=npfloat)
+
+            for gen in self.fleet.generators.values():
+                if gen.candidate_x_idx != -1:
+                    n = gen.node.order
+                    proj[gen.candidate_x_idx, n] = row_scale[gen.candidate_x_idx]
+                    node_var_counts[n] += 1.0
+
+            for sto in self.fleet.storages.values():
+                n = sto.node.order
+                if sto.candidate_p_x_idx != -1:
+                    proj[sto.candidate_p_x_idx, n] = row_scale[sto.candidate_p_x_idx]
+                    node_var_counts[n] += 1.0
+                if sto.candidate_e_x_idx != -1:
+                    proj[sto.candidate_e_x_idx, n] = row_scale[sto.candidate_e_x_idx]
+                    node_var_counts[n] += 1.0
+
+            for line in self.network.major_lines.values():
+                if line.candidate_x_idx != -1:
+                    u, v = line.node_start.order, line.node_end.order
+                    proj[line.candidate_x_idx, u] = 0.5 * row_scale[line.candidate_x_idx]
+                    proj[line.candidate_x_idx, v] = 0.5 * row_scale[line.candidate_x_idx]
+                    node_var_counts[u] += 0.5
+                    node_var_counts[v] += 0.5
+
+            if space_norm == "relative":
+                for n in range(n_nodes):
+                    if node_var_counts[n] > 0:
+                        proj[:, n] /= node_var_counts[n]
+            return proj
+
+        raise ValueError(f"Unknown mga_space_agg: '{space_agg}'")
 
     def inspect_mhmga_recombination(
         self,

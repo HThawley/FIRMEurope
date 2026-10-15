@@ -16,7 +16,6 @@ from mga.population import Population
 import mga.utils.termination as mgat
 
 from firm_ce.common.constants import SAVE_POPULATION, PENALTY_MULTIPLIER
-from firm_ce.optimisation.objective_factory import build_objective
 from firm_ce.common.typing import npfloat
 from firm_ce.backend.scalar.broad_optimum import (
     append_to_midpoint_csv,
@@ -28,6 +27,7 @@ from firm_ce.backend.scalar.broad_optimum import (
     write_broad_optimum_bands,
     write_broad_optimum_records,
 )
+from firm_ce.optimisation.objective_factory import build_objective_bundle
 
 
 def convert_binary_logs_to_csv(
@@ -109,7 +109,6 @@ def convert_binary_logs_to_csv(
 
 class BaseSolver(ABC):
     """Abstract base class for all optimisation strategies"""
-
     def __init__(
         self,
         scenario,
@@ -121,7 +120,10 @@ class BaseSolver(ABC):
         self.initial_population = initial_population
         self.result = None
 
-        self.objective_function, self.fargs = build_objective(self.scenario, self.config)
+        self.obj_bundle = build_objective_bundle(self.scenario, self.config)
+        self.objective_function = self.obj_bundle.func
+        self.fargs = self.obj_bundle.fargs
+        self.details = self.obj_bundle.details
 
     @abstractmethod
     def evaluate(self) -> None:
@@ -337,8 +339,6 @@ class MhmgaSolverBase(BaseSolver):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if getattr(self.config, "save_details", False):
-            self.details = self.fargs[-1]
 
     @abstractmethod
     def callback(self) -> None:
@@ -372,6 +372,10 @@ class MhmgaSolverBase(BaseSolver):
         mhmga_config["lower_bounds"] = self.scenario.lower_bounds.tolist()
         mhmga_config["upper_bounds"] = self.scenario.upper_bounds.tolist()
         mhmga_config["unit_type_idxs"] = self.scenario.unit_type_idx
+        mhmga_config["parameterisation"] = self.config.parameterisation
+        mhmga_config["mga_space_basis"] = getattr(self.config, "mga_space_basis", "capacity")
+        mhmga_config["mga_space_norm"] = getattr(self.config, "mga_space_norm", self.config.parameterisation)
+        mhmga_config["mga_space_agg"] = getattr(self.config, "mga_space_agg", "unit_type")
 
         with open(summary_path, "w") as f:
             json.dump(mhmga_config, f, indent=4)
@@ -583,7 +587,7 @@ class MhmgaSolver(MhmgaSolverBase):
             maximize=False,
             vectorized=True,
             constraints=True,
-            return_scaled=False,
+            return_scaled=self.obj_bundle.return_scaled,
         )
 
         algorithm = MGAProblem(
@@ -688,9 +692,9 @@ class MhmgaSolver(MhmgaSolverBase):
                 noptimal_abs=self.config.mga_noptimal_abs[step],
                 violation_factor=PENALTY_MULTIPLIER,
                 mutation_scaler=np.ones_like(self.scenario.lower_bounds),
-                space_scaler=self.scenario.projection_matrix,
+                space_scaler=self.obj_bundle.space_scaler,
                 objective_scaler=1.0,
-                fitness_method=self.config.mga_fitness[step]
+                fitness_method=self.config.mga_fitness[step],
             )
 
             algorithm.step()

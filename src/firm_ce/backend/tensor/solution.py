@@ -3,34 +3,25 @@ import numpy as np
 
 from firm_ce.common.constants import JIT_ENABLED, NUM_THREADS, FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import jitclass, njit, prange
-from firm_ce.common.typing import boolean, nbfloat, npfloat, TypedDict, nbintp
-from firm_ce.common.helpers import safe_divide_array
+from firm_ce.common.typing import boolean, nbfloat, npfloat, TypedDict, nbintp, npintp
 from firm_ce.backend.tensor.simulation import Simulate
 
 from firm_ce.system.tensor.assets import AssetTensor, AssetTensorType
 from firm_ce.system.tensor.operations import OperationTensor, OperationTensorType, reset_operations
 from firm_ce.system.tensor.static import StaticTensorType
 
-# Dynamic definition of tensor details columns.
-TENSOR_DETAILS_COLUMNS = (
-    "lcoe",
-    "penalties",
-    "nuke",
-    "nlte",
-    "nph",
-    "biom",
-    "biog",
-    "gas",
-    # -- Zero-VOM technologies in current model --
-    # "pfix",
-    # "psat",
-    # "offw",
-    # "onsw",
-    # "b4",
-    # "b2",
-    # "lines",
-)
-TENSOR_DETAILS_LENGTH = len(TENSOR_DETAILS_COLUMNS)
+# Column indices in SolutionTensor.nodal_energy (shape: nodes x 13)
+# 0: pfix, 1: psat, 2: offw, 3: onsw, 4: nuke, 5: nlte,
+# 6: biom, 7: biog, 8: gas, 9: phes_dis, 10: b4_dis, 11: b2_dis, 12: curtail
+N_ENERGY_COMPONENTS = 13
+
+# Integer codes for Numba energy-space extraction
+NORM_RELATIVE = npintp(0)
+NORM_ABSOLUTE = npintp(1)
+
+AGG_NONE = npintp(0)
+AGG_UNIT_TYPE = npintp(1)
+AGG_NODE = npintp(2)
 
 if JIT_ENABLED:
     from numba import set_num_threads
@@ -44,6 +35,10 @@ if JIT_ENABLED:
         ("static", StaticTensorType),
         ("assets", AssetTensorType),
         ("operations", OperationTensorType),
+
+        # -- Pre-allocated Nodal Operational Summary --
+        ("nodal_energy", nbfloat[:, :]),
+        ("nodal_nph_gen", nbfloat[:]),
 
         # -- State variables --
         ("simulated", boolean),
@@ -71,6 +66,9 @@ class SolutionTensor:
         self.static = static
         self.assets = AssetTensor(x, self.static)
         self.operations = OperationTensor(self.static, self.assets)
+        self.nodal_energy = np.zeros((self.static.nodes, N_ENERGY_COMPONENTS), dtype=npfloat)
+        self.nodal_nph_gen = np.zeros(self.static.nodes, dtype=npfloat)
+
         self.simulated = False
         self.evaluated = False
 
@@ -95,6 +93,8 @@ def ResetSolution(
     solution.x = x
     solution.assets = AssetTensor(x, solution.static)  # cheap enough to rebuild rather than reset
     reset_operations(solution.operations, solution.static, solution.assets)
+    solution.nodal_energy[:, :] = npfloat(0.0)
+    solution.nodal_nph_gen[:] = npfloat(0.0)
     solution.simulated = False
     solution.evaluated = False
     solution.feasible = True
@@ -110,19 +110,48 @@ def CalculateCost(
 ):
     a = solution.assets
     o = solution.operations
-    c = solution.static.costs
+    s = solution.static
+    c = s.costs
+    E = solution.nodal_energy
 
-    # Apportionment not entirely accurate but this is a miniscule cost component
-    _Mnuke_ratio = o.Mnuke.sum(axis=0)
-    safe_divide_array(_Mnuke_ratio, a.Cnuke, out=_Mnuke_ratio)
+    E[:, :] = npfloat(0.0)
 
-    # Apportionment not entirely accurate but this is a miniscule cost component
-    _Mnphes_ratio = o.Mdischarge[:, :, 0].sum(axis=0)
-    safe_divide_array(_Mnphes_ratio, a.CstorageP[:, 0], out=_Mnphes_ratio)
+    # Single-pass time accumulation over intervals into nodal_energy (shape: nodes x 13)
+    for t in range(s.intervals):
+        for n in range(s.nodes):
+            E[n, 0] += s.TSpfix[t, n]
+            E[n, 1] += s.TSpsat[t, n]
+            E[n, 2] += s.TSoffw[t, n]
+            E[n, 3] += s.TSonsw[t, n]
+            E[n, 4] += o.Mnuke[t, n]
+            E[n, 6] += o.Mpeak[t, n, 0]
+            E[n, 7] += o.Mpeak[t, n, 1]
+            E[n, 8] += o.Mpeak[t, n, 2]
+            E[n, 9] += o.Mdischarge[t, n, 0]
+            E[n, 10] += o.Mdischarge[t, n, 1]
+            E[n, 11] += o.Mdischarge[t, n, 2]
+            E[n, 12] += np.abs(o.Tcurtail[t, n])
 
-    cost = solution.static.legacy_costs
+    cost = s.legacy_costs
 
-    for n in range(solution.static.nodes):
+    for n in range(s.nodes):
+        # Convert VRE capacity factor time-sums into gross energy
+        E[n, 0] *= a.Cpfix[n]
+        E[n, 1] *= a.Cpsat[n]
+        E[n, 2] *= a.Coffw[n]
+        E[n, 3] *= a.Consw[n]
+
+        # Apportion total nuclear generation (currently in E[n, 4]) between new nuke and LTE nuke
+        tot_nuke_gen = E[n, 4]
+        nuke_ratio = tot_nuke_gen / a.Cnuke[n] if a.Cnuke[n] > 0.0 else npfloat(0.0)
+        E[n, 4] = nuke_ratio * (a.Cnuke[n] - a.Cnlte[n])  # new nuclear generation
+        E[n, 5] = nuke_ratio * a.Cnlte[n]                 # LTE nuclear generation
+
+        # Apportion total PHES discharge (E[n, 9]) to candidate new-build PHES for variable cost
+        phes_ratio = E[n, 9] / a.CstorageP[n, 0] if a.CstorageP[n, 0] > 0.0 else npfloat(0.0)
+        solution.nodal_nph_gen[n] = phes_ratio * a.CnphP[n]
+
+        # Fixed Costs
         cost += a.Cpfix[n] * c.Fpfix[n]
         cost += a.Cpsat[n] * c.Fpsat[n]
         cost += a.Coffw[n] * c.Foffw[n]
@@ -137,31 +166,27 @@ def CalculateCost(
         cost += a.CstorageP[n, 1] * c.Fb4P[n]
         cost += a.CstorageP[n, 2] * c.Fb2P[n]
 
-        # Variable Costs
-        cost += (_Mnuke_ratio[n] * (a.Cnuke[n] - a.Cnlte[n])) * c.Vnuke[n]
-        cost += (_Mnuke_ratio[n] * a.Cnlte[n]) * c.Vnlte[n]
-        cost += _Mnphes_ratio[n] * a.CnphP[n] * c.Vph[n]
+        # Variable Costs (using pre-summed nodal totals!)
+        cost += E[n, 4] * c.Vnuke[n]
+        cost += E[n, 5] * c.Vnlte[n]
+        cost += solution.nodal_nph_gen[n] * c.Vph[n]
+        cost += E[n, 6] * c.Vbiom[n]
+        cost += E[n, 7] * c.Vbiog[n]
+        cost += E[n, 8] * c.Vgas[n]
 
-    for t in range(solution.static.intervals):
-        for n in range(solution.static.nodes):
-            cost += o.Mpeak[t, n, 0] * c.Vbiom[n]
-            cost += o.Mpeak[t, n, 1] * c.Vbiog[n]
-            cost += o.Mpeak[t, n, 2] * c.Vgas[n]
+        # -- Zero-VOM technologies in current model --
+        # cost += E[n, 0] * c.Vpfix[n]
+        # cost += E[n, 1] * c.Vpsat[n]
+        # cost += E[n, 2] * c.Voffw[n]
+        # cost += E[n, 3] * c.Vonsw[n]
+        # cost += E[n, 10] * c.Vb4[n]
+        # cost += E[n, 11] * c.Vb2[n]
 
-            # -- These all have 0.0 vom in current model --
-            # cost += o.Mpfix[t, n] * c.Vpfix[n]
-            # cost += o.Mpsat[t, n] * c.Vpsat[n]
-            # cost += o.Moffw[t, n] * c.Voffw[n]
-            # cost += o.Monsw[t, n] * c.Vonsw[n]
-            # cost += np.abs(o.Tnetflow[t, n]) * c.Vlines[n]
-            # cost += o.Mdischarge[t, n, 1] * c.Vb4[n]
-            # cost += o.Mdischarge[t, n, 2] * c.Vb2[n]
-
-    for n in range(solution.static.nhvi):
+    for n in range(s.nhvi):
         cost += a.Clines[n] * c.Flines[n]
 
     solution.total_annual_cost = cost
-    solution.lcoe = cost / solution.static.mean_annual_demand_mwh
+    solution.lcoe = cost / s.mean_annual_demand_mwh
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
@@ -170,75 +195,83 @@ def ExtractDetailsTensor(
     details_slice: nbfloat[:],
 ) -> None:
     """
-    Aggregates operational dispatch by unit_type across the system into a 1D slice.
-    Matches the column order defined in TENSOR_DETAILS_COLUMNS.
+    O(nodes) extraction of system-wide unit-type operational totals from `solution.nodal_energy`.
+    Zero time-series iteration required.
     """
-    a = solution.assets
-    o = solution.operations
-    s = solution.static
+    E = solution.nodal_energy
+    nph_gen = solution.nodal_nph_gen
+    n_nodes = solution.static.nodes
 
     details_slice[:] = npfloat(0.0)
     details_slice[0] = solution.lcoe
     details_slice[1] = solution.penalties
 
-    _Mnuke_ratio = o.Mnuke.sum(axis=0)
-    safe_divide_array(_Mnuke_ratio, a.Cnuke, out=_Mnuke_ratio)
+    for n in range(n_nodes):
+        details_slice[2] += E[n, 4]      # nuclear
+        details_slice[3] += E[n, 5]      # nuclear_lte
+        details_slice[4] += nph_gen[n]   # nphes
+        details_slice[5] += E[n, 6]      # biomass
+        details_slice[6] += E[n, 7]      # biogas
+        details_slice[7] += E[n, 8]      # ccgt (gas)
 
-    _Mnphes_ratio = o.Mdischarge[:, :, 0].sum(axis=0)
-    safe_divide_array(_Mnphes_ratio, a.CstorageP[:, 0], out=_Mnphes_ratio)
+        # -- Zero-VOM technologies in current model --
+        # details_slice[8] += E[n, 0]    # pv_fixed
+        # details_slice[9] += E[n, 1]    # pv_track
+        # details_slice[10] += E[n, 2]   # offw
+        # details_slice[11] += E[n, 3]   # onsw
+        # details_slice[12] += E[n, 10]  # bess4h
+        # details_slice[13] += E[n, 11]  # bess2h
 
-    nuke_gen = npfloat(0.0)
-    nlte_gen = npfloat(0.0)
-    nph_gen = npfloat(0.0)
 
-    for n in range(s.nodes):
-        nuke_gen += _Mnuke_ratio[n] * (a.Cnuke[n] - a.Cnlte[n])
-        nlte_gen += _Mnuke_ratio[n] * a.Cnlte[n]
-        nph_gen += _Mnphes_ratio[n] * a.CnphP[n]
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
+def ExtractEnergySpaceTensor(
+    solution: SolutionTensorType,
+    nodal_demand_totals: nbfloat[:],
+    norm_mode: nbintp,
+    agg_mode: nbintp,
+    scaled_slice: nbfloat[:],
+) -> None:
+    """
+    O(nodes) projection of `solution.nodal_energy` (gross generation + storage discharge
+    + curtailment) into the target MGA fitness space (`scaled_slice`).
+    """
+    E = solution.nodal_energy
+    n_nodes = solution.static.nodes
+    scaled_slice[:] = npfloat(0.0)
 
-    biom_gen = npfloat(0.0)
-    biog_gen = npfloat(0.0)
-    gas_gen = npfloat(0.0)
+    # Total system demand over the horizon = sum of nodal_demand_totals
+    sys_demand_total = npfloat(0.0)
+    for n in range(n_nodes):
+        sys_demand_total += nodal_demand_totals[n]
 
-    # -- Zero-VOM accumulators --
-    # pfix_gen = npfloat(0.0)
-    # psat_gen = npfloat(0.0)
-    # offw_gen = npfloat(0.0)
-    # onsw_gen = npfloat(0.0)
-    # b4_gen = npfloat(0.0)
-    # b2_gen = npfloat(0.0)
-    # lines_flow = npfloat(0.0)
+    if agg_mode == AGG_UNIT_TYPE:
+        # Output shape: (N_ENERGY_COMPONENTS,) = (13,)
+        inv_nodes = npfloat(1.0) / npfloat(n_nodes)
+        inv_sys_demand = npfloat(1.0) / sys_demand_total if sys_demand_total > 0.0 else npfloat(1.0)
+        for n in range(n_nodes):
+            weight = (inv_nodes / nodal_demand_totals[n]) if norm_mode == NORM_RELATIVE else inv_sys_demand
+            for k in range(N_ENERGY_COMPONENTS):
+                scaled_slice[k] += E[n, k] * weight
 
-    for t in range(s.intervals):
-        for n in range(s.nodes):
-            biom_gen += o.Mpeak[t, n, 0]
-            biog_gen += o.Mpeak[t, n, 1]
-            gas_gen += o.Mpeak[t, n, 2]
+    elif agg_mode == AGG_NODE:
+        # Output shape: (n_nodes,)
+        inv_sys_demand = npfloat(1.0) / sys_demand_total if sys_demand_total > 0.0 else npfloat(1.0)
+        for n in range(n_nodes):
+            weight = (npfloat(1.0) / nodal_demand_totals[n]) if norm_mode == NORM_RELATIVE else inv_sys_demand
+            node_sum = npfloat(0.0)
+            for k in range(N_ENERGY_COMPONENTS):
+                node_sum += E[n, k]
+            scaled_slice[n] = node_sum * weight
 
-            # -- Zero-VOM technologies in current model --
-            # pfix_gen += s.TSpfix[t, n] * a.Cpfix[n]
-            # psat_gen += s.TSpsat[t, n] * a.Cpsat[n]
-            # offw_gen += s.TSoffw[t, n] * a.Coffw[n]
-            # onsw_gen += s.TSonsw[t, n] * a.Consw[n]
-            # b4_gen += o.Mdischarge[t, n, 1]
-            # b2_gen += o.Mdischarge[t, n, 2]
-            # lines_flow += np.abs(o.Tnetflow[t, n])
-
-    details_slice[2] = nuke_gen
-    details_slice[3] = nlte_gen
-    details_slice[4] = nph_gen
-    details_slice[5] = biom_gen
-    details_slice[6] = biog_gen
-    details_slice[7] = gas_gen
-
-    # -- Zero-VOM assignments --
-    # details_slice[8] = pfix_gen
-    # details_slice[9] = psat_gen
-    # details_slice[10] = offw_gen
-    # details_slice[11] = onsw_gen
-    # details_slice[12] = b4_gen
-    # details_slice[13] = b2_gen
-    # details_slice[14] = lines_flow
+    else:  # AGG_NONE
+        # Output shape: (n_nodes * N_ENERGY_COMPONENTS,)
+        inv_sys_demand = npfloat(1.0) / sys_demand_total if sys_demand_total > 0.0 else npfloat(1.0)
+        idx = 0
+        for n in range(n_nodes):
+            weight = (npfloat(1.0) / nodal_demand_totals[n]) if norm_mode == NORM_RELATIVE else inv_sys_demand
+            for k in range(N_ENERGY_COMPONENTS):
+                scaled_slice[idx] = E[n, k] * weight
+                idx += 1
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
@@ -248,18 +281,13 @@ def EvaluateTensorFromDetails(
     details_slice: nbfloat[:],
 ) -> tuple[nbfloat, nbfloat]:
     """
-    Reconstructs total annual cost and LCOE from decision vector `x`, `static` (potentially
-    with updated cost assumptions), and `details_slice` WITHOUT allocating SolutionTensor
-    or OperationTensor.
-
-    Assumes variable costs are spatially uniform across nodes per unit type (indexing node 0).
-    Returns (lcoe, penalties).
+    Reconstructs total annual cost and LCOE from decision vector `x`, `static`, and
+    `details_slice` WITHOUT allocating SolutionTensor or OperationTensor.
     """
     a = AssetTensor(x, static)
     c = static.costs
     cost = static.legacy_costs
 
-    # Fixed Costs
     for n in range(static.nodes):
         cost += a.Cpfix[n] * c.Fpfix[n]
         cost += a.Cpsat[n] * c.Fpsat[n]
@@ -278,22 +306,12 @@ def EvaluateTensorFromDetails(
     for n in range(static.nhvi):
         cost += a.Clines[n] * c.Flines[n]
 
-    # Variable Costs (aggregated by unit type, using uniform cost at index 0)
     cost += details_slice[2] * c.Vnuke[0]
     cost += details_slice[3] * c.Vnlte[0]
     cost += details_slice[4] * c.Vph[0]
     cost += details_slice[5] * c.Vbiom[0]
     cost += details_slice[6] * c.Vbiog[0]
     cost += details_slice[7] * c.Vgas[0]
-
-    # -- Zero-VOM technologies in current model --
-    # cost += details_slice[8] * c.Vpfix[0]
-    # cost += details_slice[9] * c.Vpsat[0]
-    # cost += details_slice[10] * c.Voffw[0]
-    # cost += details_slice[11] * c.Vonsw[0]
-    # cost += details_slice[12] * c.Vb4[0]
-    # cost += details_slice[13] * c.Vb2[0]
-    # cost += details_slice[14] * c.Vlines[0]
 
     lcoe = cost / static.mean_annual_demand_mwh
     penalties = details_slice[1]
@@ -319,10 +337,6 @@ def EvaluateTensor(
 def prep_solution_for_postprocessing(
     solution: SolutionTensorType,
 ) -> None:
-    """
-    Calculates some arrays which are required for downstream post-processing
-    but which are not calculated in EvaluateTensor for code performance
-    """
     if not solution.evaluated:
         raise Exception
 
@@ -343,9 +357,6 @@ def build_eval_and_return_solutions(
     xs: nbfloat[:, :],
     static: StaticTensorType,
 ) -> TypedDict[nbintp, SolutionTensorType]:
-    """
-    Convenience for efficient post-processing - not to be used in optimisation loops
-    """
     xs = xs.astype(nbfloat)
     n_points = xs.shape[0]
     solutions = TypedDict()
