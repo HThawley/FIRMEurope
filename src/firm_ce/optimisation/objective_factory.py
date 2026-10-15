@@ -134,11 +134,15 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
         elif space_basis == "energy":
             nodal_demand_totals = scenario.get_nodal_demand_totals()
             det_arg = details_buf if save_details else np.empty((1, 1, 1), dtype=npfloat)
+            n_vars = len(scenario.lower_bounds)
 
             if backend == "tensor":
                 norm_code, agg_code, scaled_dim = _resolve_energy_space_dims(
                     scenario, config, N_ENERGY_COMPONENTS
                 )
+                # Pass a 2D dummy space_scaler so mga sets population.scaled_points to scaled_dim columns
+                dummy_space_scaler = np.empty((n_vars, int(scaled_dim)), dtype=npfloat)
+
                 fargs = (
                     scenario.staticTensor,
                     nodal_demand_totals,
@@ -152,7 +156,7 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
                     func=mga_tensor_wrapper_scaled,
                     fargs=fargs,
                     return_scaled=True,
-                    space_scaler=None,
+                    space_scaler=dummy_space_scaler,
                     details=details_buf,
                 )
 
@@ -164,6 +168,8 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
                 norm_code, agg_code, scaled_dim = _resolve_energy_space_dims(
                     scenario, config, n_energy_types
                 )
+                dummy_space_scaler = np.empty((n_vars, int(scaled_dim)), dtype=npfloat)
+
                 fargs = (
                     *_get_default_args(scenario, config),
                     nodal_demand_totals,
@@ -179,7 +185,7 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
                     func=mga_scalar_wrapper_scaled,
                     fargs=fargs,
                     return_scaled=True,
-                    space_scaler=None,
+                    space_scaler=dummy_space_scaler,  # <-- Corrected
                     details=details_buf,
                 )
 
