@@ -15,11 +15,11 @@ from firm_ce.common.typing import npfloat
 from firm_ce.system.scalar.parameters import ModelConfig
 from firm_ce.system.scenario import Scenario
 
+from firm_ce.analysis.taxonomy import PlotStyle, TECH_COLORS, TECH_HATCHES, get_color, get_hatch
 from firm_ce.analysis.display_presets import (
     MAP_SPECS,
     SUMMARY_PRESETS,
     MetricSpec,
-    PlotStyle,
     is_generation_or_hydro,
     is_rechargeable_storage,
 )
@@ -103,6 +103,13 @@ class Display:
 
     def set_small_fontsize(self, size: int):
         self.style.small_fontsize = size
+
+    def set_annotation_format(self, fmt: Union[str, Callable[[float], str]]):
+        """
+        Sets the string format or formatting function for numeric chart annotations.
+        Examples: '{:,.1f}' (1 decimal), '{:.3g}' (3 sig figs), '{:,.0f}' (integers).
+        """
+        self.style.annotation_format = fmt
 
     # --------------------------------------------------------------------------
     # Data Extraction & Aggregation Layer
@@ -203,6 +210,11 @@ class Display:
                 val = self._get_build_energy_capacity(accessor, asset, spec.build)
             case "dispatch":
                 val = accessor.get_dispatch_gross(asset)
+            case "dispatch_and_charge":
+                out = {label: accessor.get_dispatch_gross(asset) * scale}
+                if getattr(asset, "object_class", "") == "storage":
+                    out[f"{label} (Electrical)"] = accessor.get_charge_gross(asset) * scale
+                return out
             case "post_curtailment_power":
                 val = accessor.get_gross("post_curtailment_power", asset)
             case "discharge":
@@ -650,7 +662,12 @@ class Display:
                 for pos_tot, denom in zip(bar_pos_totals, bar_denoms)
             ]
             max_pos_height = max(bar_heights, default=100.0)
-            min_neg_height = 0.0
+
+            bar_neg_heights = [
+                (neg_tot / denom * 100.0) if denom > 0 else 0.0
+                for neg_tot, denom in zip(bar_neg_totals, bar_denoms)
+            ]
+            min_neg_height = min(bar_neg_heights, default=0.0)
         else:
             bar_denoms = bar_pos_totals
             max_pos_height = max(bar_pos_totals, default=1.0)
@@ -661,6 +678,9 @@ class Display:
         for idx, (_label, mix, unit, _norm_ref) in enumerate(items):
             clean_mix = {k: v for k, v in mix.items() if abs(v) > 1e-6}
             denom = bar_denoms[idx]
+
+            pos_physical_total = sum(v for v in clean_mix.values() if v > 0)
+            neg_physical_total = sum(v for v in clean_mix.values() if v < 0)
             net_total = sum(clean_mix.values())
 
             sorted_items = (
@@ -677,16 +697,15 @@ class Display:
                     if denom <= 0:
                         continue
                     height = (val / denom) * 100.0
+                else:
+                    height = val
+
+                if val >= 0:
                     bottom = pos_bottom
                     pos_bottom += height
                 else:
-                    height = val
-                    if val >= 0:
-                        bottom = pos_bottom
-                        pos_bottom += height
-                    else:
-                        bottom = neg_bottom
-                        neg_bottom += height
+                    bottom = neg_bottom
+                    neg_bottom += height
 
                 bar_container = axis.bar(
                     x_positions[idx],
@@ -697,23 +716,60 @@ class Display:
                     hatch=self._get_hatch(tech),
                     edgecolor="black",
                     linewidth=0.5,
+                    zorder=3,
                 )
                 if tech not in legend_handles:
                     legend_handles[tech] = bar_container[0]
 
-            prefix = "+" if (is_delta and net_total > 0) else ""
+            # Top Annotation
+            display_top_val = net_total if is_delta else pos_physical_total
+            prefix = "+" if (is_delta and display_top_val > 0) else ""
+
+            if callable(self.style.annotation_format):
+                top_str = self.style.annotation_format(display_top_val)
+            else:
+                top_str = self.style.annotation_format.format(display_top_val)
+
             axis.text(
                 x_positions[idx],
                 pos_bottom + annot_offset,
-                f"{prefix}{net_total:,.1f} {unit}",
+                f"{prefix}{top_str} {unit}",
                 ha="center",
                 va="bottom",
                 fontsize=self.style.small_fontsize,
                 fontweight="bold",
             )
 
-        if is_delta:
-            axis.axhline(0, color="black", linewidth=0.8)
+            # Bottom Annotation (Negative Component)
+            if neg_physical_total < -1e-6:
+                if callable(self.style.annotation_format):
+                    # Using absolute value guarantees formatting doesn't misplace the minus sign
+                    neg_str = self.style.annotation_format(abs(neg_physical_total))
+                else:
+                    neg_str = self.style.annotation_format.format(abs(neg_physical_total))
+
+                axis.text(
+                    x_positions[idx],
+                    neg_bottom - annot_offset,
+                    f"-{neg_str} {unit}",
+                    ha="center",
+                    va="top",
+                    fontsize=self.style.small_fontsize,
+                    fontweight="bold",
+                )
+
+        if is_delta or min_neg_height < -1e-6:
+            axis.axhline(0, color="black", linewidth=0.8, zorder=4)
+
+        # Apply 10% gridlines and dynamically pad the bottom y-limit
+        if normalize and not is_delta:
+            axis.yaxis.set_major_locator(plt.MultipleLocator(10))
+            axis.grid(True, axis="y", linestyle="--", alpha=0.3, color="gray", zorder=0)
+            axis.set_axisbelow(True)
+            # Subtract 5.0 before flooring to guarantee text padding isn't cropped
+            y_bot = math.floor((min_neg_height - 5.0) / 10.0) * 10.0 if min_neg_height < -1e-6 else 0.0
+        else:
+            y_bot = (min_neg_height - max(abs(min_neg_height) * 0.15, annot_offset * 3)) if min_neg_height < -1e-6 else 0.0
 
         axis.set_xticks(x_positions)
         axis.set_xticklabels([b[0] for b in items], fontsize=self.style.base_fontsize)
@@ -724,7 +780,6 @@ class Display:
         )
 
         y_top = max(110.0, max_pos_height * 1.12) if (normalize and not is_delta) else max(max_pos_height * 1.15, 1.0)
-        y_bot = min_neg_height * 1.15 if is_delta else 0.0
         axis.set_ylim(y_bot, y_top)
         axis.spines["top"].set_visible(False)
         axis.spines["right"].set_visible(False)
@@ -807,7 +862,12 @@ class Display:
             else:
                 handles = self._draw_treemap(axis, values, colors, hatches, scale)
 
-            axis.set_title(f"{title}\nTotal: {total:,.1f} {unit}", pad=10)
+            if callable(self.style.annotation_format):
+                val_str = self.style.annotation_format(total)
+            else:
+                val_str = self.style.annotation_format.format(total)
+
+            axis.set_title(f"{title}\nTotal: {val_str} {unit}", pad=10)
             axis.set_aspect("equal")
             axis.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
 
@@ -1126,53 +1186,14 @@ class Display:
         return base
 
     def _init_colors(self):
-        self.tech_colors = {
-            "Utility Solar": "#F59E0B",
-            "Rooftop Solar": "#FEF08A",
-            "Onshore Wind": "#60A5FA",
-            "Offshore Wind": "#1D4ED8",
-            "Hydro": "#0D9488",
-            "Pondage": "#2DD4BF",
-            "Run of River": "#99F6E4",
-            "Bioenergy": "#16A34A",
-            "Biomass": "#15803D",
-            "Biogas": "#86EFAC",
-            "Geothermal": "#B91C1C",
-            "Nuclear": "#E11D48",
-            "Fossil Gas": "#78716C",
-            "Coal": "#27272A",
-            "Battery": "#A855F7",
-            "Closed-loop PHES": "#EC4899",
-            "Open-loop PHES": "#6366F1",
-            "New PHES": "#3730A3",
-            "Legacy PHES": "#818CF8",
-            "PHES": "#6366F1",
-            "AC OHL": "#9A3412",
-            "AC OHL (Mountain)": "#EA580C",
-            "DC Subsea": "#0E7490",
-            "DC Underground": "#1E293B",
-            "Curtailment": "#E5E7EB",
-            "Storage Losses": "#9CA3AF",
-            "Transmission Losses": "#6B7280",
-            "Spillage": "#BAE6FD",
-        }
-        self.tech_hatches = {
-            "Curtailment": "xx",
-            "Storage Losses": "--",
-            "Transmission Losses": "\\\\",
-            "Spillage": "oo",
-        }
+        self.tech_colors = dict(TECH_COLORS)
+        self.tech_hatches = dict(TECH_HATCHES)
 
     def _get_color(self, tech: str) -> str:
-        base_tech = tech.removesuffix(" (Electrical)").removesuffix(" (Inflows)")
-        return self.tech_colors.get(tech, self.tech_colors.get(base_tech, "#6B7280"))
+        return get_color(tech)
 
     def _get_hatch(self, tech: str) -> str | None:
-        if tech.endswith(" (Electrical)"):
-            return "//"
-        if tech.endswith(" (Inflows)"):
-            return ".."
-        return self.tech_hatches.get(tech, None)
+        return get_hatch(tech)
 
     def _add_legend(self, ax: plt.Axes, data_dict: dict):
         present_techs = {tech for mix in data_dict.values() for tech in mix.keys()}
@@ -1197,3 +1218,7 @@ class Display:
     def _sort_mix_items(mix: dict) -> list[tuple[str, float]]:
         secondary = {"Curtailment", "Storage Losses", "Transmission Losses", "Spillage"}
         return sorted(mix.items(), key=lambda item: (item[0] in secondary, item[0]))
+
+    @staticmethod
+    def format_sigfigs(val: float, sigfigs: int = 2) -> str:
+        return PlotStyle.format_sigfigs(val, sigfigs)

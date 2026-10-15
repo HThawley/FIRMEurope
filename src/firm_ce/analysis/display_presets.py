@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Dict, List, Literal, Sequence, Union
 
 AssetClass = Literal["generators", "storages", "major_lines"]
@@ -6,6 +6,7 @@ MetricType = Literal[
     "power_capacity",
     "energy_capacity",
     "dispatch",
+    "dispatch_and_charge",
     "post_curtailment_power",
     "discharge",
     "charge",
@@ -70,28 +71,14 @@ class MetricSpec:
     scale_factor: float = 1.0
     norm_ref: int | None = None  # Index of spec in preset to normalize against when normalize=True
 
-
-@dataclass
-class PlotStyle:
-    """Scoped Matplotlib style configuration to avoid mutating global plt.rcParams."""
-
-    dpi: int = 300
-    base_fontsize: int = 12
-    large_fontsize: int = 14
-    small_fontsize: int = 10
-
-    def to_rc(self) -> dict:
-        return {
-            "font.size": self.base_fontsize,
-            "legend.fontsize": self.small_fontsize,
-            "legend.title_fontsize": self.small_fontsize,
-            "axes.titlesize": self.small_fontsize,
-        }
-
+    def with_options(self, **kwargs) -> "MetricSpec":
+        """Returns a modified copy of this MetricSpec with updated fields."""
+        return replace(self, **kwargs)
 
 # ==============================================================================
 # 2. Preset Registry (Single Node/Map Specs & Summary Spec Groupings)
 # ==============================================================================
+
 
 MAP_SPECS: Dict[str, MetricSpec] = {
     "capacity": MetricSpec(
@@ -257,7 +244,7 @@ SUMMARY_PRESETS: Dict[str, List[MetricSpec]] = {
             title="Annual Energy Mix",
             unit="TWh/yr",
             assets=("generators", "storages"),
-            metric="dispatch",
+            metric="dispatch_and_charge",
             annualize=True,
         ),
         # Bar 2: Losses & Curtailment (normalized against Bar 1's TWh/yr total -> <100%)
