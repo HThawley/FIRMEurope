@@ -361,8 +361,11 @@ def build_eval_and_return_solutions(
     n_points = xs.shape[0]
     solutions = TypedDict()
 
+    for j in range(n_points):
+        j_ = npintp(j)
+        solutions[j_] = SolutionTensor(xs[j_], static)
+
     for j in prange(n_points):
-        solutions[j] = SolutionTensor(xs[j], static)
-        EvaluateTensor(solutions[j])
+        EvaluateTensor(solutions[npintp(j)])
 
     return solutions

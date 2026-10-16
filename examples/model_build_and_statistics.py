@@ -11,6 +11,7 @@ from firm_ce.analysis.validate import Validation, ValidationTensor
 from firm_ce.analysis.display import Display, MetricSpec, is_rechargeable_storage
 from firm_ce.analysis.space_explorer import SpaceExplorer
 from firm_ce.common.typing import npfloat
+from firm_ce.analysis.cost_uncertainty import MCConfig, run_monte_carlo
 
 
 def resolve_single_solution_x(scenario, run_mode: str, x_loc: str | None = None, x0_fallback: bool = True) -> np.ndarray:
@@ -54,21 +55,49 @@ def resolve_single_solution_x(scenario, run_mode: str, x_loc: str | None = None,
 def resolve_mhmga_noptima_xs(scenario) -> np.ndarray:
     """Resolves the near-optimal alternative vectors `xs` from mga_logs."""
     mga_dir = os.path.join(scenario.solution_dir, "mga_logs")
+    ndim = len(scenario.lower_bounds)
 
-    for fname, start_col in (("mga_alternatives.csv", 3), ("mga-noptima.csv", 5)):
+    for fname in ("mga_alternatives.csv", "mga-noptima.csv"):
         fpath = os.path.join(mga_dir, fname)
         if os.path.exists(fpath):
             df = pd.read_csv(fpath)
             if len(df) > 0:
-                return df.iloc[:, start_col:].to_numpy().astype(npfloat)
+                xs = df.iloc[:, -ndim:].to_numpy(dtype=npfloat)
+                valid_mask = np.all(np.isfinite(xs), axis=1)
+                if np.any(valid_mask):
+                    return xs[valid_mask]
 
     evo_path = os.path.join(mga_dir, "mga-evolution.csv")
     if os.path.exists(evo_path):
         df = pd.read_csv(evo_path)
         df = df[df["iter"] == df["iter"].max()]
-        return df.iloc[:, 6:].to_numpy().astype(npfloat)
+        xs = df.iloc[:, -ndim:].to_numpy(dtype=npfloat)
+        valid_mask = np.all(np.isfinite(xs), axis=1)
+        if np.any(valid_mask):
+            return xs[valid_mask]
 
-    raise FileNotFoundError(f"Could not find MHMGA alternatives in '{mga_dir}'.")
+    raise FileNotFoundError(f"Could not find valid MHMGA alternatives in '{mga_dir}'.")
+
+
+def run_cost_monte_carlo(
+    scenario,
+    n_samples: int = 10_000,
+    rel_halfwidth: float = 0.10,
+    perturb_mode: str = "group",  # "group" = one multiplier per cost parameter; "element" = per node/line
+):
+    """Monte-Carlo over cost inputs for the pre-evaluated near-optimal alternatives."""
+    if not scenario.config.type.startswith("mhmga"):
+        raise ValueError(f"Cost Monte-Carlo needs an mhmga scenario, got '{scenario.config.type}'.")
+    if scenario.config.backend != "tensor":
+        raise NotImplementedError("Cost Monte-Carlo is only implemented for backend='tensor'.")
+
+    cfg = MCConfig(n_samples=n_samples, rel_halfwidth=rel_halfwidth, perturb_mode=perturb_mode)
+
+    # Push the already-evaluated noptima to the analysis engine
+    summary = run_monte_carlo(scenario, cfg=cfg)
+
+    print(summary.head(10).to_string(index=False))
+    return summary
 
 
 def load_scenario(scenario, run_mode: str, x_loc: str | None = None, x0_fallback: bool = True) -> None:
@@ -104,24 +133,23 @@ def display_graphs(scenario) -> None:
     # --- Tier 1: Simulated Solution Display ---
     if scenario.config.type == "single_time":
         print(f"Generating single_time plots for '{scenario.name}'")
-        disp = Display(scenario, scenario.config, solution=scenario.solution)
-        disp.set_annotation_format(lambda v: disp.format_sigfigs(v, 2))
+        scenario.display = Display(scenario, scenario.config, solution=scenario.solution)
+        scenario.display.set_annotation_format(lambda v: scenario.display.format_sigfigs(v, 2))
 
-        disp.plot_summary("system_overview_with_losses", chart_type="stacked_bar", normalize=True)
-        disp.plot_summary("energy_balance", chart_type="stacked_bar", normalize=False)
-        disp.plot_summary("power_capacity", chart_type="treemap")
-        disp.plot_map("energy")
-        scenario.display = disp
+        scenario.display.plot_summary("system_overview_with_losses", chart_type="stacked_bar", normalize=True)
+        scenario.display.plot_summary("energy_balance", chart_type="stacked_bar", normalize=False)
+        scenario.display.plot_summary("power_capacity", chart_type="treemap")
+        scenario.display.plot_map("energy")
 
     elif scenario.config.type.startswith("mhmga"):
         print(f"Generating MHMGA plots for '{scenario.name}'")
-        disp = Display(scenario, scenario.config, noptima=scenario.noptima)
-        disp.set_annotation_format(lambda v: disp.format_sigfigs(v, 2))
+        scenario.display = Display(scenario, scenario.config, noptima=scenario.noptima)
+        scenario.display.set_annotation_format(lambda v: scenario.display.format_sigfigs(v, 2))
 
         # 1. Tier 1: Compare specific simulated MGA niche alternatives
-        gen_mix_spec = disp.presets["energy_balance"][0]
-        disp.plot_summary(gen_mix_spec, solutions=[0, 1, 2, 3, 4], normalize=False)
-        disp.plot_summary("power_capacity", solutions=2, ref_solution=0, mode="delta", normalize=False)
+        gen_mix_spec = scenario.display.presets["energy_balance"][0]
+        scenario.display.plot_summary(gen_mix_spec, solutions=[0, 1, 2, 3, 4], normalize=False)
+        scenario.display.plot_summary("power_capacity", solutions=2, ref_solution=0, mode="delta", normalize=False)
 
         custom_map_spec = MetricSpec(
             title="New Storage Energy Capacity",
@@ -132,15 +160,13 @@ def display_graphs(scenario) -> None:
             asset_filter=is_rechargeable_storage,
             group_by="subtech",
         )
-        disp.plot_map(node_spec=custom_map_spec, line_spec=None, solutions=[0, 1, 2, 3])
-        scenario.display = disp
+        scenario.display.plot_map(node_spec=custom_map_spec, line_spec=None, solutions=[0, 1, 2, 3])
 
         # 2. Tier 2: Explore full 10M+ historical MGA ensemble in Relative or Absolute space
-        explorer = SpaceExplorer(scenario, max_relaxation=1.15, precision=1, rel_norm="eligible")
-        scenario.explorer = explorer
+        scenario.explorer = SpaceExplorer(scenario, max_relaxation=1.15, precision=1, rel_norm="eligible")
 
         # Multi-panel surface (min, median, max rechargeable storage energy across solar vs wind)
-        explorer.plot_surface(
+        scenario.explorer.plot_surface(
             x="solar",
             y="wind",
             z="rechargable_e",
@@ -151,7 +177,7 @@ def display_graphs(scenario) -> None:
         )
 
         # Pairwise trade-off grid with Pareto frontier
-        explorer.plot_pairgrid(
+        scenario.explorer.plot_pairgrid(
             vars=["solar", "wind", "bess_e", "phes_e", "nuke_all"],
             z="cost",
             agg="min",
@@ -161,14 +187,14 @@ def display_graphs(scenario) -> None:
         )
 
         # Capacity slack vs cost relaxation ribbons
-        explorer.plot_slack_ribbons(
+        scenario.explorer.plot_slack_ribbons(
             vars=["solar", "wind", "bess", "phes", "trans"],
             max_threshold=1.15,
             space="rel",
         )
 
         # Near-optimal capacity distributions
-        explorer.plot_distributions(
+        scenario.explorer.plot_distributions(
             vars=["solar", "wind", "nuke_all", "bio", "ccgt", "bess", "phes", "trans"],
             threshold=1.05,
             space="rel",
@@ -176,7 +202,7 @@ def display_graphs(scenario) -> None:
 
 
 if __name__ == "__main__":
-    RUN_MODE = "results/firmeur_10yr_20260922_093328"
+    RUN_MODE = "results/firmeur_10yr_20260922_093328 - Copy"
 
     start_time = time.time()
     model = Model(model_location=RUN_MODE)
@@ -185,5 +211,7 @@ if __name__ == "__main__":
     for name in ("7percent",):
         scenario = model.scenarios[name]
         load_scenario(scenario, RUN_MODE)
+        run_cost_monte_carlo(scenario, n_samples=10_000)
+        raise KeyboardInterrupt
         display_graphs(scenario)
         plt.show()

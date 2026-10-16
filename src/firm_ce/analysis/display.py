@@ -544,6 +544,75 @@ class Display:
 
             return fig, axes_flat
 
+    def plot_single_balance_bars(
+        self,
+        solutions: Union[int, Sequence[int]] = (0, 1, 2),
+        figsize: Tuple[float, float] | None = None,
+        ax: Union[plt.Axes, Sequence[plt.Axes], None] = None,
+        save_path: str | None = None,
+    ) -> Tuple[plt.Figure, np.ndarray]:
+        """
+        Plots a single stacked bar per solution combining generation/discharge (positive)
+        and charging, curtailment, and losses (negative).
+        """
+        from firm_ce.analysis.display_presets import MetricSpec
+
+        sol_list = [solutions] if isinstance(solutions, int) else list(solutions)
+
+        # Spec 1: Generation and Charging (Generators & Storages only)
+        # dispatch_and_charge natively returns positive dispatch and negative charge
+        gen_sto_spec = MetricSpec(
+            title="Gen & Charge",
+            unit="TWh/yr",
+            assets=("generators", "storages"),
+            metric="dispatch_and_charge",
+            annualize=True,
+        )
+
+        # Spec 2: System Balances & Losses (All relevant assets)
+        # metric="none" prevents attempting to evaluate power traces on lines
+        balance_spec = MetricSpec(
+            title="Balances",
+            unit="TWh/yr",
+            assets=("generators", "storages", "major_lines"),
+            metric="none",
+            include_balances=("curtailment", "storage_losses", "spillage", "line_losses"),
+            annualize=True,
+        )
+
+        balances_to_flip = {"Curtailment", "Storage Losses", "Spillage", "Transmission Losses"}
+        items = []
+
+        for sol_idx in sol_list:
+            sol = self._resolve_solution(sol_idx)
+
+            # Extract generation/charge
+            mix = self._aggregate_spec(sol, gen_sto_spec, by_node=False)
+
+            # Extract and negate balances
+            bal_mix = self._aggregate_spec(sol, balance_spec, by_node=False)
+            for k, v in bal_mix.items():
+                if k in balances_to_flip:
+                    mix[k] = mix.get(k, 0.0) - abs(v)
+                else:
+                    mix[k] = mix.get(k, 0.0) + v
+
+            items.append((f"Alt {sol_idx}", mix, gen_sto_spec.unit, None))
+
+        fig, axes = self._render_stacked_bars(
+            items,
+            normalize=False,
+            is_delta=False,
+            sort="name",
+            figsize=figsize or (max(6.0, 2.2 * len(items) + 2.0), 7.0),
+            ax=ax
+        )
+
+        if save_path:
+            fig.savefig(save_path, dpi=self.style.dpi, bbox_inches="tight")
+
+        return fig, axes
+
     # --------------------------------------------------------------------------
     # Backwards-Compatible Wrappers
     # --------------------------------------------------------------------------
@@ -648,9 +717,12 @@ class Display:
         bar_width = 0.55
         legend_handles = {}
 
+        pos_keys = []
+        neg_keys = []
+
         # Pre-compute positive/negative totals and global axis extrema up front
-        bar_pos_totals = [sum(v for v in mix.values() if v > 1e-6) for _, mix, _, _ in items]
-        bar_neg_totals = [sum(v for v in mix.values() if v < -1e-6) for _, mix, _, _ in items]
+        bar_pos_totals = [sum(float(v) for v in mix.values() if np.isfinite(v) and v > 1e-6) for _, mix, _, _ in items]
+        bar_neg_totals = [sum(float(v) for v in mix.values() if np.isfinite(v) and v < -1e-6) for _, mix, _, _ in items]
 
         if normalize and not is_delta:
             bar_denoms = [
@@ -676,7 +748,7 @@ class Display:
         annot_offset = 1.5 if (normalize and not is_delta) else max(max_pos_height * 0.02, 0.1)
 
         for idx, (_label, mix, unit, _norm_ref) in enumerate(items):
-            clean_mix = {k: v for k, v in mix.items() if abs(v) > 1e-6}
+            clean_mix = {k: float(v) for k, v in mix.items() if np.isfinite(v) and abs(v) > 1e-6}
             denom = bar_denoms[idx]
 
             pos_physical_total = sum(v for v in clean_mix.values() if v > 0)
@@ -703,9 +775,13 @@ class Display:
                 if val >= 0:
                     bottom = pos_bottom
                     pos_bottom += height
+                    if tech not in pos_keys:
+                        pos_keys.append(tech)
                 else:
                     bottom = neg_bottom
                     neg_bottom += height
+                    if tech not in neg_keys:
+                        neg_keys.append(tech)
 
                 bar_container = axis.bar(
                     x_positions[idx],
@@ -785,9 +861,26 @@ class Display:
         axis.spines["right"].set_visible(False)
 
         if legend_handles:
+            ordered_legend_keys = []
+
+            # Positive bars stack UP, so the topmost bar is the last one built. Reverse it.
+            for k in reversed(pos_keys):
+                if k not in ordered_legend_keys and k in legend_handles:
+                    ordered_legend_keys.append(k)
+
+            # Negative bars stack DOWN, so the first one built is closest to zero. Keep forward order.
+            for k in neg_keys:
+                if k not in ordered_legend_keys and k in legend_handles:
+                    ordered_legend_keys.append(k)
+
+            # Fallback for any edge cases (e.g., zero-height bars with handles)
+            for k in legend_handles:
+                if k not in ordered_legend_keys:
+                    ordered_legend_keys.append(k)
+
             axis.legend(
-                list(legend_handles.values()),
-                list(legend_handles.keys()),
+                [legend_handles[k] for k in ordered_legend_keys],
+                ordered_legend_keys,
                 loc="center left",
                 bbox_to_anchor=(1.02, 0.5),
                 frameon=False,
@@ -903,7 +996,7 @@ class Display:
                 self._draw_pie(ax, values, x, y, radius, colors, hatches)
 
         if legend:
-            self._add_legend(ax, node_data)
+            self._add_legend(ax, node_data, reverse=(node_chart == "bar"))
 
     def _draw_delta_on_axis(
         self,
@@ -934,7 +1027,7 @@ class Display:
             )
 
         if legend:
-            self._add_legend(ax, delta_dict)
+            self._add_legend(ax, delta_dict, reverse=True)
 
     def _draw_transmission_on_axis(self, ax: plt.Axes, solution: Solution, line_spec: MetricSpec):
         max_line_width = 5.0
@@ -1195,10 +1288,11 @@ class Display:
     def _get_hatch(self, tech: str) -> str | None:
         return get_hatch(tech)
 
-    def _add_legend(self, ax: plt.Axes, data_dict: dict):
+    def _add_legend(self, ax: plt.Axes, data_dict: dict, reverse: bool = False):
         present_techs = {tech for mix in data_dict.values() for tech in mix.keys()}
         handles, labels = [], []
-        for tech in sorted(present_techs):
+
+        for tech in sorted(present_techs, reverse=reverse):
             handles.append(
                 plt.Rectangle(
                     (0, 0),
