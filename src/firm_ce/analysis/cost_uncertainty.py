@@ -320,7 +320,12 @@ def plot_pairwise_win_rates(L, base, labels, cfg, path):
     return fig
 
 
-def run_monte_carlo(scenario, df: pd.DataFrame = None, cfg: MCConfig | None = None):
+def run_monte_carlo(
+    scenario,
+    mhmga_indices: list = ...,
+    df: pd.DataFrame = None,
+    cfg: MCConfig | None = None
+):
     """
     Runs the Monte-Carlo cost-uncertainty analysis on a list of pre-evaluated solutions.
     """
@@ -332,7 +337,7 @@ def run_monte_carlo(scenario, df: pd.DataFrame = None, cfg: MCConfig | None = No
     os.makedirs(out_dir, exist_ok=True)
 
     # --- extract summaries directly from pre-evaluated solutions ---
-    summaries = [_summarise(sol) for sol in scenario.noptimaTensors]
+    summaries = [_summarise(sol) for sol in scenario.noptimaTensors[mhmga_indices]]
 
     if df is not None and "objective" in df.columns:
         sim_lcoe = np.array([q["lcoe"] for q in summaries])

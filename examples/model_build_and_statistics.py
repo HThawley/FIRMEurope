@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from mga.postprocessing import selection
+
 from firm_ce.model import Model
 from firm_ce.analysis.statistics import Statistics
 from firm_ce.analysis.validate import Validation, ValidationTensor
@@ -79,27 +81,6 @@ def resolve_mhmga_noptima_xs(scenario) -> np.ndarray:
     raise FileNotFoundError(f"Could not find valid MHMGA alternatives in '{mga_dir}'.")
 
 
-def run_cost_monte_carlo(
-    scenario,
-    n_samples: int = 10_000,
-    rel_halfwidth: float = 0.10,
-    perturb_mode: str = "group",  # "group" = one multiplier per cost parameter; "element" = per node/line
-):
-    """Monte-Carlo over cost inputs for the pre-evaluated near-optimal alternatives."""
-    if not scenario.config.type.startswith("mhmga"):
-        raise ValueError(f"Cost Monte-Carlo needs an mhmga scenario, got '{scenario.config.type}'.")
-    if scenario.config.backend != "tensor":
-        raise NotImplementedError("Cost Monte-Carlo is only implemented for backend='tensor'.")
-
-    cfg = MCConfig(n_samples=n_samples, rel_halfwidth=rel_halfwidth, perturb_mode=perturb_mode)
-
-    # Push the already-evaluated noptima to the analysis engine
-    summary = run_monte_carlo(scenario, cfg=cfg)
-
-    print(summary.head(10).to_string(index=False))
-    return summary
-
-
 def load_scenario(scenario, run_mode: str, x_loc: str | None = None, x0_fallback: bool = True) -> None:
     scenario.load_datafiles()
 
@@ -109,6 +90,23 @@ def load_scenario(scenario, run_mode: str, x_loc: str | None = None, x0_fallback
     elif scenario.config.type.startswith("mhmga"):
         xs = resolve_mhmga_noptima_xs(scenario)
         scenario.build_and_evaluate_noptima(xs)
+
+    return xs
+
+
+def get_diverse_indices(scenario, xs, n, strategy="max-min", fitness_method="auto"):
+    if fitness_method == "auto":
+        fitness_method = scenario.config.mga_fitness.lower()
+
+    scaled_xs = selection.project_space(xs, scenario.projection_matrix)
+    diverse_idx = selection.get_diverse_indices(
+        scaled_xs,
+        n=n,
+        strategy=strategy,
+        fitness_method=fitness_method
+    )
+
+    return diverse_idx
 
 
 def validate_scenario(scenario, write: bool = True) -> None:
@@ -129,7 +127,29 @@ def run_statistics(scenario, write: bool = True) -> None:
     scenario.statistics.generate_result_files(write=write, delete=True)
 
 
-def display_graphs(scenario) -> None:
+def run_cost_monte_carlo(
+    scenario,
+    n_samples: int = 10_000,
+    rel_halfwidth: float = 0.10,
+    perturb_mode: str = "group",  # "group" = one multiplier per cost parameter; "element" = per node/line
+    mhmga_indices: list = ...
+):
+    """Monte-Carlo over cost inputs for the pre-evaluated near-optimal alternatives."""
+    if not scenario.config.type.startswith("mhmga"):
+        raise ValueError(f"Cost Monte-Carlo needs an mhmga scenario, got '{scenario.config.type}'.")
+    if scenario.config.backend != "tensor":
+        raise NotImplementedError("Cost Monte-Carlo is only implemented for backend='tensor'.")
+
+    cfg = MCConfig(n_samples=n_samples, rel_halfwidth=rel_halfwidth, perturb_mode=perturb_mode)
+
+    # Push the already-evaluated noptima to the analysis engine
+    summary = run_monte_carlo(scenario, mhmga_indices, cfg=cfg)
+
+    print(summary.head(10).to_string(index=False))
+    return summary
+
+
+def display_graphs(scenario, mhmga_indices: list = ...) -> None:
     # --- Tier 1: Simulated Solution Display ---
     if scenario.config.type == "single_time":
         print(f"Generating single_time plots for '{scenario.name}'")
@@ -148,7 +168,7 @@ def display_graphs(scenario) -> None:
 
         # 1. Tier 1: Compare specific simulated MGA niche alternatives
         gen_mix_spec = scenario.display.presets["energy_balance"][0]
-        scenario.display.plot_summary(gen_mix_spec, solutions=[0, 1, 2, 3, 4], normalize=False)
+        scenario.display.plot_summary(gen_mix_spec, solutions=mhmga_indices, normalize=False)
         scenario.display.plot_summary("power_capacity", solutions=2, ref_solution=0, mode="delta", normalize=False)
 
         custom_map_spec = MetricSpec(
@@ -160,7 +180,7 @@ def display_graphs(scenario) -> None:
             asset_filter=is_rechargeable_storage,
             group_by="subtech",
         )
-        scenario.display.plot_map(node_spec=custom_map_spec, line_spec=None, solutions=[0, 1, 2, 3])
+        scenario.display.plot_map(node_spec=custom_map_spec, line_spec=None, solutions=mhmga_indices)
 
         # 2. Tier 2: Explore full 10M+ historical MGA ensemble in Relative or Absolute space
         scenario.explorer = SpaceExplorer(scenario, max_relaxation=1.15, precision=1, rel_norm="eligible")
@@ -210,8 +230,14 @@ if __name__ == "__main__":
 
     for name in ("7percent",):
         scenario = model.scenarios[name]
-        load_scenario(scenario, RUN_MODE)
-        run_cost_monte_carlo(scenario, n_samples=10_000)
+        xs = load_scenario(scenario, RUN_MODE)
+
+        if scenario.config.type.startswith("mhmga"):
+            indices = get_diverse_indices(scenario, 4)
+        else:
+            indices = ...
+
+        run_cost_monte_carlo(scenario, mhmga_indices=indices, n_samples=10_000)
         raise KeyboardInterrupt
-        display_graphs(scenario)
+        display_graphs(scenario, mhmga_indices=indices)
         plt.show()
