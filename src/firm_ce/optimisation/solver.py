@@ -588,6 +588,7 @@ class MhmgaSolver(MhmgaSolverBase):
             vectorized=True,
             constraints=True,
             return_scaled=self.obj_bundle.return_scaled,
+            scaled_ndim=self.obj_bundle.scaled_ndim,
         )
 
         algorithm = MGAProblem(
