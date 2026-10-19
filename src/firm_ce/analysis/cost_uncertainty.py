@@ -322,7 +322,7 @@ def plot_pairwise_win_rates(L, base, labels, cfg, path):
 
 def run_monte_carlo(
     scenario,
-    mhmga_indices: list = ...,
+    mhmga_indices: list = None,
     df: pd.DataFrame = None,
     cfg: MCConfig | None = None
 ):
@@ -331,13 +331,14 @@ def run_monte_carlo(
     """
     cfg = cfg or MCConfig()
     static = scenario.staticTensor
+    if mhmga_indices is None:
+        mhmga_indices = list(range(len(scenario.noptimaTensors)))
 
-    mga_dir = os.path.join(scenario.solution_dir, "mga_logs")
-    out_dir = os.path.join(mga_dir, "monte_carlo")
+    out_dir = os.path.join(scenario.solution_dir, "monte_carlo")
     os.makedirs(out_dir, exist_ok=True)
 
     # --- extract summaries directly from pre-evaluated solutions ---
-    summaries = [_summarise(sol) for sol in scenario.noptimaTensors[mhmga_indices]]
+    summaries = [_summarise(scenario.noptimaTensors[m]) for m in mhmga_indices]
 
     if df is not None and "objective" in df.columns:
         sim_lcoe = np.array([q["lcoe"] for q in summaries])

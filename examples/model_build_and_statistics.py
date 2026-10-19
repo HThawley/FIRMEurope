@@ -81,22 +81,55 @@ def resolve_mhmga_noptima_xs(scenario) -> np.ndarray:
     raise FileNotFoundError(f"Could not find valid MHMGA alternatives in '{mga_dir}'.")
 
 
-def load_scenario(scenario, run_mode: str, x_loc: str | None = None, x0_fallback: bool = True) -> None:
-    scenario.load_datafiles()
+def get_x(
+    scenario,
+    run_mode: str,
+    x_loc: str | None = None,
+    x0_fallback: bool = True,
+):
+    if not scenario.data_status:
+        scenario.load_datafiles()
 
     if scenario.config.type == "single_time":
-        x = resolve_single_solution_x(scenario, run_mode, x_loc=x_loc, x0_fallback=x0_fallback)
-        scenario.build_and_evaluate_solution(x)
+        xs = resolve_single_solution_x(scenario, run_mode, x_loc=x_loc, x0_fallback=x0_fallback)
     elif scenario.config.type.startswith("mhmga"):
         xs = resolve_mhmga_noptima_xs(scenario)
-        scenario.build_and_evaluate_noptima(xs)
+
+    return xs
+
+
+def build_and_evaluate_solutions(scenario, xs, mhmga_indices=None):
+    if not scenario.data_status:
+        scenario.load_datafiles()
+
+    if scenario.config.type == "single_time":
+        scenario.build_and_evaluate_solution(x)
+    elif scenario.config.type.startswith("mhmga"):
+        scenario.build_and_evaluate_noptima(xs[mhmga_indices])
+
+
+def load_scenario(
+    scenario,
+    run_mode: str,
+    x_loc: str | None = None,
+    x0_fallback: bool = True,
+    mhmga_indices: list | None = None,
+    xs: pd.DataFrame | None = None,
+) -> None:
+    if not scenario.data_status:
+        scenario.load_datafiles()
+
+    if xs is None:
+        xs = get_x(scenario, run_mode, x_loc, x0_fallback)
+
+    build_and_evaluate_solutions(scenario, xs, mhmga_indices)
 
     return xs
 
 
 def get_diverse_indices(scenario, xs, n, strategy="max-min", fitness_method="auto"):
     if fitness_method == "auto":
-        fitness_method = scenario.config.mga_fitness.lower()
+        fitness_method = scenario.config.mga_fitness[0].lower()
 
     scaled_xs = selection.project_space(xs, scenario.projection_matrix)
     diverse_idx = selection.get_diverse_indices(
@@ -106,7 +139,7 @@ def get_diverse_indices(scenario, xs, n, strategy="max-min", fitness_method="aut
         fitness_method=fitness_method
     )
 
-    return diverse_idx
+    return list(diverse_idx)
 
 
 def validate_scenario(scenario, write: bool = True) -> None:
@@ -132,7 +165,7 @@ def run_cost_monte_carlo(
     n_samples: int = 10_000,
     rel_halfwidth: float = 0.10,
     perturb_mode: str = "group",  # "group" = one multiplier per cost parameter; "element" = per node/line
-    mhmga_indices: list = ...
+    mhmga_indices: np.ndarray = None,
 ):
     """Monte-Carlo over cost inputs for the pre-evaluated near-optimal alternatives."""
     if not scenario.config.type.startswith("mhmga"):
@@ -149,7 +182,7 @@ def run_cost_monte_carlo(
     return summary
 
 
-def display_graphs(scenario, mhmga_indices: list = ...) -> None:
+def display_graphs(scenario, mhmga_indices: list = None) -> None:
     # --- Tier 1: Simulated Solution Display ---
     if scenario.config.type == "single_time":
         print(f"Generating single_time plots for '{scenario.name}'")
@@ -162,6 +195,8 @@ def display_graphs(scenario, mhmga_indices: list = ...) -> None:
         scenario.display.plot_map("energy")
 
     elif scenario.config.type.startswith("mhmga"):
+        if mhmga_indices is None:
+            mhmga_indices = list(range(len(scenario.noptima)))
         print(f"Generating MHMGA plots for '{scenario.name}'")
         scenario.display = Display(scenario, scenario.config, noptima=scenario.noptima)
         scenario.display.set_annotation_format(lambda v: scenario.display.format_sigfigs(v, 2))
@@ -172,12 +207,11 @@ def display_graphs(scenario, mhmga_indices: list = ...) -> None:
         scenario.display.plot_summary("power_capacity", solutions=2, ref_solution=0, mode="delta", normalize=False)
 
         custom_map_spec = MetricSpec(
-            title="New Storage Energy Capacity",
+            title="New Generation Capacity",
             unit="GWh",
-            assets=("storages",),
-            metric="energy_capacity",
+            assets=("generators",),
+            metric="power_capacity",
             build="new_build",
-            asset_filter=is_rechargeable_storage,
             group_by="subtech",
         )
         scenario.display.plot_map(node_spec=custom_map_spec, line_spec=None, solutions=mhmga_indices)
@@ -191,7 +225,7 @@ def display_graphs(scenario, mhmga_indices: list = ...) -> None:
             y="wind",
             z="rechargable_e",
             aggs=("min", "median", "max"),
-            space="rel",
+            space="abs",
             threshold=1.15,
             isolines=[1.02, 1.05, 1.10],
         )
@@ -201,28 +235,28 @@ def display_graphs(scenario, mhmga_indices: list = ...) -> None:
             vars=["solar", "wind", "bess_e", "phes_e", "nuke_all"],
             z="cost",
             agg="min",
-            space="rel",
-            threshold=1.05,
+            space="abs",
+            threshold=1.1,
             show_pareto=True,
         )
 
         # Capacity slack vs cost relaxation ribbons
         scenario.explorer.plot_slack_ribbons(
             vars=["solar", "wind", "bess", "phes", "trans"],
-            max_threshold=1.15,
-            space="rel",
+            max_threshold=1.1,
+            space="abs",
         )
 
         # Near-optimal capacity distributions
         scenario.explorer.plot_distributions(
             vars=["solar", "wind", "nuke_all", "bio", "ccgt", "bess", "phes", "trans"],
-            threshold=1.05,
-            space="rel",
+            threshold=1.5,
+            space="abs",
         )
 
 
 if __name__ == "__main__":
-    RUN_MODE = "results/firmeur_10yr_20260922_093328 - Copy"
+    RUN_MODE = "results/firmeur_7pc_explor_20261016_121741"
 
     start_time = time.time()
     model = Model(model_location=RUN_MODE)
@@ -230,14 +264,16 @@ if __name__ == "__main__":
 
     for name in ("7percent",):
         scenario = model.scenarios[name]
-        xs = load_scenario(scenario, RUN_MODE)
+        scenario.load_datafiles()
 
+        xs = get_x(scenario, RUN_MODE)
+
+        indices = None
         if scenario.config.type.startswith("mhmga"):
-            indices = get_diverse_indices(scenario, 4)
-        else:
-            indices = ...
+            indices = get_diverse_indices(scenario, xs, 4)
 
-        run_cost_monte_carlo(scenario, mhmga_indices=indices, n_samples=10_000)
-        raise KeyboardInterrupt
-        display_graphs(scenario, mhmga_indices=indices)
+        build_and_evaluate_solutions(scenario, xs=xs, mhmga_indices=indices)
+
+        run_cost_monte_carlo(scenario, n_samples=10_000)
+        display_graphs(scenario)
         plt.show()
