@@ -550,40 +550,61 @@ class MhmgaSolver(MhmgaSolverBase):
 
     def instantiate_algorithm(self, log_path: str, init_callback: bool) -> MGAProblem:
         if self.config.restart_optimisation:
-            if self.config.model_location == "new":
+            if getattr(self.config, "model_location", None) == "new":
                 pop_dir = "results/temp"
             else:
                 pop_dir = self.scenario.solution_dir
 
             ndim = len(self.scenario.lower_bounds)
+            bin_path = os.path.join(pop_dir, "population.bin")
             npy_path = os.path.join(pop_dir, "latest_population.npy")
             csv_path = os.path.join(pop_dir, "latest_population.csv")
 
-            if os.path.exists(npy_path):
-                previous = np.load(npy_path)[:, 3:ndim + 3].astype(float)
+            num_niches = self.config.mga_start_niches + self.config.mga_new_niches[0]
+            pop_size = self.config.mga_pop_size[0]
+            expected_rows = num_niches * pop_size
+
+            if os.path.exists(bin_path):
+                pop_cols = ndim + 3
+                raw_data = np.fromfile(bin_path, dtype=npfloat).reshape(-1, pop_cols)
+                raw_pop = raw_data[-expected_rows:]
+            elif os.path.exists(npy_path):
+                raw_pop = np.load(npy_path)
             elif os.path.exists(csv_path):
-                previous = pd.read_csv(
-                    csv_path,
-                    header=None,
-                    dtype=float,
-                    usecols=range(3, ndim + 3),
-                ).to_numpy()
+                raw_pop = pd.read_csv(csv_path, header=None, dtype=npfloat).to_numpy()
             else:
                 raise FileNotFoundError(
-                    f"No population file found for restarting. Expected at {npy_path} or {csv_path}"
+                    f"No population file found for restarting. Expected in '{pop_dir}'."
                 )
 
-            num_niches = self.config.mga_start_niches + self.config.mga_new_niches[0]
-            previous = previous.reshape(num_niches, self.config.mga_pop_size[0], ndim)
-            x0 = previous[0]
+            if raw_pop.shape[0] != expected_rows:
+                raise ValueError(
+                    f"Restart population row count ({raw_pop.shape[0]}) does not match "
+                    f"expected (num_niches={num_niches} * pop_size={pop_size} = {expected_rows})."
+                )
+
+            # Extract objectives (col 0), violations (col 1), and points (cols 3:ndim+3)
+            starting_objectives = raw_pop[:, 0].reshape(num_niches, pop_size).astype(npfloat)
+            starting_constraints = raw_pop[:, 1].reshape(num_niches, pop_size).astype(npfloat)
+            previous = raw_pop[:, 3:ndim + 3].reshape(num_niches, pop_size, ndim).astype(npfloat)
+
+            # Best feasible point as 1D x0
+            feasible_mask = raw_pop[:, 1] == 0
+            if np.any(feasible_mask):
+                best_idx = np.where(feasible_mask)[0][np.argmin(raw_pop[feasible_mask, 0])]
+            else:
+                best_idx = np.argmin(raw_pop[:, 0] + raw_pop[:, 1] * PENALTY_MULTIPLIER)
+            x0 = raw_pop[best_idx, 3:ndim + 3].astype(npfloat)
         else:
             previous = None
-            x0 = self.scenario.x0_rel
+            starting_objectives = None
+            starting_constraints = None
+            x0 = self.scenario.x0
 
         problem = OptimizationProblem(
             objective=self.objective_function,
             fargs=self.fargs,
-            bounds=(self.scenario.lower_bounds_rel, self.scenario.upper_bounds_rel),
+            bounds=(self.scenario.lower_bounds, self.scenario.upper_bounds),
             maximize=False,
             vectorized=True,
             constraints=True,
@@ -594,6 +615,9 @@ class MhmgaSolver(MhmgaSolverBase):
         algorithm = MGAProblem(
             problem=problem,
             x0=x0,
+            starting_points=previous,
+            starting_objectives=starting_objectives,
+            starting_constraints=starting_constraints,
             log_dir=log_path,
             log_freq=self.config.mga_log_freq,
             random_seed=None,
@@ -601,8 +625,6 @@ class MhmgaSolver(MhmgaSolverBase):
             callback=self.callback,
             include_obj_in_fitness=True,
         )
-
-        algorithm.starting_points = previous
 
         if init_callback:
             # callback inited after latest_population is loaded (if restarting from temp)
@@ -662,8 +684,13 @@ class MhmgaSolver(MhmgaSolverBase):
 
         algorithm = self.instantiate_algorithm(path_name, True)
 
-        algorithm.add_niches(num_niches=self.config.mga_start_niches)
-        self.scenario.logger.info(f"[MHMGA] MGA algorithm initialised with {self.config.mga_start_niches} niches.")
+        if self.config.restart_optimisation and algorithm.starting_points.ndim == 3:
+            loaded_niches = algorithm.starting_points.shape[0]
+            algorithm.add_niches(num_niches=loaded_niches)
+            self.scenario.logger.info(f"[MHMGA] Restarted MGA algorithm with {loaded_niches} niches from disk.")
+        else:
+            algorithm.add_niches(num_niches=self.config.mga_start_niches)
+            self.scenario.logger.info(f"[MHMGA] MGA algorithm initialised with {self.config.mga_start_niches} niches.")
 
         for step in range(self.config.mga_steps):
             algorithm.set_verbosity(
