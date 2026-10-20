@@ -9,6 +9,8 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult, differential_evolution
 from abc import ABC, abstractmethod
+import signal
+from contextlib import contextmanager
 
 from mga.problem_definition import OptimizationProblem
 from mga.mhmga import MGAProblem
@@ -28,6 +30,32 @@ from firm_ce.backend.scalar.broad_optimum import (
     write_broad_optimum_records,
 )
 from firm_ce.optimisation.objective_factory import build_objective_bundle
+
+
+@contextmanager
+def graceful_sigint_handler(algorithm: MGAProblem, logger=None):
+    """
+    Intercepts SIGINT (Ctrl+C) during Numba execution or file I/O, deferring
+    termination until the current iteration and callback complete cleanly.
+    """
+    original_handler = signal.getsignal(signal.SIGINT)
+
+    def _handler(signum, frame):
+        if getattr(algorithm, "_stop_requested", False):
+            # Second Ctrl+C forces immediate KeyboardInterrupt
+            original_handler(signum, frame)
+        algorithm._stop_requested = True
+        msg = "[MHMGA] Interrupt received. Finishing current iteration and finalising logs..."
+        if logger:
+            logger.warning(msg)
+        else:
+            print(f"\n{msg}")
+
+    signal.signal(signal.SIGINT, _handler)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, original_handler)
 
 
 def convert_binary_logs_to_csv(
@@ -105,6 +133,83 @@ def convert_binary_logs_to_csv(
         os.path.join(out_dir, "details.csv"),
         details_cols,
     )
+
+
+def recover_interrupted_run(
+    out_dir: str,
+    dtype=npfloat,
+) -> Optional[NDArray[npfloat]]:
+    """
+    Cleans up and finalises logging files in `out_dir` after an aborted/interrupted
+    optimisation run:
+      1. Truncates any torn trailing bytes in `population.bin` and `details.bin`.
+      2. Converts `.bin` and `latest_*.npy` files to `.csv`.
+      3. Reconstructs `current_optimum.csv` and returns the best feasible decision vector `x`.
+    """
+    dtype = np.dtype(dtype)
+    config_json = os.path.join(out_dir, "mhmga_config.json")
+
+    pop_cols = None
+    details_cols = None
+    if os.path.exists(config_json):
+        with open(config_json, "r") as f:
+            meta = json.load(f)
+        pop_cols = meta.get("pop_cols", meta.get("ndim", 0) + 3 or None)
+        details_cols = meta.get("details_cols", None)
+
+    latest_pop_npy = os.path.join(out_dir, "latest_population.npy")
+    if pop_cols is None and os.path.exists(latest_pop_npy):
+        pop_cols = np.load(latest_pop_npy, mmap_mode="r").shape[1]
+
+    # 1. Repair torn binary files (truncate to exact integer multiple of row_bytes)
+    for fname, n_cols in (("population.bin", pop_cols), ("details.bin", details_cols)):
+        bin_path = os.path.join(out_dir, fname)
+        if os.path.exists(bin_path) and n_cols is not None:
+            row_bytes = n_cols * dtype.itemsize
+            file_size = os.path.getsize(bin_path)
+            remainder = file_size % row_bytes
+            if remainder != 0:
+                valid_size = file_size - remainder
+                with open(bin_path, "r+b") as f_bin:
+                    f_bin.truncate(valid_size)
+                print(f"[Recover] Truncated {remainder} corrupted trailing bytes from '{fname}'.")
+
+    # 2. Convert binary logs to CSV
+    convert_binary_logs_to_csv(
+        out_dir=out_dir,
+        pop_cols=pop_cols,
+        details_cols=details_cols,
+        dtype=dtype,
+    )
+
+    # 3. Extract and return the best feasible solution found so far
+    best_x = None
+    pop_bin_path = os.path.join(out_dir, "population.bin")
+    if os.path.exists(pop_bin_path) and os.path.getsize(pop_bin_path) > 0 and pop_cols is not None:
+        total_rows = os.path.getsize(pop_bin_path) // (pop_cols * dtype.itemsize)
+        mmap_pop = np.memmap(pop_bin_path, dtype=dtype, mode="r", shape=(total_rows, pop_cols))
+
+        # For MHMGA: col 0 = obj, col 1 = violation, col 2 = fitness, cols 3: = x
+        # For SingleTime DE: cols 0:ndim = x, col -1 = energy
+        if os.path.exists(config_json):
+            feasible_mask = mmap_pop[:, 1] == 0
+            if np.any(feasible_mask):
+                feasible_indices = np.where(feasible_mask)[0]
+                best_idx = feasible_indices[np.argmin(mmap_pop[feasible_mask, 0])]
+            else:
+                best_idx = int(np.argmin(mmap_pop[:, 0] + mmap_pop[:, 1] * PENALTY_MULTIPLIER))
+            best_row = np.array(mmap_pop[best_idx], dtype=dtype)
+            best_x = best_row[3:]
+
+            with open(os.path.join(out_dir, "current_optimum.csv"), "w", newline="") as f:
+                csv.writer(f).writerow([best_row[0], best_row[1], *best_x])
+        else:
+            best_idx = int(np.argmin(mmap_pop[:, -1]))
+            best_row = np.array(mmap_pop[best_idx], dtype=dtype)
+            best_x = best_row[:-1]
+
+    print(f"[Recover] Log recovery and CSV conversion complete for '{out_dir}'.")
+    return best_x
 
 
 class BaseSolver(ABC):
@@ -677,13 +782,10 @@ class MhmgaSolver(MhmgaSolverBase):
 
     def evaluate(self) -> None:
         self.scenario.logger.info("[MHMGA] Initialising MGA algorithm.")
-
         path_name = os.path.join(self.mga_log_dir, "mga")
-
         self._write_mhmga_config_summary()
 
         algorithm = self.instantiate_algorithm(path_name, True)
-
         if self.config.restart_optimisation and algorithm.starting_points.ndim == 3:
             loaded_niches = algorithm.starting_points.shape[0]
             algorithm.add_niches(num_niches=loaded_niches)
@@ -692,50 +794,63 @@ class MhmgaSolver(MhmgaSolverBase):
             algorithm.add_niches(num_niches=self.config.mga_start_niches)
             self.scenario.logger.info(f"[MHMGA] MGA algorithm initialised with {self.config.mga_start_niches} niches.")
 
-        for step in range(self.config.mga_steps):
-            algorithm.set_verbosity(
-                self.config.mga_disp_rate[step],
-                self.config.mga_verbose_level[step],
-            )
+        try:
+            with graceful_sigint_handler(algorithm, self.scenario.logger):
+                for step in range(self.config.mga_steps):
+                    if getattr(algorithm, "_stop_requested", False):
+                        break
 
-            start_time_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            self.scenario.logger.info(f"[MHMGA] Starting step {step+1}/{self.config.mga_steps} at {start_time_str}")
+                    algorithm.set_verbosity(
+                        self.config.mga_disp_rate[step],
+                        self.config.mga_verbose_level[step],
+                    )
 
-            if self.config.mga_new_niches[step] > 0:
-                self.scenario.logger.info(f"[MHMGA] Adding {self.config.mga_new_niches[step]} niches.")
-                algorithm.add_niches(num_niches=self.config.mga_new_niches[step])
+                    start_time_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                    self.scenario.logger.info(f"[MHMGA] Starting step {step+1}/{self.config.mga_steps} at {start_time_str}")
 
-            algorithm.update_hyperparameters(
-                max_iter=self.config.mga_iter[step],
-                pop_size=self.config.mga_pop_size[step],
-                champ_count=self.config.mga_champ_count[step],
-                elite_count=self.config.mga_elite_count[step],
-                tourn_count=self.config.mga_tourn_count[step],
-                tourn_size=self.config.mga_tourn_size[step],
-                mutation_prob=self.config.mga_mutation_prob[step],
-                mutation_sigma=self.config.mga_mutation_sigma[step],
-                crossover_prob=self.config.mga_crossover_prob[step],
-                niche_elitism=self.config.mga_niche_elitism[step],
-                noptimal_rel=self.config.mga_noptimal_rel[step],
-                noptimal_abs=self.config.mga_noptimal_abs[step],
-                violation_factor=PENALTY_MULTIPLIER,
-                mutation_scaler=np.ones_like(self.scenario.lower_bounds),
-                space_scaler=self.obj_bundle.space_scaler,
-                objective_scaler=1.0,
-                fitness_method=self.config.mga_fitness[step],
-            )
+                    if self.config.mga_new_niches[step] > 0:
+                        self.scenario.logger.info(f"[MHMGA] Adding {self.config.mga_new_niches[step]} niches.")
+                        algorithm.add_niches(num_niches=self.config.mga_new_niches[step])
 
-            algorithm.step()
+                    algorithm.update_hyperparameters(
+                        max_iter=self.config.mga_iter[step],
+                        pop_size=self.config.mga_pop_size[step],
+                        champ_count=self.config.mga_champ_count[step],
+                        elite_count=self.config.mga_elite_count[step],
+                        tourn_count=self.config.mga_tourn_count[step],
+                        tourn_size=self.config.mga_tourn_size[step],
+                        mutation_prob=self.config.mga_mutation_prob[step],
+                        mutation_sigma=self.config.mga_mutation_sigma[step],
+                        crossover_prob=self.config.mga_crossover_prob[step],
+                        niche_elitism=self.config.mga_niche_elitism[step],
+                        noptimal_rel=self.config.mga_noptimal_rel[step],
+                        noptimal_abs=self.config.mga_noptimal_abs[step],
+                        violation_factor=PENALTY_MULTIPLIER,
+                        mutation_scaler=np.ones_like(self.scenario.lower_bounds),
+                        space_scaler=self.obj_bundle.space_scaler,
+                        objective_scaler=1.0,
+                        fitness_method=self.config.mga_fitness[step],
+                    )
 
-            # 4. Terminate and get results
-            results = algorithm.get_results()
-            self.save_results(results)
+                    algorithm.step()
 
-            self.scenario.logger.info("[MHMGA] MGA step complete. Results saved.")
+                    if algorithm.population is not None:
+                        results = algorithm.get_results()
+                        self.save_results(results)
 
-        self._finalise_csv_logs()
-        self.scenario.logger.info("[MHMGA] Binary logs converted to CSV.")
-        self.result = algorithm.population.optima_points[0]
+                    if getattr(algorithm, "_stop_requested", False):
+                        self.scenario.logger.warning(f"[MHMGA] Halted early at iteration {algorithm.current_iter}.")
+                        break
+
+                    self.scenario.logger.info("[MHMGA] MGA step complete. Results saved.")
+
+        finally:
+            if algorithm.population is not None:
+                results = algorithm.get_results()
+                self.save_results(results)
+                self.result = algorithm.population.optima_points[0].copy()
+            self._finalise_csv_logs()
+            self.scenario.logger.info("[MHMGA] Binary logs converted to CSV.")
 
 
 class MhmgaExtremaSolver(MhmgaSolverBase):

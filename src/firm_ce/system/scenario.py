@@ -766,6 +766,11 @@ class Scenario:
         solver.evaluate()
         return solver.result
 
+    def recover_logs(self) -> NDArray[npfloat] | None:
+        """Cleans up binary logs and converts them to CSV after an interrupted run."""
+        from firm_ce.optimisation.solver import recover_interrupted_run
+        return recover_interrupted_run(self.solution_dir)
+
     def polish(self, initial_population: NDArray[npfloat]) -> OptimizeResult:
         _polish_flag = self.config.polish_flag
         self.config.polish_flag = True
