@@ -35,21 +35,27 @@ from firm_ce.optimisation.objective_factory import build_objective_bundle
 @contextmanager
 def graceful_sigint_handler(algorithm: MGAProblem, logger=None):
     """
-    Intercepts SIGINT (Ctrl+C) during Numba execution or file I/O, deferring
-    termination until the current iteration and callback complete cleanly.
+    Intercepts SIGINT (Ctrl+C) during Numba execution, deferring termination
+    until the current iteration finishes. Prevents raising KeyboardInterrupt
+    inside Numba's `_numba_unpickle` C-callbacks (which causes SystemError).
     """
     original_handler = signal.getsignal(signal.SIGINT)
+    sigint_count = 0
 
     def _handler(signum, frame):
-        if getattr(algorithm, "_stop_requested", False):
-            # Second Ctrl+C forces immediate KeyboardInterrupt
-            original_handler(signum, frame)
+        nonlocal sigint_count
+        sigint_count += 1
         algorithm._stop_requested = True
-        msg = "[MHMGA] Interrupt received. Finishing current iteration and finalising logs..."
-        if logger:
-            logger.warning(msg)
-        else:
-            print(f"\n{msg}")
+
+        if sigint_count == 1:
+            msg = "[FIRM_CE] Interrupt received. Finishing current iteration and finalising logs (press Ctrl+C 3x to force-kill)..."
+            if logger:
+                logger.warning(msg)
+            else:
+                print(f"\n{msg}", flush=True)
+        elif sigint_count >= 3:
+            print("\n[FIRM_CE] Forced termination requested. Exiting immediately.", flush=True)
+            os._exit(130)
 
     signal.signal(signal.SIGINT, _handler)
     try:
