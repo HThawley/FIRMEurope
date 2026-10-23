@@ -250,7 +250,6 @@ class BaseSolver(ABC):
                 csv.writer(csvfile)
 
             if SAVE_POPULATION:
-                # Truncate binary append files
                 open(os.path.join(out_dir, "population.bin"), "wb").close()
                 if getattr(self.config, "save_details", False):
                     open(os.path.join(out_dir, "details.bin"), "wb").close()
@@ -580,7 +579,6 @@ class MhmgaSolverBase(BaseSolver):
             else:
                 jacobian.append(0.0)
 
-        # Lines
         for line in self.scenario.network.major_lines.values():
             af = get_annuity_factor(line.cost.discount_rate, line.cost.lifetime)
             capex = (1e3 * line.length * line.cost.capex_p + 1e3 * line.cost.transformer_capex) / af if af > 1e-6 else 0.0
@@ -606,7 +604,7 @@ class MhmgaSolverBase(BaseSolver):
         self.scenario.logger.info("[MHMGA] Initialising MGA algorithm for recombination inspection.")
 
         algorithm = self.instantiate_algorithm(log_path=None, init_callback=False)
-        algorithm.add_niches(num_niches=1)
+        algorithm.add_niches(diversity=1)
 
         config_hyperparameters = dict(
             max_iter=1,
@@ -671,7 +669,16 @@ class MhmgaSolver(MhmgaSolverBase):
             npy_path = os.path.join(pop_dir, "latest_population.npy")
             csv_path = os.path.join(pop_dir, "latest_population.csv")
 
-            num_niches = self.config.mga_start_niches + self.config.mga_new_niches[0]
+            # Determine expected num_niches
+            scaled_ndim = self.obj_bundle.scaled_ndim
+            extrema_count = 0
+            mode = self.config.mga_extrema_dims.lower()
+            if mode == "all":
+                extrema_count = 2 * scaled_ndim
+            elif mode in ("all-min", "all-max"):
+                extrema_count = scaled_ndim
+
+            num_niches = 1 + extrema_count + self.config.mga_start_div_niches + self.config.mga_new_div_niches[0]
             pop_size = self.config.mga_pop_size[0]
             expected_rows = num_niches * pop_size
 
@@ -732,9 +739,10 @@ class MhmgaSolver(MhmgaSolverBase):
             log_dir=log_path,
             log_freq=self.config.mga_log_freq,
             random_seed=None,
-            parallelize=False,  # we implement parallelisation independently
+            parallelize=False,
             callback=self.callback,
             include_obj_in_fitness=True,
+            space_scaler=self.obj_bundle.space_scaler,
         )
 
         if init_callback:
@@ -792,13 +800,26 @@ class MhmgaSolver(MhmgaSolverBase):
         self._write_mhmga_config_summary()
 
         algorithm = self.instantiate_algorithm(path_name, True)
+
+        extrema_kwargs = {}
+        if self.config.mga_extrema_dims.lower() != "none":
+            extrema_kwargs["extrema_dims"] = self.config.mga_extrema_dims
+            if self.config.mga_extrema_is_min.lower() not in ("auto", "none"):
+                extrema_kwargs["extrema_is_min"] = self.config.mga_extrema_is_min
+
         if self.config.restart_optimisation and algorithm.starting_points.ndim == 3:
             loaded_niches = algorithm.starting_points.shape[0]
-            algorithm.add_niches(num_niches=loaded_niches)
+            algorithm.add_niches(
+                diversity=self.config.mga_start_div_niches + self.config.mga_new_div_niches[0],
+                **extrema_kwargs
+            )
             self.scenario.logger.info(f"[MHMGA] Restarted MGA algorithm with {loaded_niches} niches from disk.")
         else:
-            algorithm.add_niches(num_niches=self.config.mga_start_niches)
-            self.scenario.logger.info(f"[MHMGA] MGA algorithm initialised with {self.config.mga_start_niches} niches.")
+            algorithm.add_niches(
+                diversity=self.config.mga_start_div_niches,
+                **extrema_kwargs
+            )
+            self.scenario.logger.info(f"[MHMGA] MGA algorithm initialised with {algorithm.num_niches} niches.")
 
         try:
             with graceful_sigint_handler(algorithm, self.scenario.logger):
@@ -814,9 +835,9 @@ class MhmgaSolver(MhmgaSolverBase):
                     start_time_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
                     self.scenario.logger.info(f"[MHMGA] Starting step {step+1}/{self.config.mga_steps} at {start_time_str}")
 
-                    if self.config.mga_new_niches[step] > 0:
-                        self.scenario.logger.info(f"[MHMGA] Adding {self.config.mga_new_niches[step]} niches.")
-                        algorithm.add_niches(num_niches=self.config.mga_new_niches[step])
+                    if self.config.mga_new_div_niches[step] > 0:
+                        self.scenario.logger.info(f"[MHMGA] Adding {self.config.mga_new_div_niches[step]} diversity niches.")
+                        algorithm.add_niches(diversity=self.config.mga_new_div_niches[step])
 
                     algorithm.update_hyperparameters(
                         max_iter=self.config.mga_iter[step],
@@ -833,7 +854,6 @@ class MhmgaSolver(MhmgaSolverBase):
                         noptimal_abs=self.config.mga_noptimal_abs[step],
                         violation_factor=PENALTY_MULTIPLIER,
                         mutation_scaler=np.ones_like(self.scenario.lower_bounds),
-                        space_scaler=self.obj_bundle.space_scaler,
                         objective_scaler=1.0,
                         fitness_method=self.config.mga_fitness[step],
                     )
@@ -875,7 +895,8 @@ class MhmgaExtremaSolver(MhmgaSolverBase):
             maximize=maximize,
             vectorized=True,
             constraints=True,
-            return_scaled=False,
+            return_scaled=self.obj_bundle.return_scaled,
+            scaled_ndim=self.obj_bundle.scaled_ndim,
         )
 
         algorithm = MGAProblem(
@@ -887,6 +908,7 @@ class MhmgaExtremaSolver(MhmgaSolverBase):
             parallelize=False,  # we implement parallelisation independently
             callback=self.callback,
             include_obj_in_fitness=True,
+            space_scaler=self.obj_bundle.space_scaler,
         )
 
         algorithm.starting_points = starting_points

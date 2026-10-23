@@ -10,7 +10,7 @@ from mga.postprocessing import selection
 from firm_ce.model import Model
 from firm_ce.analysis.statistics import Statistics
 from firm_ce.analysis.validate import Validation, ValidationTensor
-from firm_ce.analysis.display import Display, MetricSpec, is_rechargeable_storage
+from firm_ce.analysis.display import Display, MetricSpec
 from firm_ce.analysis.space_explorer import SpaceExplorer
 from firm_ce.common.typing import npfloat
 from firm_ce.analysis.cost_uncertainty import MCConfig, run_monte_carlo
@@ -103,7 +103,7 @@ def build_and_evaluate_solutions(scenario, xs, mhmga_indices=None):
         scenario.load_datafiles()
 
     if scenario.config.type == "single_time":
-        scenario.build_and_evaluate_solution(x)
+        scenario.build_and_evaluate_solution(xs)
     elif scenario.config.type.startswith("mhmga"):
         scenario.build_and_evaluate_noptima(xs[mhmga_indices])
 
@@ -256,7 +256,7 @@ def display_graphs(scenario, mhmga_indices: list = None) -> None:
 
 
 if __name__ == "__main__":
-    RUN_MODE = "results/firmeur_7pc_explor_20261016_121741"
+    RUN_MODE = "results/firmeur_7pc_explor_20261021_130002"
 
     start_time = time.time()
     model = Model(model_location=RUN_MODE)
@@ -270,8 +270,8 @@ if __name__ == "__main__":
 
         indices = None
         if scenario.config.type.startswith("mhmga"):
-            indices = get_diverse_indices(scenario, xs, 4)
-
+            indices = get_diverse_indices(scenario, xs, 5)
+        # raise KeyboardInterrupt
         build_and_evaluate_solutions(scenario, xs=xs, mhmga_indices=indices)
 
         run_cost_monte_carlo(scenario, n_samples=10_000)

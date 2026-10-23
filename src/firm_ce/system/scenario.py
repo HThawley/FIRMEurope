@@ -28,7 +28,7 @@ from firm_ce.fast_methods import static_m
 from firm_ce.io.file_manager import DataFile
 from firm_ce.io.data_model import ModelData
 from firm_ce.optimisation.solver import get_solver
-from firm_ce.system.scalar.parameters import ModelConfig
+from firm_ce.system.config import ModelConfig
 
 
 class Scenario:

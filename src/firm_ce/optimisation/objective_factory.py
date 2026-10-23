@@ -1,4 +1,3 @@
-# type: ignore
 from dataclasses import dataclass
 from typing import Callable, Tuple, Any, Optional
 import numpy as np
@@ -45,10 +44,24 @@ def _get_default_args(scenario, config) -> Tuple:
     )
 
 
-def _allocate_details_array(scenario, config) -> np.ndarray:
+def _get_extrema_count(config, scaled_ndim: int) -> int:
+    mode = getattr(config, "mga_extrema_dims", "none").lower()
+    if mode == "all":
+        return 2 * scaled_ndim
+    elif mode in ("all-min", "all-max"):
+        return scaled_ndim
+    elif mode == "none":
+        return 0
+    else:
+        raise NotImplementedError("Custom extrema targets parsing not implemented yet.")
+
+
+def _allocate_details_array(scenario, config, scaled_ndim: int) -> np.ndarray:
+    extrema_count = _get_extrema_count(config, scaled_ndim)
+    total_niches = 1 + extrema_count + config.mga_start_div_niches + sum(config.mga_new_div_niches)
     return np.empty(
         (
-            config.mga_start_niches + sum(config.mga_new_niches),
+            total_niches,
             max(config.mga_pop_size),
             scenario.details_length,
         ),
@@ -95,10 +108,11 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
 
     elif opt_type.startswith("mhmga"):
         space_basis = getattr(config, "mga_space_basis", "capacity").lower()
-        details_buf = _allocate_details_array(scenario, config) if save_details else None
 
         if space_basis == "capacity":
             space_scaler = scenario.build_capacity_space_scaler()
+            scaled_ndim = space_scaler.shape[1] if space_scaler.ndim == 2 else len(scenario.lower_bounds_abs)
+            details_buf = _allocate_details_array(scenario, config, scaled_ndim) if save_details else None
 
             if backend == "scalar":
                 if save_details:
@@ -107,6 +121,7 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
                         fargs=(*_get_default_args(scenario, config), details_buf),
                         return_scaled=False,
                         space_scaler=space_scaler,
+                        scaled_ndim=scaled_ndim,
                         details=details_buf,
                     )
                 return ObjectiveBundle(
@@ -114,6 +129,7 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
                     fargs=_get_default_args(scenario, config),
                     return_scaled=False,
                     space_scaler=space_scaler,
+                    scaled_ndim=scaled_ndim,
                 )
 
             elif backend == "tensor":
@@ -123,6 +139,7 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
                         fargs=(scenario.staticTensor, details_buf),
                         return_scaled=False,
                         space_scaler=space_scaler,
+                        scaled_ndim=scaled_ndim,
                         details=details_buf,
                     )
                 return ObjectiveBundle(
@@ -130,16 +147,19 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
                     fargs=(scenario.staticTensor,),
                     return_scaled=False,
                     space_scaler=space_scaler,
+                    scaled_ndim=scaled_ndim,
                 )
 
         elif space_basis == "energy":
             nodal_demand_totals = scenario.get_nodal_demand_totals()
-            det_arg = details_buf if save_details else np.empty((1, 1, 1), dtype=npfloat)
 
             if backend == "tensor":
                 norm_code, agg_code, scaled_ndim = _resolve_energy_space_dims(
                     scenario, config, N_ENERGY_COMPONENTS
                 )
+                details_buf = _allocate_details_array(scenario, config, scaled_ndim) if save_details else None
+                det_arg = details_buf if save_details else np.empty((1, 1, 1), dtype=npfloat)
+
                 fargs = (
                     scenario.staticTensor,
                     nodal_demand_totals,
@@ -166,6 +186,9 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
                 norm_code, agg_code, scaled_ndim = _resolve_energy_space_dims(
                     scenario, config, n_energy_types
                 )
+                details_buf = _allocate_details_array(scenario, config, scaled_ndim) if save_details else None
+                det_arg = details_buf if save_details else np.empty((1, 1, 1), dtype=npfloat)
+
                 fargs = (
                     *_get_default_args(scenario, config),
                     nodal_demand_totals,
