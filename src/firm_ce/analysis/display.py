@@ -12,7 +12,7 @@ import pandas as pd
 from firm_ce.analysis.accessor import Accessor
 from firm_ce.backend.scalar.solution import Solution, evaluate
 from firm_ce.common.typing import npfloat
-from firm_ce.system.scalar.parameters import ModelConfig
+from firm_ce.system.config import ModelConfig
 from firm_ce.system.scenario import Scenario
 
 from firm_ce.analysis.taxonomy import PlotStyle, TECH_COLORS, TECH_HATCHES, get_color, get_hatch

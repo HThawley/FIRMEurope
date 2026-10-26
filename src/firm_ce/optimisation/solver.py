@@ -819,7 +819,14 @@ class MhmgaSolver(MhmgaSolverBase):
                 diversity=self.config.mga_start_div_niches,
                 **extrema_kwargs
             )
-            self.scenario.logger.info(f"[MHMGA] MGA algorithm initialised with {algorithm.num_niches} niches.")
+            n_opt = algorithm.niche_types.count(0)
+            n_ext = algorithm.niche_types.count(1)
+            n_div = algorithm.niche_types.count(2)
+
+            self.scenario.logger.info(
+                f"[MHMGA] MGA algorithm initialised with {algorithm.num_niches} niches "
+                f"({n_opt} optimisation, {n_ext} extrema, {n_div} diversity)."
+            )
 
         try:
             with graceful_sigint_handler(algorithm, self.scenario.logger):
