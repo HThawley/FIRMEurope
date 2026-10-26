@@ -67,9 +67,11 @@ class MetricSpec:
     asset_filter: Callable[[object, str], bool] = lambda asset, base_tech: True
     group_by: Union[Literal["tech", "subtech", "node"], Callable[[object], str]] = "subtech"
     include_balances: Sequence[BalanceType] = field(default_factory=tuple)
+    negate_balances: bool = False  # Plots balances (curtailment, losses, spillage) below 0
     annualize: bool = False
     scale_factor: float = 1.0
     norm_ref: int | None = None  # Index of spec in preset to normalize against when normalize=True
+    norm_by: Literal["self", "demand"] = "self"  # "demand" sets 100% = system demand
 
     def with_options(self, **kwargs) -> "MetricSpec":
         """Returns a modified copy of this MetricSpec with updated fields."""
@@ -239,23 +241,16 @@ SUMMARY_PRESETS: Dict[str, List[MetricSpec]] = {
             assets=("generators", "storages"),
             metric="power_capacity",
         ),
-        # Bar 1: Gross Annual Energy Mix (stacks to 100% of total TWh/yr)
+        # Bar 1: Gross Annual Energy Mix + negative Charging, Losses & Curtailment
         MetricSpec(
             title="Annual Energy Mix",
             unit="TWh/yr",
-            assets=("generators", "storages"),
+            assets=("generators", "storages", "major_lines"),
             metric="dispatch_and_charge",
-            annualize=True,
-        ),
-        # Bar 2: Losses & Curtailment (normalized against Bar 1's TWh/yr total -> <100%)
-        MetricSpec(
-            title="Losses & Curtailment",
-            unit="TWh/yr",
-            assets=("storages", "major_lines"),
-            metric="none",
             include_balances=("curtailment", "storage_losses", "spillage", "line_losses"),
+            negate_balances=True,
             annualize=True,
-            norm_ref=1,  # Normalize height against Bar 1 ("Annual Energy Mix")
+            norm_by="demand",
         ),
     ],
 }

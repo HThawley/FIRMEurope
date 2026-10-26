@@ -187,6 +187,11 @@ class Display:
             case _:
                 raise ValueError(f"Unknown group_by mode: '{group_by}'")
 
+    def _get_system_demand(self, solution: Solution, annualize: bool = True, scale_factor: float = 1.0) -> float:
+        accessor = self._get_accessor(solution)
+        scale = scale_factor / (self.scenario.static.year_count * 1000.0) if annualize else scale_factor
+        return float(accessor.get_demand_gross("system") * scale)
+
     def _eval_asset_metric(self, accessor: Accessor, asset, spec: MetricSpec, scale: float) -> Dict[str, float]:
         """Evaluates a MetricSpec on a single asset, returning {label: value}."""
         if spec.metric == "none":
@@ -209,8 +214,12 @@ class Display:
             case "energy_capacity":
                 val = self._get_build_energy_capacity(accessor, asset, spec.build)
             case "dispatch":
+                if getattr(asset, "object_class", "") == "line":
+                    return {}
                 val = accessor.get_dispatch_gross(asset)
             case "dispatch_and_charge":
+                if getattr(asset, "object_class", "") == "line":
+                    return {}
                 out = {label: accessor.get_dispatch_gross(asset) * scale}
                 if getattr(asset, "object_class", "") == "storage":
                     out[f"{label} (Electrical)"] = accessor.get_charge_gross(asset) * scale
@@ -263,20 +272,29 @@ class Display:
 
                 # Asset-level balances
                 if not by_node and spec.include_balances:
+                    bal_sign = -1.0 if spec.negate_balances else 1.0
                     if "storage_losses" in spec.include_balances and asset_class == "storages":
                         data["Storage Losses"] = (
-                            data.get("Storage Losses", 0.0) + accessor.get_storage_loss_gross(asset) * scale
+                            data.get("Storage Losses", 0.0)
+                            + bal_sign * accessor.get_storage_loss_gross(asset) * scale
                         )
                     if "spillage" in spec.include_balances and asset_class == "storages":
-                        data["Spillage"] = data.get("Spillage", 0.0) + accessor.get_spillage_gross(asset) * scale
+                        data["Spillage"] = (
+                            data.get("Spillage", 0.0)
+                            + bal_sign * accessor.get_spillage_gross(asset) * scale
+                        )
                     if "line_losses" in spec.include_balances and asset_class == "major_lines":
                         data["Transmission Losses"] = (
-                            data.get("Transmission Losses", 0.0) + accessor.get_line_loss_gross(asset) * scale
+                            data.get("Transmission Losses", 0.0)
+                            + bal_sign * accessor.get_line_loss_gross(asset) * scale
                         )
 
         # System-level balances
         if not by_node and "curtailment" in spec.include_balances:
-            data["Curtailment"] = data.get("Curtailment", 0.0) + accessor.get_curtail_gross("system") * scale
+            bal_sign = -1.0 if spec.negate_balances else 1.0
+            data["Curtailment"] = (
+                data.get("Curtailment", 0.0) + bal_sign * accessor.get_curtail_gross("system") * scale
+            )
 
         return data
 
@@ -515,7 +533,12 @@ class Display:
                     item_label = spec.title
 
                 resolved_ref = (base_offset + spec.norm_ref) if spec.norm_ref is not None else None
-                items.append((item_label, mix, spec.unit, resolved_ref))
+                custom_denom = (
+                    self._get_system_demand(sol, spec.annualize, spec.scale_factor)
+                    if spec.norm_by == "demand"
+                    else None
+                )
+                items.append((item_label, mix, spec.unit, resolved_ref, custom_denom))
 
         with plt.rc_context(self.style.to_rc()):
             if chart_type == "stacked_bar":
@@ -547,6 +570,8 @@ class Display:
     def plot_single_balance_bars(
         self,
         solutions: Union[int, Sequence[int]] = (0, 1, 2),
+        *,
+        normalize: bool = False,
         figsize: Tuple[float, float] | None = None,
         ax: Union[plt.Axes, Sequence[plt.Axes], None] = None,
         save_path: str | None = None,
@@ -554,64 +579,42 @@ class Display:
         """
         Plots a single stacked bar per solution combining generation/discharge (positive)
         and charging, curtailment, and losses (negative).
+        When `normalize=True`, 100% equals annual system demand.
         """
-        from firm_ce.analysis.display_presets import MetricSpec
-
         sol_list = [solutions] if isinstance(solutions, int) else list(solutions)
 
-        # Spec 1: Generation and Charging (Generators & Storages only)
-        # dispatch_and_charge natively returns positive dispatch and negative charge
-        gen_sto_spec = MetricSpec(
-            title="Gen & Charge",
-            unit="TWh/yr",
-            assets=("generators", "storages"),
-            metric="dispatch_and_charge",
-            annualize=True,
-        )
-
-        # Spec 2: System Balances & Losses (All relevant assets)
-        # metric="none" prevents attempting to evaluate power traces on lines
-        balance_spec = MetricSpec(
-            title="Balances",
+        balance_bar_spec = MetricSpec(
+            title="Energy Balance",
             unit="TWh/yr",
             assets=("generators", "storages", "major_lines"),
-            metric="none",
+            metric="dispatch_and_charge",
             include_balances=("curtailment", "storage_losses", "spillage", "line_losses"),
+            negate_balances=True,
             annualize=True,
+            norm_by="demand",
         )
 
-        balances_to_flip = {"Curtailment", "Storage Losses", "Spillage", "Transmission Losses"}
         items = []
-
         for sol_idx in sol_list:
             sol = self._resolve_solution(sol_idx)
+            mix = self._aggregate_spec(sol, balance_bar_spec, by_node=False)
+            demand_denom = self._get_system_demand(sol, annualize=True) if normalize else None
+            items.append((f"Alt {sol_idx}", mix, balance_bar_spec.unit, None, demand_denom))
 
-            # Extract generation/charge
-            mix = self._aggregate_spec(sol, gen_sto_spec, by_node=False)
+        with plt.rc_context(self.style.to_rc()):
+            fig, axes = self._render_stacked_bars(
+                items,
+                normalize=normalize,
+                is_delta=False,
+                sort="name",
+                figsize=figsize or (max(6.0, 2.2 * len(items) + 2.0), 7.0),
+                ax=ax,
+            )
 
-            # Extract and negate balances
-            bal_mix = self._aggregate_spec(sol, balance_spec, by_node=False)
-            for k, v in bal_mix.items():
-                if k in balances_to_flip:
-                    mix[k] = mix.get(k, 0.0) - abs(v)
-                else:
-                    mix[k] = mix.get(k, 0.0) + v
+            if save_path:
+                fig.savefig(save_path, dpi=self.style.dpi, bbox_inches="tight")
 
-            items.append((f"Alt {sol_idx}", mix, gen_sto_spec.unit, None))
-
-        fig, axes = self._render_stacked_bars(
-            items,
-            normalize=False,
-            is_delta=False,
-            sort="name",
-            figsize=figsize or (max(6.0, 2.2 * len(items) + 2.0), 7.0),
-            ax=ax
-        )
-
-        if save_path:
-            fig.savefig(save_path, dpi=self.style.dpi, bbox_inches="tight")
-
-        return fig, axes
+            return fig, axes
 
     # --------------------------------------------------------------------------
     # Backwards-Compatible Wrappers
@@ -692,14 +695,14 @@ class Display:
 
     def _render_stacked_bars(
         self,
-        items: List[Tuple[str, Dict[str, float], str, int | None]],
+        items: List[Tuple[str, Dict[str, float], str, int | None, float | None]],
         normalize: bool,
         is_delta: bool,
         sort: str,
         figsize: Tuple[float, float] | None,
         ax: plt.Axes | None,
     ) -> Tuple[plt.Figure, np.ndarray]:
-        units_set = {u for _, _, u, _ in items}
+        units_set = {u for _, _, u, *_ in items}
         if not normalize and len(units_set) > 1:
             raise ValueError(
                 f"Cannot plot unnormalized stacked bars across mixed units {units_set}. Set normalize=True."
@@ -719,16 +722,25 @@ class Display:
 
         pos_keys = []
         neg_keys = []
+        has_elec_charging = False
+        has_inflows = False
 
         # Pre-compute positive/negative totals and global axis extrema up front
-        bar_pos_totals = [sum(float(v) for v in mix.values() if np.isfinite(v) and v > 1e-6) for _, mix, _, _ in items]
-        bar_neg_totals = [sum(float(v) for v in mix.values() if np.isfinite(v) and v < -1e-6) for _, mix, _, _ in items]
+        bar_pos_totals = [sum(float(v) for v in mix.values() if np.isfinite(v) and v > 1e-6) for _, mix, *_ in items]
+        bar_neg_totals = [sum(float(v) for v in mix.values() if np.isfinite(v) and v < -1e-6) for _, mix, *_ in items]
 
         if normalize and not is_delta:
-            bar_denoms = [
-                bar_pos_totals[norm_ref] if (norm_ref is not None and 0 <= norm_ref < len(items)) else pos_tot
-                for pos_tot, (_, _, _, norm_ref) in zip(bar_pos_totals, items)
-            ]
+            bar_denoms = []
+            for idx, pos_tot in enumerate(bar_pos_totals):
+                norm_ref = items[idx][3] if len(items[idx]) > 3 else None
+                custom_denom = items[idx][4] if len(items[idx]) > 4 else None
+                if custom_denom is not None and custom_denom > 0:
+                    bar_denoms.append(custom_denom)
+                elif norm_ref is not None and 0 <= norm_ref < len(items):
+                    bar_denoms.append(bar_pos_totals[norm_ref])
+                else:
+                    bar_denoms.append(pos_tot)
+
             bar_heights = [
                 (pos_tot / denom * 100.0) if denom > 0 else 0.0
                 for pos_tot, denom in zip(bar_pos_totals, bar_denoms)
@@ -745,9 +757,10 @@ class Display:
             max_pos_height = max(bar_pos_totals, default=1.0)
             min_neg_height = min(bar_neg_totals, default=0.0)
 
-        annot_offset = 1.5 if (normalize and not is_delta) else max(max_pos_height * 0.02, 0.1)
+        annot_offset = max(max_pos_height * 0.015, 1.5) if (normalize and not is_delta) else max(max_pos_height * 0.02, 0.1)
 
-        for idx, (_label, mix, unit, _norm_ref) in enumerate(items):
+        for idx, item in enumerate(items):
+            _, mix, unit = item[0], item[1], item[2]
             clean_mix = {k: float(v) for k, v in mix.items() if np.isfinite(v) and abs(v) > 1e-6}
             denom = bar_denoms[idx]
 
@@ -794,7 +807,21 @@ class Display:
                     linewidth=0.5,
                     zorder=3,
                 )
-                if tech not in legend_handles:
+
+                # Consolidate storage (Electrical) and (Inflows) into generic white hatch legend entries
+                if tech.endswith(" (Electrical)"):
+                    has_elec_charging = True
+                    base_tech = tech.removesuffix(" (Electrical)")
+                    # Ensure parent storage color is still represented in legend if it didn't discharge
+                    if base_tech not in legend_handles:
+                        legend_handles[base_tech] = plt.Rectangle(
+                            (0, 0), 1, 1, facecolor=self._get_color(base_tech), edgecolor="black", linewidth=0.5
+                        )
+                        if base_tech not in pos_keys:
+                            pos_keys.insert(0, base_tech)
+                elif tech.endswith(" (Inflows)"):
+                    has_inflows = True
+                elif tech not in legend_handles:
                     legend_handles[tech] = bar_container[0]
 
             # Top Annotation
@@ -819,7 +846,6 @@ class Display:
             # Bottom Annotation (Negative Component)
             if neg_physical_total < -1e-6:
                 if callable(self.style.annotation_format):
-                    # Using absolute value guarantees formatting doesn't misplace the minus sign
                     neg_str = self.style.annotation_format(abs(neg_physical_total))
                 else:
                     neg_str = self.style.annotation_format.format(abs(neg_physical_total))
@@ -837,15 +863,15 @@ class Display:
         if is_delta or min_neg_height < -1e-6:
             axis.axhline(0, color="black", linewidth=0.8, zorder=4)
 
-        # Apply 10% gridlines and dynamically pad the bottom y-limit
         if normalize and not is_delta:
             axis.yaxis.set_major_locator(plt.MultipleLocator(10))
             axis.grid(True, axis="y", linestyle="--", alpha=0.3, color="gray", zorder=0)
             axis.set_axisbelow(True)
-            # Subtract 5.0 before flooring to guarantee text padding isn't cropped
-            y_bot = math.floor((min_neg_height - 5.0) / 10.0) * 10.0 if min_neg_height < -1e-6 else 0.0
+            y_bot = math.floor((min_neg_height - 6.0) / 10.0) * 10.0 if min_neg_height < -1e-6 else 0.0
+            y_top = math.ceil((max_pos_height + 6.0) / 10.0) * 10.0
         else:
             y_bot = (min_neg_height - max(abs(min_neg_height) * 0.15, annot_offset * 3)) if min_neg_height < -1e-6 else 0.0
+            y_top = max(max_pos_height * 1.15, 1.0)
 
         axis.set_xticks(x_positions)
         axis.set_xticklabels([b[0] for b in items], fontsize=self.style.base_fontsize)
@@ -855,25 +881,33 @@ class Display:
             fontsize=self.style.base_fontsize,
         )
 
-        y_top = max(110.0, max_pos_height * 1.12) if (normalize and not is_delta) else max(max_pos_height * 1.15, 1.0)
         axis.set_ylim(y_bot, y_top)
         axis.spines["top"].set_visible(False)
         axis.spines["right"].set_visible(False)
 
-        if legend_handles:
+        if legend_handles or has_elec_charging or has_inflows:
             ordered_legend_keys = []
 
-            # Positive bars stack UP, so the topmost bar is the last one built. Reverse it.
             for k in reversed(pos_keys):
                 if k not in ordered_legend_keys and k in legend_handles:
                     ordered_legend_keys.append(k)
 
-            # Negative bars stack DOWN, so the first one built is closest to zero. Keep forward order.
+            if has_elec_charging:
+                legend_handles["Storage Charging"] = plt.Rectangle(
+                    (0, 0), 1, 1, facecolor="white", hatch="//", edgecolor="black", linewidth=0.5
+                )
+                ordered_legend_keys.append("Storage Charging")
+
+            if has_inflows:
+                legend_handles["Storage Inflows"] = plt.Rectangle(
+                    (0, 0), 1, 1, facecolor="white", hatch="..", edgecolor="black", linewidth=0.5
+                )
+                ordered_legend_keys.append("Storage Inflows")
+
             for k in neg_keys:
                 if k not in ordered_legend_keys and k in legend_handles:
                     ordered_legend_keys.append(k)
 
-            # Fallback for any edge cases (e.g., zero-height bars with handles)
             for k in legend_handles:
                 if k not in ordered_legend_keys:
                     ordered_legend_keys.append(k)
@@ -916,7 +950,7 @@ class Display:
 
         # Normalize area per shared physical unit
         unit_maxes: Dict[str, float] = {}
-        for _, mix, unit, _ in items:
+        for _, mix, unit, *_ in items:
             total = sum(v for v in mix.values() if v > 0)
             unit_maxes[unit] = max(unit_maxes.get(unit, 1.0), total)
 
@@ -925,7 +959,7 @@ class Display:
                 axis.axis("off")
                 continue
 
-            title, mix, unit, _ = items[i]
+            title, mix, unit, *_ = items[i]
             clean_mix = {k: v for k, v in mix.items() if v > 1e-6}
             total = sum(clean_mix.values())
 
