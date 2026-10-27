@@ -91,11 +91,11 @@ def validate_model_config(config_dict, model_logger):
         "population": validate_positive_int,
         "restart_optimisation": validate_bool,
         "save_details": validate_bool,
-        "model_location": lambda v: isinstance(v,str),
+        "model_location": lambda v: isinstance(v, str),
         "recombination": lambda v: validate_range(v, 0, 1),
         "type": lambda v: validate_enum(
             v,
-            ["single_time", "capacity_expansion", "near_optimum", "midpoint_explore", "mhmga"],
+            ["single_time", "capacity_expansion", "near_optimum", "midpoint_explore", "mhmga", "mhmga_extrema"],
         ),
         "model_name": None,
         "near_optimal_tol": lambda v: validate_range(v, 0, 1),
@@ -104,22 +104,27 @@ def validate_model_config(config_dict, model_logger):
         "simple_blocks_per_day": validate_positive_int,
         "fixed_costs_threshold": lambda v: validate_range(v, 0),
         "limit_timesteps": validate_positive_int,
-        "demand_multiple": lambda v: validate_range(v, 0.0, inclusive = False),
+        "demand_multiple": lambda v: validate_range(v, 0.0, inclusive=False),
         "interval_aggregation": lambda v: validate_range(v, 1.0),
+        # MGA structural keys not in expected_mga_hyperparameters
+        "mga_steps": validate_positive_int,
+        "mga_space_basis": lambda v: str(v).lower() in ("capacity", "energy"),
+        "mga_space_norm": lambda v: str(v).lower() in ("relative", "absolute"),
+        "mga_space_agg": lambda v: str(v).lower() in ("unit_type", "node", "none"),
     }
+
+    known_keys = set(validators.keys()) | set(expected_mga_hyperparameters.keys())
 
     for item in config_dict.values():
         name = item["name"]
         value = item["value"]
 
-        if name not in validators:
-            if name.startswith("mga_"):
-                # Skip here, handled by parse_and_validate_mga bel
-                continue
-            model_logger.warning(f"Unknown configuration name {name}")
+        if name not in known_keys:
+            model_logger.error(f"Unknown configuration parameter '{name}' in config.csv.")
+            flag = False
             continue
 
-        if not validators[name]:
+        if name in expected_mga_hyperparameters or validators.get(name) is None:
             continue
 
         try:
