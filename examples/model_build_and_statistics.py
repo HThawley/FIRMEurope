@@ -11,6 +11,7 @@ from firm_ce.model import Model
 from firm_ce.analysis.statistics import Statistics
 from firm_ce.analysis.validate import Validation, ValidationTensor
 from firm_ce.analysis.display import Display, MetricSpec
+from firm_ce.analysis.display_presets import is_rechargeable_storage
 from firm_ce.analysis.space_explorer import SpaceExplorer
 from firm_ce.common.typing import npfloat
 from firm_ce.analysis.cost_uncertainty import MCConfig, run_monte_carlo
@@ -182,7 +183,12 @@ def run_cost_monte_carlo(
     return summary
 
 
-def display_graphs(scenario, mhmga_indices: list = None) -> None:
+def display_graphs(
+    scenario,
+    mhmga_indices: list = None,
+    mga_rel = None,
+    mga_abs = None,
+) -> None:
     # --- Tier 1: Simulated Solution Display ---
     if scenario.config.type == "single_time":
         print(f"Generating single_time plots for '{scenario.name}'")
@@ -195,6 +201,12 @@ def display_graphs(scenario, mhmga_indices: list = None) -> None:
         scenario.display.plot_map("energy")
 
     elif scenario.config.type.startswith("mhmga"):
+        if mga_rel is None:
+            mga_rel = scenario.config.mga_noptimal_rel[-1]
+            mga_rel += 1
+        if mga_abs is not None:
+            raise NotImplementedError("absolute threshold relaxation not implemented yet.")
+
         if mhmga_indices is None:
             mhmga_indices = list(range(len(scenario.noptima)))
         print(f"Generating MHMGA plots for '{scenario.name}'")
@@ -204,6 +216,8 @@ def display_graphs(scenario, mhmga_indices: list = None) -> None:
         # 1. Tier 1: Compare specific simulated MGA niche alternatives
         gen_mix_spec = scenario.display.presets["energy_balance"][0]
         scenario.display.plot_summary(gen_mix_spec, solutions=mhmga_indices, normalize=False)
+        scenario.display.plot_single_balance_bars(list(range(len(mhmga_indices))))
+        scenario.display.plot_summary("system_overview_with_losses", chart_type="stacked_bar", normalize=True)
         scenario.display.plot_summary("power_capacity", solutions=2, ref_solution=0, mode="delta", normalize=False)
 
         custom_map_spec = MetricSpec(
@@ -216,8 +230,36 @@ def display_graphs(scenario, mhmga_indices: list = None) -> None:
         )
         scenario.display.plot_map(node_spec=custom_map_spec, line_spec=None, solutions=mhmga_indices)
 
-        # 2. Tier 2: Explore full 10M+ historical MGA ensemble in Relative or Absolute space
-        scenario.explorer = SpaceExplorer(scenario, max_relaxation=1.15, precision=1, rel_norm="eligible")
+        custom_storage_spec = [
+            MetricSpec(
+                title="Power Capacity",
+                unit="GW",
+                assets=("storages",),
+                metric="power_capacity",
+                asset_filter=is_rechargeable_storage,
+            ),
+            MetricSpec(
+                title="Energy Capacity",
+                unit="GWh",
+                assets=("storages",),
+                metric="energy_capacity",
+                asset_filter=is_rechargeable_storage,
+            ),
+            MetricSpec(
+                title="Discharge Energy",
+                unit="TWh/yr",
+                assets=("storages",),
+                metric="discharge",
+                asset_filter=is_rechargeable_storage,
+                include_balances=("storage_losses"),
+                annualize=True,
+            ),
+        ]
+        scenario.display.plot_summary(custom_storage_spec, solutions=[0], chart_type="treemap")
+
+
+        # 2. Tier 2: Explore full historical MGA ensemble in Relative or Absolute space
+        scenario.explorer = SpaceExplorer(scenario, max_relaxation=1.11, precision=3)
 
         # Multi-panel surface (min, median, max rechargeable storage energy across solar vs wind)
         scenario.explorer.plot_surface(
@@ -226,37 +268,38 @@ def display_graphs(scenario, mhmga_indices: list = None) -> None:
             z="rechargable_e",
             aggs=("min", "median", "max"),
             space="abs",
-            threshold=1.15,
+            threshold=mga_rel,
             isolines=[1.02, 1.05, 1.10],
         )
 
         # Pairwise trade-off grid with Pareto frontier
         scenario.explorer.plot_pairgrid(
-            vars=["solar", "wind", "bess_e", "phes_e", "nuke_all"],
-            z="cost",
+            vars=["solar", "wind", "nuke_all", "nphes_e", "trans"],
+            z="ccgt",
             agg="min",
-            space="abs",
-            threshold=1.1,
-            show_pareto=True,
+            space="rel",
+            threshold=1.11,
+            show_pareto=False,
+            show_diagonal=False
         )
 
         # Capacity slack vs cost relaxation ribbons
         scenario.explorer.plot_slack_ribbons(
             vars=["solar", "wind", "bess", "phes", "trans"],
-            max_threshold=1.1,
+            max_threshold=mga_rel,
             space="abs",
         )
 
         # Near-optimal capacity distributions
         scenario.explorer.plot_distributions(
             vars=["solar", "wind", "nuke_all", "bio", "ccgt", "bess", "phes", "trans"],
-            threshold=1.5,
+            threshold=mga_rel,
             space="abs",
         )
 
 
 if __name__ == "__main__":
-    RUN_MODE = "results/firmeur_7pc_explor_20261021_130002"
+    RUN_MODE = "results/firmeur_5yr_explor_20261027_110444"
 
     start_time = time.time()
     model = Model(model_location=RUN_MODE)
@@ -270,10 +313,10 @@ if __name__ == "__main__":
 
         indices = None
         if scenario.config.type.startswith("mhmga"):
-            indices = get_diverse_indices(scenario, xs, 5)
+            indices = get_diverse_indices(scenario, xs, 47)
         # raise KeyboardInterrupt
         build_and_evaluate_solutions(scenario, xs=xs, mhmga_indices=indices)
 
-        run_cost_monte_carlo(scenario, n_samples=10_000)
-        display_graphs(scenario)
+        run_cost_monte_carlo(scenario, n_samples=10_000, rel_halfwidth=0.2)
+        display_graphs(scenario, mga_rel=1.05)
         plt.show()
