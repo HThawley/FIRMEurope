@@ -40,7 +40,7 @@ class MCConfig:
     seed: int = 12345
     chunk_solutions: int = 32  # solutions simulated per parallel batch (memory)
     chunk_samples: int = 2_000  # MC draws per matrix product (memory)
-    top_k_ranks: int = 10  # rank columns shown: 1st..kth, then "k+"
+    max_top_k_ranks: int = 10  # rank columns shown: 1st..kth, then "k+"
     max_heatmap_rows: int = 10  # alternatives shown in rank matrix
     max_pdf_curves: int = 40  # alternatives drawn as PDFs in fig 1
     max_pairwise_alts: int = 10  # number of top alternatives to include in the pairwise win matrix
@@ -126,10 +126,11 @@ def monte_carlo(comp: np.ndarray, group_idx: np.ndarray, demand_mwh: float, cfg:
     rng = np.random.default_rng(cfg.seed)
     S, P = comp.shape
     G = int(group_idx.max()) + 1
-    n, k, h = cfg.n_samples, cfg.top_k_ranks, cfg.rel_halfwidth
+    n, k, h = cfg.n_samples, cfg.max_top_k_ranks, cfg.rel_halfwidth
+    k = min(k, S)
 
     L = np.empty((n, S), dtype=np.float32)  # $/MWh
-    rank_counts = np.zeros((S, k + 1), dtype=np.int64)  # last column = "k+"
+    rank_counts = np.zeros((S, k), dtype=np.int64)  # last column = "k+"
     ar = np.arange(S)
 
     for lo in range(0, n, cfg.chunk_samples):
@@ -148,7 +149,7 @@ def monte_carlo(comp: np.ndarray, group_idx: np.ndarray, demand_mwh: float, cfg:
         ranks = np.empty_like(order)
         np.put_along_axis(ranks, order, np.broadcast_to(ar, (m, S)), axis=1)
         capped = np.minimum(ranks, k)
-        for r in range(k + 1):
+        for r in range(k):
             rank_counts[:, r] += (capped == r).sum(axis=0)
 
     return dict(L=L, rank_counts=rank_counts)

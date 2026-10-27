@@ -3,7 +3,7 @@ import os
 from typing import Literal, Optional, Sequence, Tuple, Union
 
 import matplotlib.pyplot as plt
-from matplotlib.colors import Normalize
+from matplotlib.colors import Normalize, LogNorm
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -48,14 +48,13 @@ class EnsembleDataset:
         scenario: Scenario,
         max_relaxation: float | None = 1.25,
         precision: int | None = 1,
-        rel_norm: Literal["eligible", "all_nodes"] = "eligible",
         include_details: bool = True,
     ):
         self.scenario = scenario
         if not scenario.data_status:
             scenario.load_datafiles()
 
-        self.taxonomy = TechTaxonomy(scenario, rel_norm=rel_norm)
+        self.taxonomy = TechTaxonomy(scenario)
         self.precision = precision
 
         raw_pop, raw_det = self._load_feasible_arrays(max_relaxation, include_details)
@@ -227,12 +226,11 @@ class SpaceExplorer:
         dataset: Optional[EnsembleDataset] = None,
         max_relaxation: float | None = 1.25,
         precision: int | None = 1,
-        rel_norm: Literal["eligible", "all_nodes"] = "eligible",
     ):
         self.scenario = scenario
         self.style = PlotStyle()
         self.dataset = dataset or EnsembleDataset(
-            scenario, max_relaxation=max_relaxation, precision=precision, rel_norm=rel_norm
+            scenario, max_relaxation=max_relaxation, precision=precision
         )
 
     @property
@@ -371,23 +369,30 @@ class SpaceExplorer:
         bins: Union[int, str] = 30,
         corner: bool = True,
         show_pareto: bool = False,
+        show_diagonal: bool = True,
         cmap: str = "RdYlBu_r",
+        log_color_scale: bool = False,
         figsize: Optional[Tuple[float, float]] = None,
         save_path: Optional[str] = None,
     ) -> Tuple[plt.Figure, np.ndarray]:
         """
-        Plots an N x N pairwise grid of technologies with 1D marginal distributions on
-        the diagonal and 2D binned surfaces on the off-diagonal.
+        Plots a pairwise grid of technologies with 2D binned surfaces on the off-diagonal.
+        Optional 1D marginal distributions can be displayed on the diagonal.
         """
         df = self.dataset.get_frame(space=space, threshold=threshold)
-        n = len(vars)
-        figsize = figsize or (3.2 * n, 3.0 * n)
+        n_vars = len(vars)
+        n_grid = n_vars if show_diagonal else n_vars - 1
+
+        if n_grid < 1:
+            raise ValueError("Insufficient variables to plot. Need at least 2 variables if show_diagonal=False.")
+
+        figsize = figsize or (3.2 * n_grid, 3.0 * n_grid)
 
         # Precompute off-diagonal grids for shared color normalization
         cell_grids = {}
         vmin, vmax = np.inf, -np.inf
-        for r in range(n):
-            for c in range(n):
+        for r in range(n_vars):
+            for c in range(n_vars):
                 if r == c or (corner and r < c):
                     continue
                 X, Y, Z = self._compute_2d_grid(df, vars[c], vars[r], z, agg=agg, bins=bins)
@@ -395,18 +400,33 @@ class SpaceExplorer:
                 vmin = min(vmin, float(np.nanmin(Z)))
                 vmax = max(vmax, float(np.nanmax(Z)))
 
-        norm = Normalize(vmin, vmax) if np.isfinite(vmin) else None
+        if np.isfinite(vmin):
+            if log_color_scale:
+                norm = LogNorm(vmin=1, vmax=max(vmax, 10))
+            else:
+                norm = Normalize(vmin, vmax) if np.isfinite(vmin) else None
+        else:
+            norm = None
 
         with plt.rc_context(self.style.to_rc()):
-            fig, axs = plt.subplots(n, n, figsize=figsize, dpi=self.style.dpi, squeeze=False)
+            fig, axs = plt.subplots(n_grid, n_grid, figsize=figsize, dpi=self.style.dpi, squeeze=False)
             last_mesh = None
 
-            for r in range(n):
-                for c in range(n):
-                    ax = axs[r, c]
-                    if corner and r < c:
-                        ax.axis("off")
+            for r in range(n_vars):
+                for c in range(n_vars):
+                    if r == c and not show_diagonal:
                         continue
+                    if corner and r < c:
+                        continue
+
+                    # Map data coordinates to axis layout coordinates
+                    ax_r = r if show_diagonal else r - 1
+                    ax_c = c
+
+                    if ax_r < 0 or ax_r >= n_grid or ax_c >= n_grid:
+                        continue
+
+                    ax = axs[ax_r, ax_c]
 
                     if r == c:
                         color = get_color(vars[c])
@@ -418,26 +438,36 @@ class SpaceExplorer:
 
                         if show_pareto:
                             valid_pts = np.column_stack([X[~np.isnan(Z)], Y[~np.isnan(Z)]])
-                            p_mask = _pareto_frontier_2d(valid_pts, maximize_x=False, maximize_y=False)
-                            ax.scatter(
-                                valid_pts[p_mask, 0],
-                                valid_pts[p_mask, 1],
-                                marker="x",
-                                color="red",
-                                s=25,
-                                linewidths=1.2,
-                                zorder=5,
-                            )
+                            if len(valid_pts) > 0:
+                                p_mask = _pareto_frontier_2d(valid_pts, maximize_x=False, maximize_y=False)
+                                ax.scatter(
+                                    valid_pts[p_mask, 0],
+                                    valid_pts[p_mask, 1],
+                                    marker="x",
+                                    color="red",
+                                    s=25,
+                                    linewidths=1.2,
+                                    zorder=5,
+                                )
 
-                    if r == n - 1:
+                    # Subplot labeling logic
+                    if ax_r == n_grid - 1:
                         ax.set_xlabel(vars[c])
                     else:
                         ax.set_xticklabels([])
 
-                    if c == 0 and r > 0:
+                    if ax_c == 0:
                         ax.set_ylabel(vars[r])
                     elif r != c:
                         ax.set_yticklabels([])
+
+            # Turn off any unused axes in the upper triangle when corner=True and show_diagonal=False
+            if corner and not show_diagonal:
+                for ax_r in range(n_grid):
+                    for ax_c in range(n_grid):
+                        # The diagonal of the axs grid corresponds to r = c + 1
+                        if ax_r < ax_c:
+                            axs[ax_r, ax_c].axis("off")
 
             if last_mesh is not None:
                 fig.colorbar(last_mesh, ax=axs.ravel().tolist(), label=f"{agg}({z})", shrink=0.7)

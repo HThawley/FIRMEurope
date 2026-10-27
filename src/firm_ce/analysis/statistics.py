@@ -71,7 +71,7 @@ class Statistics:
             self.solution = map_tensor_to_scalar(self.scenario, self.solutionTensor)
         else:
             # next, use x to construct a new solution/solutionTensor
-            self.solution, self.solutionTensor = scenario.build_and_evaluate(x, False)
+            self.solution, self.solutionTensor = scenario.build_and_evaluate_solution(x, False)
 
         self.accessor = Accessor(self.solution, "GW")
         if solution_results_directory is None:

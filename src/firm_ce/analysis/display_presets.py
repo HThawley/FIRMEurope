@@ -241,13 +241,20 @@ SUMMARY_PRESETS: Dict[str, List[MetricSpec]] = {
             assets=("generators", "storages"),
             metric="power_capacity",
         ),
-        # Bar 1: Gross Annual Energy Mix + negative Charging, Losses & Curtailment
+        # Bar 1: Transmission capacity
+        MetricSpec(
+            title="Transmission Capacity",
+            unit="GW",
+            assets=("major_lines",),
+            metric="power_capacity",
+        ),
+        # Bar 2: Gross Annual Energy Mix + negative Charging, Losses & Curtailment
         MetricSpec(
             title="Annual Energy Mix",
             unit="TWh/yr",
             assets=("generators", "storages", "major_lines"),
             metric="dispatch_and_charge",
-            include_balances=("curtailment", "storage_losses", "spillage", "line_losses"),
+            include_balances=("curtailment", "spillage", "line_losses"),
             negate_balances=True,
             annualize=True,
             norm_by="demand",

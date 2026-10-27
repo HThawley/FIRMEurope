@@ -588,7 +588,7 @@ class Display:
             unit="TWh/yr",
             assets=("generators", "storages", "major_lines"),
             metric="dispatch_and_charge",
-            include_balances=("curtailment", "storage_losses", "spillage", "line_losses"),
+            include_balances=("curtailment", "spillage", "line_losses"),
             negate_balances=True,
             annualize=True,
             norm_by="demand",
@@ -983,9 +983,10 @@ class Display:
                     values,
                     radius=scale,
                     colors=colors,
-                    hatches=hatches,
                     wedgeprops={"linewidth": 0.5, "edgecolor": "black"},
                 )
+                for patch, hatch in zip(handles, hatches):
+                    patch.set_hatch(hatch)
             else:
                 handles = self._draw_treemap(axis, values, colors, hatches, scale)
 

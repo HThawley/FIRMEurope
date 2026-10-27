@@ -49,9 +49,9 @@ class Accessor:
             "expected_curtailment": (self._expected_curtailment_trace_single, ("generators", "storages")),
             "post_curtailment_power": (self._post_curtailment_power_trace_single, ("generators", "storages")),
             "local_consumption": (self._local_consumption_trace_single, ("generators", "storages")),
-            "transmission": (self._transmission_trace_single, ("major_lines", "minor_lines")),
-            "line_loss": (self._line_loss_trace_single, ("major_lines", "minor_lines")),
-            "line_use": (self._line_use_trace_single, ("major_lines", "minor_lines")),
+            "transmission": (self._transmission_trace_single, ("major_lines",)),
+            "line_loss": (self._line_loss_trace_single, ("major_lines",)),
+            "line_use": (self._line_use_trace_single, ("major_lines",)),
         }
 
     def update_units(self, units: Any):
