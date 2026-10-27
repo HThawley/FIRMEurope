@@ -623,7 +623,8 @@ class MhmgaSolverBase(BaseSolver):
             violation_factor=PENALTY_MULTIPLIER,
             mutation_scaler='bounds',
             objective_scaler=1.0,
-            extrema_epsilon=self.config.mga_extrema_epsilon[0],
+            extrema_epsilon_rel=self.config.mga_extrema_epsilon_rel[0],
+            extrema_epsilon_abs=self.config.mga_extrema_epsilon_abs[0],
         )
 
         config_hyperparameters.update(hyperparameters)
@@ -864,7 +865,8 @@ class MhmgaSolver(MhmgaSolverBase):
                         mutation_scaler=np.ones_like(self.scenario.lower_bounds),
                         objective_scaler=1.0,
                         fitness_method=self.config.mga_fitness[step],
-                        extrema_epsilon=self.config.mga_extrema_epsilon[step],
+                        extrema_epsilon_rel=self.config.mga_extrema_epsilon_rel[step],
+                        extrema_epsilon_abs=self.config.mga_extrema_epsilon_abs[step],
                     )
 
                     algorithm.step()
@@ -1013,7 +1015,8 @@ class MhmgaExtremaSolver(MhmgaSolverBase):
                         noptimal_abs=np.inf,
                         violation_factor=PENALTY_MULTIPLIER,
                         mutation_scaler='bounds',  # TODO: enlargen weightings?
-                        extrema_epsilon=self.config.mga_extrema_epsilon[step],
+                        extrema_epsilon_rel=self.config.mga_extrema_epsilon_rel[step],
+                        extrema_epsilon_abs=self.config.mga_extrema_epsilon_abs[step],
                     )
 
                     abs_min = self.scenario.lower_bounds[weighting > 0].sum()

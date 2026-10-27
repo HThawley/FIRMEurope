@@ -32,7 +32,8 @@ id,name,value
 30,mga_disp_rate,1
 31,mga_verbose_level,2
 32,mga_fitness,angular
-33,mga_extrema_epsilon,"1e-3"
-34,mga_space_basis,energy
-35,mga_space_norm,absolute
-36,mga_space_agg,unit_type
+33,mga_extrema_epsilon_rel,"0.01"
+34,mga_extrema_epsilon_abs,"0.001"
+35,mga_space_basis,energy
+36,mga_space_norm,absolute
+37,mga_space_agg,unit_type

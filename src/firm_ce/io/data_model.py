@@ -693,7 +693,8 @@ expected_mga_hyperparameters = {
     "mga_disp_rate": {"default": 1, "ditherable": False, "broadcastable": True, "types": ((int, -1, np.inf),)},
     "mga_verbose_level": {"default": 3, "ditherable": False, "broadcastable": True, "types": ((int, 0, np.inf),)},
     "mga_fitness": {"default": "angular", "ditherable": False, "broadcastable": True, "types": ((str, ("angular", "l2", "l1")),)},
-    "mga_extrema_epsilon": {"default": 1e-6, "ditherable": False, "broadcastable": True, "types": ((float, 0, np.inf),)},
+    "mga_extrema_epsilon_rel": {"default": 1e-3, "ditherable": False, "broadcastable": True, "types": ((float, 0, np.inf),)},
+    "mga_extrema_epsilon_abs": {"default": 1e-6, "ditherable": False, "broadcastable": True, "types": ((float, 0, np.inf),)},
 }
 
 
