@@ -8,13 +8,14 @@ import pandas as pd
 from mga.postprocessing import selection
 
 from firm_ce.model import Model
+from firm_ce.common.typing import npfloat
 from firm_ce.analysis.statistics import Statistics
 from firm_ce.analysis.validate import Validation, ValidationTensor
 from firm_ce.analysis.display import Display, MetricSpec
 from firm_ce.analysis.display_presets import is_rechargeable_storage
 from firm_ce.analysis.space_explorer import SpaceExplorer
-from firm_ce.common.typing import npfloat
 from firm_ce.analysis.cost_uncertainty import MCConfig, run_monte_carlo
+from firm_ce.analysis.behaviour import Behaviour
 
 
 def resolve_single_solution_x(scenario, run_mode: str, x_loc: str | None = None, x0_fallback: bool = True) -> np.ndarray:
@@ -183,13 +184,13 @@ def run_cost_monte_carlo(
     return summary
 
 
-def display_graphs(
+def plot_solutions(
     scenario,
     mhmga_indices: list = None,
-    mga_rel = None,
-    mga_abs = None,
+    mga_rel=None,
+    mga_abs=None,
 ) -> None:
-    # --- Tier 1: Simulated Solution Display ---
+    # --- Simulated Solution Display ---
     if scenario.config.type == "single_time":
         print(f"Generating single_time plots for '{scenario.name}'")
         scenario.display = Display(scenario, scenario.config, solution=scenario.solution)
@@ -258,48 +259,122 @@ def display_graphs(
         scenario.display.plot_summary(custom_storage_spec, solutions=[0], chart_type="treemap")
 
 
-        # 2. Tier 2: Explore full historical MGA ensemble in Relative or Absolute space
-        scenario.explorer = SpaceExplorer(scenario, max_relaxation=1.11, precision=3)
+def plot_heatmaps(
+    scenario,
+    mhmga_indices: list = None,
+    mga_rel=None,
+    mga_abs=None,
+):
+    if mga_rel is None:
+        mga_rel = scenario.config.mga_noptimal_rel[-1]
+        mga_rel += 1
+    if mga_abs is not None:
+        raise NotImplementedError("absolute threshold relaxation not implemented yet.")
 
-        # Multi-panel surface (min, median, max rechargeable storage energy across solar vs wind)
-        scenario.explorer.plot_surface(
-            x="solar",
-            y="wind",
-            z="rechargable_e",
-            aggs=("min", "median", "max"),
-            space="abs",
-            threshold=mga_rel,
-            isolines=[1.02, 1.05, 1.10],
-        )
+    if mhmga_indices is None:
+        mhmga_indices = list(range(len(scenario.noptima)))
 
-        # Pairwise trade-off grid with Pareto frontier
-        scenario.explorer.plot_pairgrid(
-            vars=["solar", "wind", "nuke_all", "nphes_e", "trans"],
-            z="ccgt",
-            agg="min",
-            space="rel",
-            threshold=1.11,
-            show_pareto=False,
-            show_diagonal=False
-        )
+    # Explore full historical MGA ensemble in Relative or Absolute space
+    scenario.explorer = SpaceExplorer(scenario, max_relaxation=1.11, precision=3)
 
-        # Capacity slack vs cost relaxation ribbons
-        scenario.explorer.plot_slack_ribbons(
-            vars=["solar", "wind", "bess", "phes", "trans"],
-            max_threshold=mga_rel,
-            space="abs",
-        )
+    # Multi-panel surface (min, median, max rechargeable storage energy across solar vs wind)
+    scenario.explorer.plot_surface(
+        x="solar",
+        y="wind",
+        z="rechargable_e",
+        aggs=("min", "median", "max"),
+        space="abs",
+        threshold=mga_rel,
+        isolines=[1.02, 1.05, 1.10],
+    )
 
-        # Near-optimal capacity distributions
-        scenario.explorer.plot_distributions(
-            vars=["solar", "wind", "nuke_all", "bio", "ccgt", "bess", "phes", "trans"],
-            threshold=mga_rel,
-            space="abs",
-        )
+    # Pairwise trade-off grid with Pareto frontier
+    scenario.explorer.plot_pairgrid(
+        vars=["solar", "wind", "nuke_all", "nphes_e", "trans"],
+        z="ccgt",
+        agg="min",
+        space="rel",
+        threshold=1.11,
+        show_pareto=False,
+        show_diagonal=False
+    )
+
+    # Capacity slack vs cost relaxation ribbons
+    scenario.explorer.plot_slack_ribbons(
+        vars=["solar", "wind", "bess", "phes", "trans"],
+        max_threshold=mga_rel,
+        space="abs",
+    )
+
+    # Near-optimal capacity distributions
+    scenario.explorer.plot_distributions(
+        vars=["solar", "wind", "nuke_all", "bio", "ccgt", "bess", "phes", "trans"],
+        threshold=mga_rel,
+        space="abs",
+    )
+
+
+def plot_behaviours(scenario):
+    # --- Operational Behaviour Traces ---
+    # Select the scalar Solution object (raising NotImplementedError if a SolutionTensor is passed)
+    active_sol = scenario.solution if scenario.config.type == "single_time" else scenario.noptima[0]
+    behav = Behaviour(scenario, active_sol, units="GW")
+
+    # 1. Time-of-day average behaviour (discharge vs charging) of all storages
+    behav.plot_daily_average(
+        technologies="storages",
+        periods=["winter", "summer"],
+        metric="dispatch_and_charge",
+        assets=("storages",),
+        group_by="subtech",
+        chart_type="stacked",
+        include_demand=False,
+    )
+
+    # 2. Seasonal comparison (Winter vs Summer) of all technologies + system demand
+    behav.plot_daily_average(
+        technologies="all",
+        periods=["winter", "summer"],
+        metric="dispatch_and_charge",
+        group_by="subtech",
+        chart_type="stacked",
+        include_demand=True,
+        include_curtailment=True,
+    )
+
+    # 3. Monthly average diurnal profile for specific VRE & storage technologies
+    behav.plot_daily_average(
+        technologies=["solar", "wind", "bess", "phes"],
+        periods=["jan", "apr", "jul", "oct"],
+        metric="power",
+        chart_type="line",
+        include_demand=False,
+    )
+
+    # 4. Raw (unaveraged) dispatch & charging trace over a 2-week winter window
+    behav.plot_raw_trace(
+        technologies="all",
+        period=(720, 1056),  # Hours 720..1056 (2 weeks in early February)
+        metric="dispatch_and_charge",
+        chart_type="stacked",
+        include_demand=True,
+        include_curtailment=True,
+    )
+
+    # 5. Raw state-of-charge (storage_level in GWh) across the full horizon for rechargeable storages
+    behav_gwh = Behaviour(scenario, active_sol, units="GWh")
+    behav_gwh.plot_raw_trace(
+        technologies="rechargeable_storage",
+        period="all",
+        metric="storage_level",
+        assets=("storages",),
+        chart_type="line",
+        include_demand=False,
+    )
 
 
 if __name__ == "__main__":
-    RUN_MODE = "results/firmeur_5yr_explor_20261027_110444"
+    RUN_MODE = "results/firmeur_5yr_explor_20261023_155451"
 
     start_time = time.time()
     model = Model(model_location=RUN_MODE)
@@ -313,10 +388,12 @@ if __name__ == "__main__":
 
         indices = None
         if scenario.config.type.startswith("mhmga"):
-            indices = get_diverse_indices(scenario, xs, 47)
+            indices = get_diverse_indices(scenario, xs, 5)
         # raise KeyboardInterrupt
         build_and_evaluate_solutions(scenario, xs=xs, mhmga_indices=indices)
 
         run_cost_monte_carlo(scenario, n_samples=10_000, rel_halfwidth=0.2)
-        display_graphs(scenario, mga_rel=1.05)
+        plot_solutions(scenario, mga_rel=1.05)
+        plot_heatmaps(scenario, mga_rel=1.05)
+        plot_behaviours(scenario)
         plt.show()
