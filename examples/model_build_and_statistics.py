@@ -299,17 +299,30 @@ def plot_heatmaps(
         show_diagonal=False
     )
 
+    # Pairwise trade-off grid with Pareto frontier
+    scenario.explorer.plot_pairgrid(
+        vars=["solar", "wind", "nuke_all", "nphes_e", "trans"],
+        z="ccgt",
+        agg="min",
+        space="rel",
+        threshold=mga_rel,
+        show_pareto=False,
+        show_diagonal=False
+    )
+
+    scenario.explorer.plot_surface(
+        x="cl_recharg_e",
+        y="trans",
+        z="ccgt",
+        aggs=('min'),
+        space="rel",
+        threshold=mga_rel,
+    )
+
     # Capacity slack vs cost relaxation ribbons
     scenario.explorer.plot_slack_ribbons(
         vars=["solar", "wind", "bess", "phes", "trans"],
         max_threshold=mga_rel,
-        space="abs",
-    )
-
-    # Near-optimal capacity distributions
-    scenario.explorer.plot_distributions(
-        vars=["solar", "wind", "nuke_all", "bio", "ccgt", "bess", "phes", "trans"],
-        threshold=mga_rel,
         space="abs",
     )
 
@@ -388,7 +401,9 @@ if __name__ == "__main__":
 
         indices = None
         if scenario.config.type.startswith("mhmga"):
-            indices = get_diverse_indices(scenario, xs, 5)
+            # indices = get_diverse_indices(scenario, xs, 47)
+            # indices=[0, 1,2,3,4,5,6,7,8,9,12,13,15,17,18,19,20,21,23,25,26]
+            indices=[0]
         # raise KeyboardInterrupt
         build_and_evaluate_solutions(scenario, xs=xs, mhmga_indices=indices)
 
