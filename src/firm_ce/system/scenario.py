@@ -229,9 +229,6 @@ class Scenario:
             for node in self.network.nodes.values():
                 node.relative_scaler = 1.0
 
-            for sto in self.fleet.storages.values():
-                sto.relative_energy = False
-
             for line in self.network.major_lines.values():
                 idx = line.candidate_x_idx
                 if idx != -1:
