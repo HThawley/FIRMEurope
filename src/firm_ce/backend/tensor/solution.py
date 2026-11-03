@@ -13,7 +13,7 @@ from firm_ce.system.tensor.static import StaticTensorType
 # Column indices in SolutionTensor.nodal_energy (shape: nodes x 13)
 # 0: pfix, 1: psat, 2: offw, 3: onsw, 4: nuke, 5: nlte,
 # 6: biom, 7: biog, 8: gas, 9: phes_dis, 10: b4_dis, 11: b2_dis, 12: curtail
-N_ENERGY_COMPONENTS = 13
+N_ENERGY_COMPONENTS = 14
 
 # Integer codes for Numba energy-space extraction
 NORM_RELATIVE = npintp(0)
@@ -131,6 +131,7 @@ def CalculateCost(
             E[n, 10] += o.Mdischarge[t, n, 1]
             E[n, 11] += o.Mdischarge[t, n, 2]
             E[n, 12] += np.abs(o.Mcurtail[t, n])
+            E[n, 13] += 0.5 * np.abs(o.Mimport[t, n])
 
     cost = s.legacy_costs
 
