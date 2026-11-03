@@ -75,7 +75,10 @@ class Scenario:
         if len(self.x0_abs) > 0:
             if (self.x0_abs - self.lower_bounds_abs).min() < 0 or (self.x0_abs - self.upper_bounds_abs).max() > 0:
                 self.logger.info("Initial guess (x0) is out of bounds. Clipping to bounds.")
-                self.x0_abs = np.clip(self.x0_abs, self.lower_bounds_abs, self.upper_bounds_abs)
+                self.lower_bounds_abs, self.upper_bounds_abs = self.assign_indices_and_get_abs_bounds()
+                self.x0_raw, self.x0_is_relative = self._get_x0(model_data.x0s)
+                self.x0_abs = np.array([], dtype=npfloat)
+                self.x0_rel = np.array([], dtype=npfloat)
 
         self.statistics = None
         self.assign_unit_type_idx()
@@ -319,12 +322,15 @@ class Scenario:
         self.projection_matrix = self.build_capacity_space_scaler()
         self.set_relative_scalers()
 
-        if self.x0_abs.size == 0:
+        if self.x0_raw.size > 0:
+            if self.x0_is_relative:
+                self.x0_rel = np.clip(self.x0_raw, self.lower_bounds_rel, self.upper_bounds_rel)
+                self.x0_abs = self.convert_x_to_abs(self.x0_rel)
+            else:
+                self.x0_abs = np.clip(self.x0_raw, self.lower_bounds_abs, self.upper_bounds_abs)
+                self.x0_rel = self.convert_x_to_rel(self.x0_abs)
+        else:
             self.x0_rel, self.x0_abs = self._approximate_feasible_solution()
-        elif getattr(self, "x0_rel", np.array([])).size == 0:
-            self.x0_rel = self.convert_x_to_rel(self.x0_abs)
-        elif getattr(self, "x0_abs", np.array([])).size == 0:
-            self.x0_abs = self.convert_x_to_abs(self.x0_rel)
 
         self.set_canonical_bounds_and_x0()
 
@@ -375,16 +381,17 @@ class Scenario:
             or parse_comma_separated(datafile_filenames_dict[idx]["scenarios"]) == ["all"]
         }
 
-    def _get_x0(self, all_x0s: Dict[str, Dict[str, str]]) -> NDArray[npfloat]:
-        """Get the initial guess corresponding to this scenario."""
+    def _get_x0(self, all_x0s: Dict[str, Dict[str, str]]) -> tuple[NDArray[npfloat], bool]:
         for entry in all_x0s.values():
             if entry["scenario"] == self.name:
-                try:  # TODO: more elegant
+                try:
                     x0_list = [float(x) for x in entry["x_0"].strip().split(",") if x.strip()]
                 except AttributeError:
                     x0_list = []
-                return np.array(x0_list, dtype=npfloat)
-        return np.array([], npfloat)
+
+                is_relative = str(entry.get("is_relative", "false")).lower() in ("true", "1", "t", "yes", "y")
+                return np.array(x0_list, dtype=npfloat), is_relative
+        return np.array([], npfloat), False
 
     def _approximate_feasible_solution(self) -> NDArray[npfloat]:
         """ If no initial guess is provided, create an approximate feasible solution."""
