@@ -91,9 +91,9 @@ class AssetTensor:
             node_idx = static.biom_nodes[i]
             self.Cpeak[node_idx, 0] += x[x_idx] * static.abs_rel_scaler[x_idx]
 
-        for i in range(static.ccgt_len):
-            x_idx = static.ccgt_offset + i
-            node_idx = static.ccgt_nodes[i]
+        for i in range(static.ocgt_len):
+            x_idx = static.ocgt_offset + i
+            node_idx = static.ocgt_nodes[i]
             self.Cpeak[node_idx, 2] += x[x_idx] * static.abs_rel_scaler[x_idx]
 
         for i in range(static.nuke_len):

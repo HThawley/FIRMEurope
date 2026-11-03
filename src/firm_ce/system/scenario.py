@@ -403,7 +403,7 @@ class Scenario:
 
         factors = {
             # 'name': <approx energy fraction> / <approx capacity factor>
-            "ccgt": 0.05 / 0.05,
+            "ocgt": 0.05 / 0.05,
             "pv_fixed": 0.3 / 0.15,
             "pv_track": 0.2 / 0.15,
             "onsw": 0.3 / 0.35,
@@ -465,7 +465,7 @@ class Scenario:
                 "nphes",
                 "biomass",
                 "biogas",
-                "ccgt",
+                "ocgt",
                 # -- Zero-VOM technologies in current model --
                 # "pv_fixed",
                 # "pv_track",

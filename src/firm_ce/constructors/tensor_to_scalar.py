@@ -58,7 +58,7 @@ def map_tensor_to_scalar(
             agg_cap, agg_dispatch = assets.Cpeak[n, 0], ops.Mpeak[:, n, 0]
         elif gen.unit_type == "biogas":
             agg_cap, agg_dispatch = assets.Cpeak[n, 1], ops.Mpeak[:, n, 1]
-        elif gen.unit_type == "ccgt":
+        elif gen.unit_type == "ocgt":
             agg_cap, agg_dispatch = assets.Cpeak[n, 2], ops.Mpeak[:, n, 2]
         elif gen.unit_type == "nuclear":
             agg_cap, agg_dispatch = assets.Cnuke[n], ops.Mnuke[:, n]

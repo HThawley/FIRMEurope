@@ -174,7 +174,7 @@ class Generator:
     min_build (nbfloat): Minimum build limit in GW.
     initial_capacity (nbfloat): Installed capacity at model start in GW.
     unit_type (unicode_type): Type of Generator (e.g., 'solar', 'wind', 'baseload', 'flexible').
-    is_flexible (unicode_type): Whether Generator is flexible (e.g. ccgt).
+    is_flexible (unicode_type): Whether Generator is flexible (e.g. ocgt).
     near_optimum_check (boolean): Flag to perform near-optimum optimisation.
     node (Node_InstanceType): The Network Node where the Generator is located.
     fuel (Fuel_InstanceType): The Fuel consumed by the Generator.

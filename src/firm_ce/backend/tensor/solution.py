@@ -212,7 +212,7 @@ def ExtractDetailsTensor(
         details_slice[4] += nph_gen[n]   # nphes
         details_slice[5] += E[n, 6]      # biomass
         details_slice[6] += E[n, 7]      # biogas
-        details_slice[7] += E[n, 8]      # ccgt (gas)
+        details_slice[7] += E[n, 8]      # ocgt (gas)
 
         # -- Zero-VOM technologies in current model --
         # details_slice[8] += E[n, 0]    # pv_fixed

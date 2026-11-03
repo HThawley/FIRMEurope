@@ -121,9 +121,9 @@ if JIT_ENABLED:
         ("biom_offset", nbintp),
         ("biom_nodes", nbintp[:]),
         ("biom_len", nbintp),
-        ("ccgt_offset", nbintp),
-        ("ccgt_nodes", nbintp[:]),
-        ("ccgt_len", nbintp),
+        ("ocgt_offset", nbintp),
+        ("ocgt_nodes", nbintp[:]),
+        ("ocgt_len", nbintp),
         ("nuke_offset", nbintp),
         ("nuke_nodes", nbintp[:]),
         ("nuke_len", nbintp),
@@ -238,13 +238,13 @@ class StaticTensor:
         self.biom_nodes = _map
         self.biom_len = len(_map)
 
-        _map = asset_node_map.get("ccgt", empty_nodes)
-        self.ccgt_offset = self.biom_len + self.biom_offset
-        self.ccgt_nodes = _map
-        self.ccgt_len = len(_map)
+        _map = asset_node_map.get("ocgt", empty_nodes)
+        self.ocgt_offset = self.biom_len + self.biom_offset
+        self.ocgt_nodes = _map
+        self.ocgt_len = len(_map)
 
         _map = asset_node_map.get("nuclear", empty_nodes)
-        self.nuke_offset = self.ccgt_len + self.ccgt_offset
+        self.nuke_offset = self.ocgt_len + self.ocgt_offset
         self.nuke_nodes = _map
         self.nuke_len = len(_map)
 

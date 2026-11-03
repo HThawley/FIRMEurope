@@ -155,7 +155,7 @@ class CostTensor:
             elif gen.unit_type == "nuclear_lte":
                 self.Fnlte[n] = Fval
                 self.Vnlte[n] = Vval
-            elif gen.unit_type == "ccgt":
+            elif gen.unit_type == "ocgt":
                 self.Fgas[n] = Fval
                 self.Vgas[n] = Vval
 
