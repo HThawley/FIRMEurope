@@ -70,15 +70,10 @@ class Scenario:
         )
 
         self.lower_bounds_abs, self.upper_bounds_abs = self.assign_indices_and_get_abs_bounds()
-        self.x0_abs = self._get_x0(model_data.x0s)
 
-        if len(self.x0_abs) > 0:
-            if (self.x0_abs - self.lower_bounds_abs).min() < 0 or (self.x0_abs - self.upper_bounds_abs).max() > 0:
-                self.logger.info("Initial guess (x0) is out of bounds. Clipping to bounds.")
-                self.lower_bounds_abs, self.upper_bounds_abs = self.assign_indices_and_get_abs_bounds()
-                self.x0_raw, self.x0_is_relative = self._get_x0(model_data.x0s)
-                self.x0_abs = np.array([], dtype=npfloat)
-                self.x0_rel = np.array([], dtype=npfloat)
+        self.x0_raw, self.x0_is_relative = self._get_x0(model_data.x0s)
+        self.x0_abs = np.array([], dtype=npfloat)
+        self.x0_rel = np.array([], dtype=npfloat)
 
         self.statistics = None
         self.assign_unit_type_idx()
