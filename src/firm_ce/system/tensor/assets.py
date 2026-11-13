@@ -113,37 +113,37 @@ class AssetTensor:
             node_idx = static.php_nodes[i]
             _cap = x[x_idx] * static.abs_rel_scaler[x_idx]
             self.CnphP[node_idx] = _cap
-            self.CstorageP[node_idx, 0] += _cap
+            self.CstorageP[node_idx, 1] += _cap
 
         for i in range(static.b4p_len):
             x_idx = static.b4p_offset + i
             node_idx = static.b4p_nodes[i]
             _cap = x[x_idx] * static.abs_rel_scaler[x_idx]
-            self.CstorageP[node_idx, 1] += _cap
-            self.CstorageE[node_idx, 1] += 4.0 * _cap
+            self.CstorageP[node_idx, 2] += _cap
+            self.CstorageE[node_idx, 2] += 4.0 * _cap
 
         for i in range(static.b2p_len):
             x_idx = static.b2p_offset + i
             node_idx = static.b2p_nodes[i]
             _cap = x[x_idx] * static.abs_rel_scaler[x_idx]
-            self.CstorageP[node_idx, 2] += _cap
-            self.CstorageE[node_idx, 2] += 2.0 * _cap
+            self.CstorageP[node_idx, 3] += _cap
+            self.CstorageE[node_idx, 3] += 2.0 * _cap
 
         for i in range(static.phe_len):
             x_idx = static.phe_offset + i
             node_idx = static.phe_nodes[i]
             _cap = x[x_idx] * static.abs_rel_scaler[x_idx]
             self.CnphE[node_idx] += _cap
-            self.CstorageE[node_idx, 0] += _cap
+            self.CstorageE[node_idx, 1] += _cap
 
         for i in range(static.nhvi):
             x_idx = static.lines_offset + i
             self.Clines[i] += x[x_idx] * static.abs_rel_scaler[x_idx]
 
-        # pondage, hydro, and pumped hydro
-        self.Clongdur = self.ChydP[:, 0] + self.ChydP[:, 1] + self.CstorageP[:, 0]
-        # 4 hour, 2 hour batteries
-        self.Cshortdur = self.CstorageP[:, 1] + self.CstorageP[:, 2]
+        # reservoir hydro (h=1), open-loop PHES (s=0), and closed-loop PHES (s=1)
+        self.Clongdur = self.ChydP[:, 1] + self.CstorageP[:, 0] + self.CstorageP[:, 1]
+        # pondage (h=0), 4 hour (s=2), 2 hour (s=3) batteries
+        self.Cshortdur = self.ChydP[:, 0] + self.CstorageP[:, 2] + self.CstorageP[:, 3]
 
 
 if JIT_ENABLED:

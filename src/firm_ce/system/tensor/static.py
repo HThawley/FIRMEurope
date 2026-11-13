@@ -253,7 +253,7 @@ class StaticTensor:
         self.nlte_nodes = _map
         self.nlte_len = len(_map)
 
-        _map = asset_node_map.get("nphes", empty_nodes)
+        _map = asset_node_map.get("new_phes", empty_nodes)
         self.php_offset = self.nlte_len + self.nlte_offset
         self.php_nodes = _map
         self.php_len = len(_map)
@@ -268,7 +268,7 @@ class StaticTensor:
         self.b4p_nodes = _map
         self.b4p_len = len(_map)
 
-        _map = asset_node_map.get("nphes", empty_nodes)
+        _map = asset_node_map.get("new_phes", empty_nodes)
         self.phe_offset = self.b4p_len + self.b4p_offset
         self.phe_nodes = _map
         self.phe_len = len(_map)
@@ -285,11 +285,12 @@ class StaticTensor:
             self.Elines[line_order] = line.initial_capacity
             self.line_efficiencies[line_order] = line.efficiency
 
-        self.nstor = 3  # TODO: dynamic
-        self.nhyd = 2  # TODO: dynamic
-        self.npeak = 3  # TODO: dynamic
+        # TODO: make these dynamic
+        self.nstor = 4  # 0: olphes, 1: clphes/aa_phes/e_phes, 2: bess4h, 3: bess2h
+        self.nhyd = 2  # 0: pond, 1: hydro
+        self.npeak = 3  # 0: biomass, 1: biogas, 2: ocgt
 
-        self.Bpeak = np.zeros((self.years, self.npeak-1), npfloat)
+        self.Bpeak = np.zeros((self.years, self.npeak - 1), npfloat)
         for fuel in fleet.fuels.values():
             if fuel.name == "biomass":
                 self.Bpeak[:, 0] = fuel.annual_limit
@@ -300,22 +301,29 @@ class StaticTensor:
         self.storage_discha_eff = np.zeros(self.nstor, npfloat)
         storage_type_count = np.zeros(self.nstor, npint)
 
-        # original assumption is flat efficiency across fleet
-        # have implemented by taking the mean
         for sto in fleet.storages.values():
-            if "phes" in sto.unit_type:
-                s = 0  # PHES
-            elif sto.unit_type == 'bess4h':
-                s = 1  # 4-hour battery
-            elif sto.unit_type == 'bess2h':
-                s = 2  # 2-hour battery
+            if sto.unit_type == "olphes":
+                s = 0  # Legacy open-loop PHES
+            elif sto.unit_type in ("clphes", "aa_phes", "e_phes"):
+                s = 1  # Legacy closed-loop + new-build closed-loop PHES
+            elif sto.unit_type == "bess4h":
+                s = 2  # 4-hour battery
+            elif sto.unit_type == "bess2h":
+                s = 3  # 2-hour battery
             else:
                 continue
             self.storage_charge_eff[s] += sto.charge_efficiency
             self.storage_discha_eff[s] += sto.discharge_efficiency
             storage_type_count[s] += 1
-        self.storage_charge_eff /= storage_type_count
-        self.storage_discha_eff /= storage_type_count
+
+        for s in range(self.nstor):
+            if storage_type_count[s] > 0:
+                self.storage_charge_eff[s] /= storage_type_count[s]
+                self.storage_discha_eff[s] /= storage_type_count[s]
+            else:
+                # Fallback if a storage tier is absent from scenario
+                self.storage_charge_eff[s] = 0.85
+                self.storage_discha_eff[s] = 0.85
 
         self.Eror = np.zeros(self.nodes, npfloat)
         self.Enuke = np.zeros(self.nodes, npfloat)
@@ -327,7 +335,6 @@ class StaticTensor:
         self.Rnuke_mask = np.zeros(self.nodes, np.bool_)
         self.Rnlte_mask = np.zeros(self.nodes, np.bool_)
 
-        self.Eror = np.zeros(self.nodes, npfloat)
         self.Mror = np.zeros((self.intervals, self.nodes), npfloat)
         self.TSpfix = np.zeros((self.intervals, self.nodes), npfloat)
         self.TSpsat = np.zeros((self.intervals, self.nodes), npfloat)
@@ -377,11 +384,20 @@ class StaticTensor:
 
         for sto in fleet.storages.values():
             n = sto.node.order
-            if "phes" in sto.unit_type:
+            if sto.unit_type == "olphes":
                 self.EstorageP[n, 0] += sto.initial_power_capacity
                 self.EstorageE[n, 0] += sto.initial_energy_capacity
                 if sto.inflows:
                     self.TSphes_inflow[:, n] += sto.data
+            elif sto.unit_type in ("clphes", "aa_phes", "e_phes"):
+                self.EstorageP[n, 1] += sto.initial_power_capacity
+                self.EstorageE[n, 1] += sto.initial_energy_capacity
+            elif sto.unit_type == "bess4h":
+                self.EstorageP[n, 2] += sto.initial_power_capacity
+                self.EstorageE[n, 2] += sto.initial_energy_capacity
+            elif sto.unit_type == "bess2h":
+                self.EstorageP[n, 3] += sto.initial_power_capacity
+                self.EstorageE[n, 3] += sto.initial_energy_capacity
             elif sto.unit_type == "pond":
                 self.TShyd_inflow[:, n, 0] += sto.data
                 self.EhydP[n, 0] += sto.initial_power_capacity

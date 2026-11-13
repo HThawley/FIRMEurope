@@ -10,6 +10,7 @@ from firm_ce.system.tensor.costs import (
     get_generator_costs,
     get_line_costs,
     get_storage_costs,
+    apportion_new_phes,
 )
 
 from firm_ce.fast_methods import generator_m, storage_m
@@ -91,30 +92,49 @@ def map_tensor_to_scalar(
         gen.lt_costs.fuel = fuel * power_trace.sum()  # res and years already in `fuel`
 
     # Update Storages
+    c = solutionTensor.static.costs
     for sto in solution.fleet.storages.values():
         n = sto.node.order
         p_idx = sto.candidate_p_x_idx
         e_idx = sto.candidate_e_x_idx
 
-        sto.new_build_p = x_abs[p_idx] if p_idx != -1 else 0.0
-        sto.power_capacity = sto.initial_power_capacity + sto.new_build_p
+        raw_p = npfloat(x_abs[p_idx]) if p_idx != -1 else npfloat(0.0)
+        raw_e = npfloat(x_abs[e_idx]) if e_idx != -1 else npfloat(0.0)
 
-        sto.new_build_e = x_abs[e_idx] if e_idx != -1 else 0.0
+        if sto.unit_type in ("aa_phes", "e_phes"):
+            p_aa, e_aa, p_e, e_e = apportion_new_phes(
+                raw_p, raw_e, c.E_aa_max[n], c.P_aa_max[n], c.P_e_max[n]
+            )
+            if sto.unit_type == "aa_phes":
+                sto.new_build_p = p_aa
+                sto.new_build_e = e_aa
+            else:
+                sto.new_build_p = p_e
+                sto.new_build_e = e_e
+        else:
+            sto.new_build_p = raw_p
+            sto.new_build_e = raw_e
+
+        sto.power_capacity = sto.initial_power_capacity + sto.new_build_p
         sto.energy_capacity = sto.initial_energy_capacity + sto.new_build_e
 
         # Apportionment mapping
-        if "phes" in sto.unit_type:
+        if sto.unit_type == "olphes":
             agg_cap_p, agg_cap_e = assets.CstorageP[n, 0], assets.CstorageE[n, 0]
             agg_dispatch = ops.Mdischarge[:, n, 0] - ops.Mcharge[:, n, 0]
             agg_soc = ops.Mstorage[:, n, 0]
-        elif sto.unit_type == "bess4h":
+        elif sto.unit_type in ("clphes", "aa_phes", "e_phes"):
             agg_cap_p, agg_cap_e = assets.CstorageP[n, 1], assets.CstorageE[n, 1]
             agg_dispatch = ops.Mdischarge[:, n, 1] - ops.Mcharge[:, n, 1]
             agg_soc = ops.Mstorage[:, n, 1]
-        elif sto.unit_type == "bess2h":
+        elif sto.unit_type == "bess4h":
             agg_cap_p, agg_cap_e = assets.CstorageP[n, 2], assets.CstorageE[n, 2]
             agg_dispatch = ops.Mdischarge[:, n, 2] - ops.Mcharge[:, n, 2]
             agg_soc = ops.Mstorage[:, n, 2]
+        elif sto.unit_type == "bess2h":
+            agg_cap_p, agg_cap_e = assets.CstorageP[n, 3], assets.CstorageE[n, 3]
+            agg_dispatch = ops.Mdischarge[:, n, 3] - ops.Mcharge[:, n, 3]
+            agg_soc = ops.Mstorage[:, n, 3]
         elif sto.unit_type == "pond":
             agg_cap_p, agg_cap_e = assets.ChydP[n, 0], assets.ChydE[n, 0]
             agg_dispatch = ops.Mhydro[:, n, 0]
@@ -140,7 +160,6 @@ def map_tensor_to_scalar(
         sto.lt_costs.annualised_build_p = ann_build_p * sto.power_capacity
         sto.lt_costs.annualised_build_e = ann_build_e * sto.energy_capacity
         sto.lt_costs.fom = fom * sto.power_capacity
-
         sto.lt_costs.vom = vom * np.maximum(0, sto.dispatch_power).sum()  # res and years already in `vom`
 
     # Update Major Lines

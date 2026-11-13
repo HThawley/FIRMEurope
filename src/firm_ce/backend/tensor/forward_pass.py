@@ -39,9 +39,9 @@ def ForwardPassRenewables(solution):  # noqa: C901
         UpdateLocalCharge(solution, t)
         UpdateLocalDischarge(solution, t)
 
-        # Fill deficits from network (long duration) storage reserves
+        # Fill deficits from network (short duration: pondage, B2, B4) reserves first
         if solution.operations.has_deficit_t:
-            GetLongDurSurplust(solution, t, working_buffer)
+            GetShortDurSurplust(solution, t, working_buffer)
             if (working_buffer > TOLERANCE).any():
                 Interconnection(
                     solution,
@@ -53,9 +53,9 @@ def ForwardPassRenewables(solution):  # noqa: C901
                 UpdateUnbalancedt(solution, t)
                 UpdateLocalDischarge(solution, t)
 
-        # Fill deficits from network (short duration) storage reserves
+        # Fill deficits from network (long duration: clphes/nphes, olphes, reservoir) reserves
         if solution.operations.has_deficit_t:
-            GetShortDurSurplust(solution, t, working_buffer)
+            GetLongDurSurplust(solution, t, working_buffer)
             if (working_buffer > TOLERANCE).any():
                 Interconnection(
                     solution,

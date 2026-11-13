@@ -85,55 +85,83 @@ class Scenario:
     def create_solution_directory(self) -> None:
         os.makedirs(self.solution_dir, exist_ok=True)
 
-    def assign_indices_and_get_abs_bounds(self) -> None:
+    def assign_indices_and_get_abs_bounds(self) -> tuple[NDArray[npfloat], NDArray[npfloat]]:
         lower, upper = [], []
         x_index = 0
 
-        # ensure unit_types are contiguous in x
+        # Ensure generator unit_types are contiguous in x
         g_unit_types = defaultdict(list)
         for gen in self.fleet.generators.values():
-            g_unit_types[gen.unit_type].append(gen.node.order)
+            if gen.max_build > 0:
+                g_unit_types[gen.unit_type].append(gen.node.order)
+                gen.candidate_x_idx = x_index
+                lower.append(gen.min_build)
+                upper.append(gen.max_build)
+                x_index += 1
+            else:
+                gen.candidate_x_idx = -1
+
+        # Group new-build PHES (aa_phes, e_phes) by node so each node gets 1 power and 1 energy variable
+        phes_by_node = defaultdict(list)
+        other_s_types = defaultdict(list)
+        for sto in self.fleet.storages.values():
+            sto.candidate_p_x_idx = -1
+            sto.candidate_e_x_idx = -1
+            if sto.unit_type in ("aa_phes", "e_phes"):
+                if sto.max_build_p > 0 or sto.max_build_e > 0:
+                    phes_by_node[sto.node.order].append(sto)
+            else:
+                if sto.max_build_p > 0:
+                    other_s_types[sto.unit_type].append(sto)
 
         s_unit_types = defaultdict(list)
-        for sto in self.fleet.storages.values():
-            s_unit_types[sto.unit_type].append(sto.node.order)
 
-        for unit_type in g_unit_types.keys():
-            for gen in self.fleet.generators.values():
-                if gen.unit_type != unit_type:
-                    continue
-                if gen.max_build > 0:
-                    gen.candidate_x_idx = x_index
-                    lower.append(gen.min_build)
-                    upper.append(gen.max_build)
-                    x_index += 1
-                else:
-                    gen.candidate_x_idx = -1
+        # 1. Storage Power: new-build PHES (sum of AA and E power bounds per node)
+        phes_nodes_sorted = sorted(phes_by_node.keys())
+        for n_order in phes_nodes_sorted:
+            stos = phes_by_node[n_order]
+            min_p = sum(s.min_build_p for s in stos)
+            max_p = sum(s.max_build_p for s in stos)
+            if max_p > 0:
+                for s in stos:
+                    s.candidate_p_x_idx = x_index
+                lower.append(min_p)
+                upper.append(max_p)
+                s_unit_types["new_phes"].append(n_order)
+                x_index += 1
 
-        for unit_type in s_unit_types.keys():
-            for sto in self.fleet.storages.values():
-                if sto.unit_type != unit_type:
-                    continue
-                if sto.max_build_p > 0:
-                    sto.candidate_p_x_idx = x_index
-                    lower.append(sto.min_build_p)
-                    upper.append(sto.max_build_p)
-                    x_index += 1
-                else:
-                    sto.candidate_p_x_idx = -1
+        # 2. Storage Power: other candidate storages (bess2h, bess4h)
+        for unit_type, stos in other_s_types.items():
+            for sto in stos:
+                sto.candidate_p_x_idx = x_index
+                lower.append(sto.min_build_p)
+                upper.append(sto.max_build_p)
+                s_unit_types[unit_type].append(sto.node.order)
+                x_index += 1
 
-        for unit_type in s_unit_types.keys():
-            for sto in self.fleet.storages.values():
-                if sto.unit_type != unit_type:
-                    continue
+        # 3. Storage Energy: new-build PHES (sum of AA and E energy bounds per node)
+        for n_order in phes_nodes_sorted:
+            stos = phes_by_node[n_order]
+            min_e = sum(s.min_build_e for s in stos)
+            max_e = sum(s.max_build_e for s in stos)
+            if max_e > 0:
+                for s in stos:
+                    s.candidate_e_x_idx = x_index
+                lower.append(min_e)
+                upper.append(max_e)
+                x_index += 1
+
+        # 4. Storage Energy: other candidate storages with duration == 0 (if any)
+        for unit_type, stos in other_s_types.items():
+            for sto in stos:
                 if sto.max_build_e > 0 and sto.duration == 0:
                     sto.candidate_e_x_idx = x_index
                     lower.append(sto.min_build_e)
                     upper.append(sto.max_build_e)
+                    s_unit_types[unit_type].append(sto.node.order)
                     x_index += 1
-                else:
-                    sto.candidate_e_x_idx = -1
 
+        # 5. Major Lines
         for line in self.network.major_lines.values():
             if line.max_build > 0:
                 line.candidate_x_idx = x_index
@@ -164,36 +192,35 @@ class Scenario:
         self.upper_bounds_rel = np.zeros_like(self.upper_bounds_abs)
         self.abs_rel_scaler = np.zeros_like(self.lower_bounds_abs)
 
-        processed_idx = []
+        processed_idx = set()
         for gen in self.fleet.generators.values():
             idx = gen.candidate_x_idx
-            if idx != -1:
-                nodal_demand = gen.node.mean_demand
-                self.scale_index(idx, nodal_demand)
-                processed_idx.append(idx)
+            if idx != -1 and idx not in processed_idx:
+                self.scale_index(idx, gen.node.mean_demand)
+                processed_idx.add(idx)
 
         for sto in self.fleet.storages.values():
+            nodal_demand = sto.node.mean_demand
             idx_p = sto.candidate_p_x_idx
-            if idx_p != -1:
-                nodal_demand = sto.node.mean_demand
+            if idx_p != -1 and idx_p not in processed_idx:
                 self.scale_index(idx_p, nodal_demand)
-                processed_idx.append(idx_p)
+                processed_idx.add(idx_p)
 
             idx_e = sto.candidate_e_x_idx
-            if idx_e != -1:
-                # new-build phes is the only unit type here
+            if idx_e != -1 and idx_e not in processed_idx:
                 self.scale_index(idx_e, nodal_demand)
-                processed_idx.append(idx_e)
+                processed_idx.add(idx_e)
 
         for line in self.network.major_lines.values():
             idx = line.candidate_x_idx
-            if idx != -1:
+            if idx != -1 and idx not in processed_idx:
                 nodal_demand = max(line.node_start.mean_demand, line.node_end.mean_demand)
                 self.scale_index(idx, nodal_demand)
-                processed_idx.append(idx)
+                processed_idx.add(idx)
 
-        assert (set(range(len(self.lower_bounds_abs))) == set(processed_idx)
-                ), "Not all indices were processed in relative space construction"
+        assert (
+            set(range(len(self.lower_bounds_abs))) == processed_idx
+        ), "Not all indices were processed in relative space construction"
 
         self.relative_space_constructed = True
 
@@ -414,35 +441,31 @@ class Scenario:
             # storage
             "bess2h": 0.33,
             "bess4h": 0.33,
-            "nphes": 0.33,
-            # supply < 0.25 > of average load for < 64 > hours
-            "nphes_e": 0.25 * 64,
+            "aa_phes": 0.33,
+            "e_phes": 0.33,
+            # supply average load for 16 hours
+            "aa_phes_e": 16,
+            "e_phes_e": 16,
         }
 
         for gen in self.fleet.generators.values():
             idx = gen.candidate_x_idx
-            unit_type = gen.unit_type
-            # assignment pattern is avg / <capacity factor> * < net energy contrib.>
-            if idx == -1:
-                continue
-            heuristic_x_rel[idx] = factors[unit_type]
+            if idx != -1:
+                heuristic_x_rel[idx] = factors[gen.unit_type]
 
         for sto in self.fleet.storages.values():
             idx_p = sto.candidate_p_x_idx
-            unit_type = sto.unit_type
             if idx_p != -1:
-                heuristic_x_rel[idx_p] = factors[unit_type]
+                heuristic_x_rel[idx_p] = factors[sto.unit_type]
 
             idx_e = sto.candidate_e_x_idx
-            ut_e = unit_type + '_e'
             if idx_e != -1:
-                # only applies to phes
-                heuristic_x_rel[idx_e] = factors[ut_e]
+                heuristic_x_rel[idx_e] = factors[sto.unit_type + "_e"]
 
         for line in self.network.major_lines.values():
             idx = line.candidate_x_idx
-
-            heuristic_x_rel[idx] = 0.2
+            if idx != -1:
+                heuristic_x_rel[idx] = 0.2
 
         heuristic_x_rel = np.clip(heuristic_x_rel, self.lower_bounds_rel, self.upper_bounds_rel)
         heuristic_x_abs = self.convert_x_to_abs(heuristic_x_rel)
@@ -457,11 +480,11 @@ class Scenario:
         backend = getattr(self.config, "backend", "scalar").lower()
 
         if backend == "tensor":
-            # Canonical unit_type names matching the tensor details layout
             tensor_unit_types = [
                 "nuclear",
                 "nuclear_lte",
-                "nphes",
+                "aa_phes",
+                "e_phes",
                 "biomass",
                 "biogas",
                 "ocgt",
@@ -480,7 +503,6 @@ class Scenario:
             return
 
         # --- Scalar Backend ---
-        # Extract unique types deterministically
         gen_types = sorted(list(set(g.unit_type for g in self.fleet.generators.values())))
         sto_types = sorted(list(set(s.unit_type for s in self.fleet.storages.values())))
 
@@ -489,26 +511,22 @@ class Scenario:
         line_types = sorted(list(line_types_set))
 
         self.unit_type_idx = {}
-        current_idx = 2  # reserve first two for lcoe and penalties
+        current_idx = 2
 
-        # Generators need 2 slots (lt_generation, unit_lt_hours)
         for t in gen_types:
             self.unit_type_idx[t] = current_idx
             current_idx += 2
 
-        # Storages need 1 slot (lt_generation)
         for t in sto_types:
             self.unit_type_idx[t] = current_idx
             current_idx += 1
 
-        # Lines need 1 slot (lt_flows)
         for t in line_types:
             self.unit_type_idx[t] = current_idx
             current_idx += 1
 
         self.details_length = current_idx
 
-        # Assign to scalar jitclass instances
         for g in self.fleet.generators.values():
             g.unit_type_idx = self.unit_type_idx[g.unit_type]
         for s in self.fleet.storages.values():
@@ -537,18 +555,12 @@ class Scenario:
         space_norm: str | None = None,
         space_agg: str | None = None,
     ) -> np.ndarray:
-        """
-        Constructs the linear `space_scaler` matrix mapping the decision vector `x`
-        (in `self.config.parameterisation`) to the requested (space_norm, space_agg)
-        capacity space for MHMGA fitness evaluation.
-        """
         space_norm = (space_norm or getattr(self.config, "mga_space_norm", self.config.parameterisation)).lower()
         space_agg = (space_agg or getattr(self.config, "mga_space_agg", "unit_type")).lower()
         param_mode = self.config.parameterisation.lower()
 
         n_vars = len(self.lower_bounds_abs)
 
-        # Row-wise conversion factor if target space_norm differs from x's parameterisation
         if param_mode == space_norm:
             row_scale = np.ones(n_vars, dtype=npfloat)
         elif param_mode == "relative" and space_norm == "absolute":
@@ -558,21 +570,20 @@ class Scenario:
         else:
             raise ValueError(f"Unknown norm/parameterisation combination: {param_mode} -> {space_norm}")
 
-        # 1. Unaggregated ("none"): 1D or diagonal scaling vector of length n_vars
         if space_agg == "none":
             return row_scale if not np.allclose(row_scale, 1.0) else np.ones(n_vars, dtype=npfloat)
 
-        # 2. Aggregated by Unit Type ("unit_type"): (n_vars, K_unit_types) matrix
         if space_agg == "unit_type":
             groups = defaultdict(list)
             for gen in self.fleet.generators.values():
                 if gen.candidate_x_idx != -1:
                     groups[gen.unit_type].append(gen.candidate_x_idx)
             for sto in self.fleet.storages.values():
-                if sto.candidate_p_x_idx != -1:
-                    groups[f"{sto.unit_type}_power"].append(sto.candidate_p_x_idx)
-                if sto.candidate_e_x_idx != -1:
-                    groups[f"{sto.unit_type}_energy"].append(sto.candidate_e_x_idx)
+                ut_key = "phes" if sto.unit_type in ("aa_phes", "e_phes") else sto.unit_type
+                if sto.candidate_p_x_idx != -1 and sto.candidate_p_x_idx not in groups[f"{ut_key}_power"]:
+                    groups[f"{ut_key}_power"].append(sto.candidate_p_x_idx)
+                if sto.candidate_e_x_idx != -1 and sto.candidate_e_x_idx not in groups[f"{ut_key}_energy"]:
+                    groups[f"{ut_key}_energy"].append(sto.candidate_e_x_idx)
             for line in self.network.major_lines.values():
                 if line.candidate_x_idx != -1:
                     groups[line.unit_type].append(line.candidate_x_idx)
@@ -580,19 +591,17 @@ class Scenario:
             k_dims = len(groups)
             proj = np.zeros((n_vars, k_dims), dtype=npfloat)
             for k, (_, indices) in enumerate(groups.items()):
-                # Under relative norm, take the mean across nodes in the unit type;
-                # under absolute norm, take the sum across nodes.
                 weight = (1.0 / len(indices)) if space_norm == "relative" else 1.0
                 proj[indices, k] = row_scale[indices] * weight
 
             self.projection_groups = groups
             return proj
 
-        # 3. Aggregated by Node ("node"): (n_vars, n_nodes) matrix
         if space_agg == "node":
             n_nodes = len(self.network.nodes)
             proj = np.zeros((n_vars, n_nodes), dtype=npfloat)
             node_var_counts = np.zeros(n_nodes, dtype=npfloat)
+            seen_sto_idx = set()
 
             for gen in self.fleet.generators.values():
                 if gen.candidate_x_idx != -1:
@@ -602,12 +611,14 @@ class Scenario:
 
             for sto in self.fleet.storages.values():
                 n = sto.node.order
-                if sto.candidate_p_x_idx != -1:
+                if sto.candidate_p_x_idx != -1 and sto.candidate_p_x_idx not in seen_sto_idx:
                     proj[sto.candidate_p_x_idx, n] = row_scale[sto.candidate_p_x_idx]
                     node_var_counts[n] += 1.0
-                if sto.candidate_e_x_idx != -1:
+                    seen_sto_idx.add(sto.candidate_p_x_idx)
+                if sto.candidate_e_x_idx != -1 and sto.candidate_e_x_idx not in seen_sto_idx:
                     proj[sto.candidate_e_x_idx, n] = row_scale[sto.candidate_e_x_idx]
                     node_var_counts[n] += 1.0
+                    seen_sto_idx.add(sto.candidate_e_x_idx)
 
             for line in self.network.major_lines.values():
                 if line.candidate_x_idx != -1:
@@ -741,20 +752,23 @@ class Scenario:
 
     def get_tech_index_map(self) -> dict:
         """Maps technology categories to their specific column indices in the x vector."""
-        from collections import defaultdict
         tech_map = defaultdict(list)
 
         for gen in self.fleet.generators.values():
-            tech = self.identify_tech(gen.name)
-            tech_map[tech].append(gen.candidate_x_idx)
+            if gen.candidate_x_idx != -1:
+                tech = self.identify_tech(gen.name)
+                tech_map[tech].append(gen.candidate_x_idx)
 
         for sto in self.fleet.storages.values():
             tech = self.identify_tech(sto.name)
-            tech_map[f"{tech} Power (GW)"].append(sto.candidate_p_x_idx)
-            tech_map[f"{tech} Energy (GWh)"].append(sto.candidate_e_x_idx)
+            if sto.candidate_p_x_idx != -1 and sto.candidate_p_x_idx not in tech_map[f"{tech} Power (GW)"]:
+                tech_map[f"{tech} Power (GW)"].append(sto.candidate_p_x_idx)
+            if sto.candidate_e_x_idx != -1 and sto.candidate_e_x_idx not in tech_map[f"{tech} Energy (GWh)"]:
+                tech_map[f"{tech} Energy (GWh)"].append(sto.candidate_e_x_idx)
 
         for line in self.network.major_lines.values():
-            tech_map["Transmission (GW)"].append(line.candidate_x_idx)
+            if line.candidate_x_idx != -1:
+                tech_map["Transmission (GW)"].append(line.candidate_x_idx)
 
         return dict(tech_map)
 

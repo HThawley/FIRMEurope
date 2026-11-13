@@ -9,6 +9,7 @@ from firm_ce.backend.tensor.simulation import Simulate
 from firm_ce.system.tensor.assets import AssetTensor, AssetTensorType
 from firm_ce.system.tensor.operations import OperationTensor, OperationTensorType, reset_operations
 from firm_ce.system.tensor.static import StaticTensorType
+from firm_ce.system.tensor.costs import apportion_new_phes
 
 # Column indices in SolutionTensor.nodal_energy (shape: nodes x 13)
 # 0: pfix, 1: psat, 2: offw, 3: onsw, 4: nuke, 5: nlte,
@@ -38,7 +39,8 @@ if JIT_ENABLED:
 
         # -- Pre-allocated Nodal Operational Summary --
         ("nodal_energy", nbfloat[:, :]),
-        ("nodal_nph_gen", nbfloat[:]),
+        ("nodal_aaph_gen", nbfloat[:]),
+        ("nodal_eph_gen", nbfloat[:]),
 
         # -- State variables --
         ("simulated", boolean),
@@ -66,8 +68,10 @@ class SolutionTensor:
         self.static = static
         self.assets = AssetTensor(x, self.static)
         self.operations = OperationTensor(self.static, self.assets)
+
         self.nodal_energy = np.zeros((self.static.nodes, N_ENERGY_COMPONENTS), dtype=npfloat)
-        self.nodal_nph_gen = np.zeros(self.static.nodes, dtype=npfloat)
+        self.nodal_aaph_gen = np.zeros(self.static.nodes, dtype=npfloat)
+        self.nodal_eph_gen = np.zeros(self.static.nodes, dtype=npfloat)
 
         self.simulated = False
         self.evaluated = False
@@ -94,7 +98,8 @@ def ResetSolution(
     solution.assets = AssetTensor(x, solution.static)  # cheap enough to rebuild rather than reset
     reset_operations(solution.operations, solution.static, solution.assets)
     solution.nodal_energy[:, :] = npfloat(0.0)
-    solution.nodal_nph_gen[:] = npfloat(0.0)
+    solution.nodal_aaph_gen[:] = npfloat(0.0)
+    solution.nodal_eph_gen[:] = npfloat(0.0)
     solution.simulated = False
     solution.evaluated = False
     solution.feasible = True
@@ -115,8 +120,10 @@ def CalculateCost(
     E = solution.nodal_energy
 
     E[:, :] = npfloat(0.0)
+    solution.nodal_aaph_gen[:] = npfloat(0.0)
+    solution.nodal_eph_gen[:] = npfloat(0.0)
 
-    # Single-pass time accumulation over intervals into nodal_energy (shape: nodes x 13)
+    # Single-pass time accumulation over intervals into nodal_energy (shape: nodes x 14)
     for t in range(s.intervals):
         for n in range(s.nodes):
             E[n, 0] += s.TSpfix[t, n]
@@ -127,11 +134,13 @@ def CalculateCost(
             E[n, 6] += o.Mpeak[t, n, 0]
             E[n, 7] += o.Mpeak[t, n, 1]
             E[n, 8] += o.Mpeak[t, n, 2]
-            E[n, 9] += o.Mdischarge[t, n, 0]
-            E[n, 10] += o.Mdischarge[t, n, 1]
-            E[n, 11] += o.Mdischarge[t, n, 2]
+            E[n, 9] += o.Mdischarge[t, n, 0] + o.Mdischarge[t, n, 1]  # All PHES for MGA energy space
+            E[n, 10] += o.Mdischarge[t, n, 2]  # B4 (s=2)
+            E[n, 11] += o.Mdischarge[t, n, 3]  # B2 (s=3)
             E[n, 12] += np.abs(o.Mcurtail[t, n])
             E[n, 13] += 0.5 * np.abs(o.Mimport[t, n])
+            # Temporarily accumulate total s=1 (closed-loop PHES) discharge in nodal_aaph_gen
+            solution.nodal_aaph_gen[n] += o.Mdischarge[t, n, 1]
 
     cost = s.legacy_costs
 
@@ -145,12 +154,21 @@ def CalculateCost(
         # Apportion total nuclear generation (currently in E[n, 4]) between new nuke and LTE nuke
         tot_nuke_gen = E[n, 4]
         nuke_ratio = tot_nuke_gen / a.Cnuke[n] if a.Cnuke[n] > 0.0 else npfloat(0.0)
-        E[n, 4] = nuke_ratio * (a.Cnuke[n] - a.Cnlte[n])  # new nuclear generation
-        E[n, 5] = nuke_ratio * a.Cnlte[n]                 # LTE nuclear generation
+        E[n, 4] = nuke_ratio * (a.Cnuke[n] - a.Cnlte[n])
+        E[n, 5] = nuke_ratio * a.Cnlte[n]
 
-        # Apportion total PHES discharge (E[n, 9]) to candidate new-build PHES for variable cost
-        phes_ratio = E[n, 9] / a.CstorageP[n, 0] if a.CstorageP[n, 0] > 0.0 else npfloat(0.0)
-        solution.nodal_nph_gen[n] = phes_ratio * a.CnphP[n]
+        # Apportion new-build PHES into AA and E
+        # Class AA and class E have equal storage duration - class AA built until Energy limit
+        p_aa, e_aa, p_e, e_e = apportion_new_phes(
+            a.CnphP[n], a.CnphE[n], c.E_aa_max[n], c.P_aa_max[n], c.P_e_max[n]
+        )
+
+        # Apportion closed-loop PHES discharge (s=1) across clphes, aa_phes, and e_phes by power capacity
+        tot_s1_dis = solution.nodal_aaph_gen[n]
+        s1_ratio = tot_s1_dis / a.CstorageP[n, 1] if a.CstorageP[n, 1] > 0.0 else npfloat(0.0)
+        # clphes_gen = s1_ratio * s.EstorageP[n, 1]  # vom is 0
+        solution.nodal_aaph_gen[n] = s1_ratio * p_aa
+        solution.nodal_eph_gen[n] = s1_ratio * p_e
 
         # Fixed Costs
         cost += a.Cpfix[n] * c.Fpfix[n]
@@ -162,20 +180,21 @@ def CalculateCost(
         cost += a.Cpeak[n, 2] * c.Fgas[n]
         cost += (a.Cnuke[n] - a.Cnlte[n]) * c.Fnuke[n]
         cost += a.Cnlte[n] * c.Fnlte[n]
-        cost += a.CnphP[n] * c.FphP[n]
-        cost += a.CnphE[n] * c.FphE[n]
-        cost += a.CstorageP[n, 1] * c.Fb4P[n]
-        cost += a.CstorageP[n, 2] * c.Fb2P[n]
+        cost += p_aa * c.Faa_phP[n] + e_aa * c.Faa_phE[n]
+        cost += p_e * c.Fe_phP[n] + e_e * c.Fe_phE[n]
+        cost += a.CstorageP[n, 2] * c.Fb4P[n]
+        cost += a.CstorageP[n, 3] * c.Fb2P[n]
 
-        # Variable Costs (using pre-summed nodal totals!)
+        # Variable Costs (using pre-summed nodal totals)
         cost += E[n, 4] * c.Vnuke[n]
         cost += E[n, 5] * c.Vnlte[n]
-        cost += solution.nodal_nph_gen[n] * c.Vph[n]
+        cost += (solution.nodal_aaph_gen[n] + solution.nodal_eph_gen[n]) * c.Vph[n]
         cost += E[n, 6] * c.Vbiom[n]
         cost += E[n, 7] * c.Vbiog[n]
         cost += E[n, 8] * c.Vgas[n]
 
         # -- Zero-VOM technologies in current model --
+        # cost += clphes_gen * c.Vclphes[n]  # vom is 0
         # cost += E[n, 0] * c.Vpfix[n]
         # cost += E[n, 1] * c.Vpsat[n]
         # cost += E[n, 2] * c.Voffw[n]
@@ -200,7 +219,8 @@ def ExtractDetailsTensor(
     Zero time-series iteration required.
     """
     E = solution.nodal_energy
-    nph_gen = solution.nodal_nph_gen
+    aaph_gen = solution.nodal_aaph_gen
+    eph_gen = solution.nodal_eph_gen
     n_nodes = solution.static.nodes
 
     details_slice[:] = npfloat(0.0)
@@ -210,10 +230,11 @@ def ExtractDetailsTensor(
     for n in range(n_nodes):
         details_slice[2] += E[n, 4]      # nuclear
         details_slice[3] += E[n, 5]      # nuclear_lte
-        details_slice[4] += nph_gen[n]   # nphes
-        details_slice[5] += E[n, 6]      # biomass
-        details_slice[6] += E[n, 7]      # biogas
-        details_slice[7] += E[n, 8]      # ocgt (gas)
+        details_slice[4] += aaph_gen[n]  # aa_phes
+        details_slice[5] += eph_gen[n]   # e_phes
+        details_slice[6] += E[n, 6]      # biomass
+        details_slice[7] += E[n, 7]      # biogas
+        details_slice[8] += E[n, 8]      # ocgt (gas)
 
         # -- Zero-VOM technologies in current model --
         # details_slice[8] += E[n, 0]    # pv_fixed
@@ -290,6 +311,10 @@ def EvaluateTensorFromDetails(
     cost = static.legacy_costs
 
     for n in range(static.nodes):
+        p_aa, e_aa, p_e, e_e = apportion_new_phes(
+            a.CnphP[n], a.CnphE[n], c.E_aa_max[n], c.P_aa_max[n], c.P_e_max[n]
+        )
+
         cost += a.Cpfix[n] * c.Fpfix[n]
         cost += a.Cpsat[n] * c.Fpsat[n]
         cost += a.Coffw[n] * c.Foffw[n]
@@ -299,20 +324,20 @@ def EvaluateTensorFromDetails(
         cost += a.Cpeak[n, 2] * c.Fgas[n]
         cost += (a.Cnuke[n] - a.Cnlte[n]) * c.Fnuke[n]
         cost += a.Cnlte[n] * c.Fnlte[n]
-        cost += a.CnphP[n] * c.FphP[n]
-        cost += a.CnphE[n] * c.FphE[n]
-        cost += a.CstorageP[n, 1] * c.Fb4P[n]
-        cost += a.CstorageP[n, 2] * c.Fb2P[n]
+        cost += p_aa * c.Faa_phP[n] + e_aa * c.Faa_phE[n]
+        cost += p_e * c.Fe_phP[n] + e_e * c.Fe_phE[n]
+        cost += a.CstorageP[n, 2] * c.Fb4P[n]
+        cost += a.CstorageP[n, 3] * c.Fb2P[n]
 
     for n in range(static.nhvi):
         cost += a.Clines[n] * c.Flines[n]
 
     cost += details_slice[2] * c.Vnuke[0]
     cost += details_slice[3] * c.Vnlte[0]
-    cost += details_slice[4] * c.Vph[0]
-    cost += details_slice[5] * c.Vbiom[0]
-    cost += details_slice[6] * c.Vbiog[0]
-    cost += details_slice[7] * c.Vgas[0]
+    cost += (details_slice[4] + details_slice[5]) * c.Vph[0]
+    cost += details_slice[6] * c.Vbiom[0]
+    cost += details_slice[7] * c.Vbiog[0]
+    cost += details_slice[8] * c.Vgas[0]
 
     lcoe = cost / static.mean_annual_demand_mwh
     penalties = details_slice[1]

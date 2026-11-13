@@ -96,7 +96,8 @@ def UpdateLocalCharge(solution, t):
         solution.operations.Mcurtail[t, n] = 0.0
 
         if unbal < -TOLERANCE:
-            for s in range(solution.static.nstor):
+            # Charge shortest-duration storage first (bess2h -> bess4h -> clphes/nphes -> olphes)
+            for s in range(solution.static.nstor - 1, -1, -1):
                 prev_soc = (
                     solution.operations.Mstorage_init[n, s] if t == 0
                     else solution.operations.Mstorage[t - 1, n, s]
@@ -116,7 +117,6 @@ def UpdateLocalCharge(solution, t):
             solution.operations.Mdeficit[t, n] = unbal
             has_deficit = True
 
-    # Lock state for the interval
     solution.operations.has_curtail_t = has_curtail
     solution.operations.has_deficit_t = has_deficit
 
@@ -148,6 +148,7 @@ def UpdateLocalDischarge(solution, t):
 
         if unbal > TOLERANCE:
             # Pondage (h=0)
+            # Run pondage first
             h = 0
             prev_soc = (
                 solution.operations.Mreservoir_init[n, h] if t == 0
@@ -160,8 +161,8 @@ def UpdateLocalDischarge(solution, t):
             solution.operations.Mhydro[t, n, h] += discharge_amt
             unbal -= discharge_amt
 
-            # Storage (s=0 to 3)
-            for s in range(solution.static.nstor):
+            # Storage: shortest duration first (s=3: bess2h -> s=2: bess4h -> s=1: clphes/nphes -> s=0: olphes)
+            for s in range(solution.static.nstor - 1, -1, -1):
                 prev_soc = (
                     solution.operations.Mstorage_init[n, s] if t == 0
                     else solution.operations.Mstorage[t - 1, n, s]
@@ -191,7 +192,7 @@ def UpdateLocalDischarge(solution, t):
             solution.operations.Mhydro[t, n, h] += discharge_amt
             unbal -= discharge_amt
 
-            # peak deduction
+            # Peak deduction
             for k in range(solution.static.npeak):
                 unbal -= solution.operations.Mpeak[t, n, k]
 
@@ -220,23 +221,27 @@ def GetLongDurSurplust(solution, t, Msurplust):
     Msurplust.fill(0.0)
     for n in range(solution.static.nodes):
         surplus = 0.0
-        # Pondage & Reservoir
-        for h in range(solution.static.nhyd):
-            prev_soc = (solution.operations.Mreservoir_init[n, h] if t == 0
-                        else solution.operations.Mreservoir[t - 1, n, h])
-            inflow_e = solution.static.TShyd_inflow[t, n, h]
-            discharge_cap = (prev_soc + inflow_e) / res
-            surplus += max(
-                0.0, min(solution.assets.ChydP[n, h], discharge_cap) - solution.operations.Mhydro[t, n, h])
-
-        # PHES (s=0)
-        s = 0
-        prev_soc = solution.operations.Mstorage_init[n, s] if t == 0 else solution.operations.Mstorage[t - 1, n, s]
-        inflow_e = solution.static.TSphes_inflow[t, n]
-        discharge_cap = (prev_soc + inflow_e) * solution.static.storage_discha_eff[s] / res
-        surplus += max(
-            0.0, min(solution.assets.CstorageP[n, s], discharge_cap) - solution.operations.Mdischarge[t, n, s]
+        # Seasonal Reservoir (h=1)
+        h = 1
+        prev_soc = (
+            solution.operations.Mreservoir_init[n, h] if t == 0
+            else solution.operations.Mreservoir[t - 1, n, h]
         )
+        inflow_e = solution.static.TShyd_inflow[t, n, h]
+        discharge_cap = (prev_soc + inflow_e) / res
+        surplus += max(
+            0.0, min(solution.assets.ChydP[n, h], discharge_cap) - solution.operations.Mhydro[t, n, h]
+        )
+
+        # Closed-loop/New PHES (s=1) & Open-loop PHES (s=0)
+        for s in (1, 0):
+            prev_soc = solution.operations.Mstorage_init[n, s] if t == 0 else solution.operations.Mstorage[t - 1, n, s]
+            if s == 0:
+                prev_soc += solution.static.TSphes_inflow[t, n]
+            discharge_cap = prev_soc * solution.static.storage_discha_eff[s] / res
+            surplus += max(
+                0.0, min(solution.assets.CstorageP[n, s], discharge_cap) - solution.operations.Mdischarge[t, n, s]
+            )
 
         Msurplust[n] = surplus
 
@@ -247,8 +252,20 @@ def GetShortDurSurplust(solution, t, Msurplust):
     Msurplust.fill(0.0)
     for n in range(solution.static.nodes):
         surplus = 0.0
-        # B4, B2, B1 (s=1, 2, 3)
-        for s in range(1, solution.static.nstor):
+        # Pondage (h=0)
+        h = 0
+        prev_soc = (
+            solution.operations.Mreservoir_init[n, h] if t == 0
+            else solution.operations.Mreservoir[t - 1, n, h]
+        )
+        inflow_e = solution.static.TShyd_inflow[t, n, h]
+        discharge_cap = (prev_soc + inflow_e) / res
+        surplus += max(
+            0.0, min(solution.assets.ChydP[n, h], discharge_cap) - solution.operations.Mhydro[t, n, h]
+        )
+
+        # B2 (s=3) and B4 (s=2)
+        for s in range(solution.static.nstor - 1, 1, -1):
             prev_soc = solution.operations.Mstorage_init[n, s] if t == 0 else solution.operations.Mstorage[t - 1, n, s]
             discharge_cap = prev_soc * solution.static.storage_discha_eff[s] / res
             surplus += max(

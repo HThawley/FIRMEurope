@@ -19,6 +19,11 @@ def Simulate(solution):
         return
 
     ForwardPassPeak(solution)  # Dispatch Biomass, Biogas, Gas against the remaining deficits
+    # TODO: ?
+    #   1. forward pass biomass, biogas
+    #   2. backward pass biomass, biogas
+    #   3. check early exit
+    #   4. forward/backward fossil gas
     total_deficit = solution.operations.Mdeficit.sum()
 
     if feasible_early_exit(solution, total_deficit <= solution.static.allowance):

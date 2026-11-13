@@ -38,6 +38,35 @@ def get_line_costs(line, res, years_float):
     return annual_build, fom, vom
 
 
+@njit(inline="always")
+def apportion_new_phes(
+    tot_p: nbfloat,
+    tot_e: nbfloat,
+    e_aa_max: nbfloat,
+    p_aa_max: nbfloat,
+    p_e_max: nbfloat,
+) -> tuple[nbfloat, nbfloat, nbfloat, nbfloat]:
+    """
+    Allocates new-build PHES energy to Class AA first (up to e_aa_max), with residual
+    to Class E. Apportions power at equal storage duration, clamped to individual
+    class power bounds [p_aa_max, p_e_max] so neither class exceeds its max_build_p.
+    """
+    e_aa = min(tot_e, e_aa_max)
+    e_e = max(npfloat(0.0), tot_e - e_aa)
+
+    if tot_e > npfloat(0.0):
+        raw_p_aa = tot_p * (e_aa / tot_e)
+    else:
+        raw_p_aa = tot_p if e_aa_max > npfloat(0.0) else npfloat(0.0)
+
+    min_p_aa = max(npfloat(0.0), tot_p - p_e_max)
+    max_p_aa = min(tot_p, p_aa_max)
+    p_aa = min(max(raw_p_aa, min_p_aa), max_p_aa)
+    p_e = tot_p - p_aa
+
+    return p_aa, e_aa, p_e, e_e
+
+
 if JIT_ENABLED:
     cost_spec = [
         # -- Fixed Costs --
@@ -51,8 +80,13 @@ if JIT_ENABLED:
         ("Fgas", nbfloat[:]),
         ("Fnuke", nbfloat[:]),
         ("Fnlte", nbfloat[:]),
-        ("FphP", nbfloat[:]),
-        ("FphE", nbfloat[:]),
+        ("Faa_phP", nbfloat[:]),
+        ("Faa_phE", nbfloat[:]),
+        ("Fe_phP", nbfloat[:]),
+        ("Fe_phE", nbfloat[:]),
+        ("E_aa_max", nbfloat[:]),
+        ("P_aa_max", nbfloat[:]),
+        ("P_e_max", nbfloat[:]),
         ("Fb4P", nbfloat[:]),
         ("Fb2P", nbfloat[:]),
         # (nhvi,)
@@ -70,6 +104,7 @@ if JIT_ENABLED:
         ("Vnuke", nbfloat[:]),
         ("Vnlte", nbfloat[:]),
         ("Vph", nbfloat[:]),
+        # ("Vclphes", nbfloat[:]),  # vom is 0
         ("Vb4", nbfloat[:]),
         ("Vb2", nbfloat[:]),
         # (nhvi,)
@@ -100,12 +135,18 @@ class CostTensor:
         self.Fgas = np.zeros(nodes, dtype=npfloat)
         self.Fnuke = np.zeros(nodes, dtype=npfloat)
         self.Fnlte = np.zeros(nodes, dtype=npfloat)
-        self.FphP = np.zeros(nodes, dtype=npfloat)
-        self.FphE = np.zeros(nodes, dtype=npfloat)
+        self.Faa_phP = np.zeros(nodes, dtype=npfloat)
+        self.Faa_phE = np.zeros(nodes, dtype=npfloat)
+        self.Fe_phP = np.zeros(nodes, dtype=npfloat)
+        self.Fe_phE = np.zeros(nodes, dtype=npfloat)
         self.Fb4P = np.zeros(nodes, dtype=npfloat)
         self.Fb2P = np.zeros(nodes, dtype=npfloat)
-        #  Batteries have no capex_e
+        # Batteries have no capex_e
         self.Flines = np.zeros(nhvi, dtype=npfloat)
+
+        self.E_aa_max = np.zeros(nodes, dtype=npfloat)
+        self.P_aa_max = np.zeros(nodes, dtype=npfloat)
+        self.P_e_max = np.zeros(nodes, dtype=npfloat)
 
         self.Vpfix = np.zeros(nodes, dtype=npfloat)
         self.Vpsat = np.zeros(nodes, dtype=npfloat)
@@ -117,6 +158,7 @@ class CostTensor:
         self.Vnuke = np.zeros(nodes, dtype=npfloat)
         self.Vnlte = np.zeros(nodes, dtype=npfloat)
         self.Vph = np.zeros(nodes, dtype=npfloat)
+        # self.Vclphes = np.zeros(nodes, dtype=npfloat)  # vom is 0
         self.Vb4 = np.zeros(nodes, dtype=npfloat)
         self.Vb2 = np.zeros(nodes, dtype=npfloat)
         self.Vlines = np.zeros(nhvi, dtype=npfloat)
@@ -167,9 +209,16 @@ class CostTensor:
             FvalE = ann_build_e
             Vval = vom
 
-            if sto.unit_type == "nphes":
-                self.FphP[n] = FvalP
-                self.FphE[n] = FvalE
+            if sto.unit_type == "aa_phes":
+                self.Faa_phP[n] = FvalP
+                self.Faa_phE[n] = FvalE
+                self.E_aa_max[n] = sto.max_build_e
+                self.P_aa_max[n] = sto.max_build_p
+                self.Vph[n] = Vval
+            elif sto.unit_type == "e_phes":
+                self.Fe_phP[n] = FvalP
+                self.Fe_phE[n] = FvalE
+                self.P_e_max[n] = sto.max_build_p
                 self.Vph[n] = Vval
             elif sto.unit_type == "bess4h":
                 self.Fb4P[n] = FvalP

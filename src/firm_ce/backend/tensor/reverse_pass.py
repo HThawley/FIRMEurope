@@ -162,7 +162,7 @@ def SetupStorageDonors(solution, t):
             solution.operations.discharge_max_t[t, n, s] = 0.0
 
         if solution.operations.rolling_deficits[n] <= TOLERANCE:
-            for s in range(solution.static.nstor - 1, -1, -1):  # Longest duration first
+            for s in range(solution.static.nstor):  # Longest duration first (0: olphes -> 1: clphes/nphes -> 2: b4 -> 3: b2)
                 available_e_power = (
                     solution.operations.storage_min_future[n, s]
                     * solution.static.storage_discha_eff[s]
@@ -213,7 +213,7 @@ def DrainHydroDonors(solution, t, n, transfer_amount):
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
 def DrainStorageDonors(solution, t, n, transfer_amount):
     res = solution.static.resolution
-    for s in range(solution.static.nstor - 1, -1, -1):
+    for s in range(solution.static.nstor):  # Longest duration first (0 -> nstor-1)
         if solution.operations.trickling_flag[n, s] and transfer_amount > TOLERANCE:
             allocated = min(transfer_amount, solution.operations.discharge_max_t[t, n, s])
             solution.operations.Mdischarge[t, n, s] += allocated
@@ -269,6 +269,7 @@ def TrickleStorageHydro(solution, t):  # noqa: C901
             FillPrechargers(solution, t, n, transfer)
 
     # Network Transfers
+    # TODO: Is this redundant because of last step of initial forward pass?
     if (surplus > TOLERANCE).any() and (node_precharge_fill > TOLERANCE).any():
         precharge_fill_orig[:] = node_precharge_fill
         surplus_orig[:] = surplus
