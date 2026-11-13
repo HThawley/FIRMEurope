@@ -27,6 +27,8 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from scipy.stats import gaussian_kde
 
+from firm_ce.system.tensor.costs import apportion_new_phes
+
 
 @dataclass
 class MCConfig:
@@ -52,13 +54,36 @@ class MCConfig:
 
 
 def _summarise(sol) -> dict:
-    a, E = sol.assets, sol.nodal_energy
+    a, E, s = sol.assets, sol.nodal_energy, sol.static
+    c = s.costs
+    nodes = s.nodes
+
+    p_aa = np.zeros(nodes, dtype=np.float64)
+    e_aa = np.zeros(nodes, dtype=np.float64)
+    p_e = np.zeros(nodes, dtype=np.float64)
+    e_e = np.zeros(nodes, dtype=np.float64)
+    clphes_gen = np.zeros(nodes, dtype=np.float64)
+
+    for n in range(nodes):
+        pa, ea, pe, ee = apportion_new_phes(
+            a.CnphP[n], a.CnphE[n], c.E_aa_max[n], c.P_aa_max[n], c.P_e_max[n]
+        )
+        p_aa[n], e_aa[n], p_e[n], e_e[n] = pa, ea, pe, ee
+        if p_aa[n] > 0.0:
+            clphes_gen[n] = (sol.nodal_aaph_gen[n] / p_aa[n]) * s.EstorageP[n, 1]
+        elif p_e[n] > 0.0:
+            clphes_gen[n] = (sol.nodal_eph_gen[n] / p_e[n]) * s.EstorageP[n, 1]
+
     return dict(
         Cpfix=a.Cpfix.copy(), Cpsat=a.Cpsat.copy(), Coffw=a.Coffw.copy(), Consw=a.Consw.copy(),
         Cpeak=a.Cpeak.copy(), Cnuke=a.Cnuke.copy(), Cnlte=a.Cnlte.copy(),
-        CnphP=a.CnphP.copy(), CnphE=a.CnphE.copy(), CstorageP=a.CstorageP.copy(),
+        Caa_phP=p_aa, Caa_phE=e_aa, Ce_phP=p_e, Ce_phE=e_e,
+        CstorageP=a.CstorageP.copy(),
         Clines=a.Clines.copy(),
-        E=E.copy(), nph_gen=sol.nodal_nph_gen.copy(),
+        E=E.copy(),
+        aaph_gen=sol.nodal_aaph_gen.copy(),
+        eph_gen=sol.nodal_eph_gen.copy(),
+        clphes_gen=clphes_gen,
         feasible=bool(sol.feasible), penalties=float(sol.penalties),
         lcoe=float(sol.lcoe), total=float(sol.total_annual_cost),
     )
@@ -83,15 +108,18 @@ def cost_terms(q: dict, static) -> list[tuple[str, np.ndarray]]:
         ("F_gas", f(q["Cpeak"][:, 2]) * f(c.Fgas)),
         ("F_nuke", f(q["Cnuke"] - q["Cnlte"]) * f(c.Fnuke)),
         ("F_nlte", f(q["Cnlte"]) * f(c.Fnlte)),
-        ("F_phP", f(q["CnphP"]) * f(c.FphP)),
-        ("F_phE", f(q["CnphE"]) * f(c.FphE)),
-        ("F_b4P", f(q["CstorageP"][:, 1]) * f(c.Fb4P)),
-        ("F_b2P", f(q["CstorageP"][:, 2]) * f(c.Fb2P)),
+        ("F_aa_phP", f(q["Caa_phP"]) * f(c.Faa_phP)),
+        ("F_aa_phE", f(q["Caa_phE"]) * f(c.Faa_phE)),
+        ("F_e_phP", f(q["Ce_phP"]) * f(c.Fe_phP)),
+        ("F_e_phE", f(q["Ce_phE"]) * f(c.Fe_phE)),
+        ("F_b4P", f(q["CstorageP"][:, 2]) * f(c.Fb4P)),
+        ("F_b2P", f(q["CstorageP"][:, 3]) * f(c.Fb2P)),
         ("F_lines", f(q["Clines"]) * f(c.Flines)),
-        # ---- variable (energy x $/unit); VRE & battery VOM are zero in current model ----
+        # ---- variable (energy x $/unit) ----
         ("V_nuke", f(E[:, 4]) * f(c.Vnuke)),
         ("V_nlte", f(E[:, 5]) * f(c.Vnlte)),
-        ("V_ph", f(q["nph_gen"]) * f(c.Vph)),
+        ("V_clphes", f(q["clphes_gen"]) * f(c.Vclphes)),
+        ("V_ph", f(q["aaph_gen"] + q["eph_gen"]) * f(c.Vph)),
         ("V_biom", f(E[:, 6]) * f(c.Vbiom)),
         ("V_biog", f(E[:, 7]) * f(c.Vbiog)),
         ("V_gas", f(E[:, 8]) * f(c.Vgas)),

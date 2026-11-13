@@ -202,7 +202,7 @@ class Display:
         if spec.metric == "storage_sources":
             out = {}
             raw_type = str(getattr(asset, "unit_type", "")).lower()
-            if raw_type in ("clphes", "olphes", "nphes", "bess2h", "bess4h") or "bess" in raw_type:
+            if raw_type in ("clphes", "olphes", "aa_phes", "e_phes", "bess2h", "bess4h") or "bess" in raw_type:
                 out[f"{label} (Electrical)"] = abs(accessor.get_charge_gross(asset)) * scale
                 if accessor.has_inflows(asset):
                     out[f"{label} (Inflows)"] = accessor.get_inflow_gross(asset) * scale
@@ -1293,8 +1293,10 @@ class Display:
             return "Bioenergy"
 
         if is_rechargeable_storage(asset, base):
-            if raw_type == "nphes":
-                return "New PHES"
+            if raw_type == "aa_phes":
+                return "AA PHES"
+            if raw_type == "e_phes":
+                return "E PHES"
             if raw_type == "clphes":
                 return "Closed-loop PHES"
             if raw_type == "olphes":

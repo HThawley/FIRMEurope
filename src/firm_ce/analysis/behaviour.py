@@ -189,7 +189,8 @@ class Behaviour:
             return "Bioenergy"
         if is_rechargeable_storage(asset, base):
             return {
-                "nphes": "New PHES",
+                "aa_phes": "AA PHES",
+                "e_phes": "E PHES",
                 "clphes": "Closed-loop PHES",
                 "olphes": "Open-loop PHES",
             }.get(raw_type, "Battery" if ("bess" in raw_type or raw_type == "battery") else base)

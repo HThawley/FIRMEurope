@@ -518,7 +518,7 @@ class ValidationTensor:
                 )
 
         # Storage energy: Mdis/charge (intervals, nodes, nstor) vs CstorageP (nodes, nstor)
-        stor_names = {0: "phes", 1: "bess4h", 2: "bess2h"}
+        stor_names = {0: "olphes", 1: "clphes_new_phes", 2: "bess4h", 3: "bess2h"}
         for s in range(static.nstor):
             sname = stor_names.get(s, f"stor_{s}")
             for n in range(nodes):

@@ -35,6 +35,8 @@ TECH_COLORS: Dict[str, str] = {
     "Battery": "#A855F7",
     "Closed-loop PHES": "#EC4899",
     "Open-loop PHES": "#6366F1",
+    "AA PHES": "#3730A3",
+    "E PHES": "#4338CA",
     "New PHES": "#3730A3",
     "Legacy PHES": "#818CF8",
     "PHES": "#6366F1",
@@ -69,10 +71,12 @@ TECH_COLORS: Dict[str, str] = {
     "bess4h": "#7E22CE",
     "bess2h_e": "#C084FC",
     "bess4h_e": "#7E22CE",
-    "phes": "#6366F1",
-    "phes_e": "#4F46E5",
-    "nphes": "#3730A3",
-    "nphes_e": "#312E81",
+    "aa_phes": "#3730A3",
+    "aa_phes_e": "#312E81",
+    "e_phes": "#4338CA",
+    "e_phes_e": "#3730A3",
+    "new_phes": "#3730A3",
+    "new_phes_e": "#312E81",
     "legacy_phes": "#818CF8",
     "legacy_phes_e": "#6366F1",
     "rechargable": "#8B5CF6",
@@ -101,11 +105,13 @@ COMPOSITE_GROUPS: Dict[str, Tuple[Tuple[str, ...], str]] = {
     "bess_e": (("bess2h_e", "bess4h_e"), "node_energy"),
     "legacy_phes": (("clphes", "olphes"), "node_power"),
     "legacy_phes_e": (("clphes_e", "olphes_e"), "node_energy"),
-    "phes": (("nphes", "clphes", "olphes"), "node_power"),
-    "phes_e": (("nphes_e", "clphes_e", "olphes_e"), "node_energy"),
-    "rechargable": (("bess2h", "bess4h", "nphes", "clphes", "olphes"), "node_power"),
-    "rechargable_e": (("bess2h_e", "bess4h_e", "nphes_e", "clphes_e", "olphes_e"), "node_energy"),
-    "cl_recharg_e": (("bess2h_e", "bess4h_e", "nphes_e", "clphes_e"), "node_energy"),
+    "new_phes": (("aa_phes", "e_phes"), "node_power"),
+    "new_phes_e": (("aa_phes_e", "e_phes_e"), "node_energy"),
+    "phes": (("aa_phes", "e_phes", "clphes", "olphes"), "node_power"),
+    "phes_e": (("aa_phes_e", "e_phes_e", "clphes_e", "olphes_e"), "node_energy"),
+    "rechargable": (("bess2h", "bess4h", "aa_phes", "e_phes", "clphes", "olphes"), "node_power"),
+    "rechargable_e": (("bess2h_e", "bess4h_e", "aa_phes_e", "e_phes_e", "clphes_e", "olphes_e"), "node_energy"),
+    "cl_recharg_e": (("bess2h_e", "bess4h_e", "aa_phes_e", "e_phes_e", "clphes_e"), "node_energy"),
     "renewable": (("pv_fixed", "pv_track", "onsw", "offw", "hydro", "ror"), "node_power"),
     "hvdc": (("dc_subsea_transmission", "dc_underground_transmission"), "line_power"),
     "hvac": (("ac_ohl_transmission", "ac_ohl_mountain_transmission"), "line_power"),
@@ -188,6 +194,9 @@ class TechTaxonomy:
         x_weights_abs = defaultdict(list)
         existing_abs = defaultdict(float)
 
+        # Track nodal new-build PHES shared decision variable indices & class bounds for exact split
+        phes_node_meta = {}  # node_order -> dict(p_idx, e_idx, e_aa_max, p_aa_max, p_e_max)
+
         # 1. Generators
         for gen in self.scenario.fleet.generators.values():
             ut = gen.unit_type
@@ -202,13 +211,35 @@ class TechTaxonomy:
             ut_e = f"{ut}_e"
             dur = float(sto.duration)
 
-            if sto.candidate_p_x_idx != -1:
-                x_weights_abs[ut].append((sto.candidate_p_x_idx, 1.0))
-                if dur > 0:
-                    x_weights_abs[ut_e].append((sto.candidate_p_x_idx, dur))
+            if ut in ("aa_phes", "e_phes"):
+                n_ord = sto.node.order
+                meta = phes_node_meta.setdefault(
+                    n_ord,
+                    {
+                        "p_idx": sto.candidate_p_x_idx,
+                        "e_idx": sto.candidate_e_x_idx,
+                        "e_aa_max": 0.0,
+                        "p_aa_max": 0.0,
+                        "p_e_max": 0.0,
+                    },
+                )
+                if sto.candidate_p_x_idx != -1:
+                    meta["p_idx"] = sto.candidate_p_x_idx
+                if sto.candidate_e_x_idx != -1:
+                    meta["e_idx"] = sto.candidate_e_x_idx
+                if ut == "aa_phes":
+                    meta["e_aa_max"] = float(sto.max_build_e)
+                    meta["p_aa_max"] = float(sto.max_build_p)
+                else:
+                    meta["p_e_max"] = float(sto.max_build_p)
+            else:
+                if sto.candidate_p_x_idx != -1:
+                    x_weights_abs[ut].append((sto.candidate_p_x_idx, 1.0))
+                    if dur > 0:
+                        x_weights_abs[ut_e].append((sto.candidate_p_x_idx, dur))
 
-            if sto.candidate_e_x_idx != -1:
-                x_weights_abs[ut_e].append((sto.candidate_e_x_idx, 1.0))
+                if sto.candidate_e_x_idx != -1:
+                    x_weights_abs[ut_e].append((sto.candidate_e_x_idx, 1.0))
 
             if sto.initial_power_capacity > TOLERANCE:
                 existing_abs[ut] += sto.initial_power_capacity
@@ -216,6 +247,8 @@ class TechTaxonomy:
             init_e = sto.initial_energy_capacity if sto.initial_energy_capacity > 0 else dur * sto.initial_power_capacity
             if init_e > TOLERANCE:
                 existing_abs[ut_e] += init_e
+
+        self._phes_nodes = list(phes_node_meta.values())
 
         # 3. Major Lines
         for line in self.scenario.network.major_lines.values():
@@ -226,7 +259,7 @@ class TechTaxonomy:
                 existing_abs[ut] += line.initial_capacity
 
         # Order unit types deterministically
-        base_uts = list(x_weights_abs.keys() | existing_abs.keys())
+        base_uts = list(x_weights_abs.keys() | existing_abs.keys() | {"aa_phes", "aa_phes_e", "e_phes", "e_phes_e"})
         for comp_uts, _ in COMPOSITE_GROUPS.values():
             for u in comp_uts:
                 if u not in base_uts:
@@ -234,9 +267,10 @@ class TechTaxonomy:
 
         all_columns = base_uts + [c for c in COMPOSITE_GROUPS.keys() if c not in base_uts]
         self.columns: List[str] = all_columns
+        self._col_idx = {c: i for i, c in enumerate(all_columns)}
         n_cols = len(all_columns)
 
-        # Build projection matrices
+        # Build linear projection matrices for non-piecewise columns
         self.P_abs = np.zeros((self.n_vars, n_cols), dtype=npfloat)
         self.offset_abs = np.zeros(n_cols, dtype=npfloat)
 
@@ -246,11 +280,21 @@ class TechTaxonomy:
             self.offset_abs[col_idx] = existing_abs[ut]
 
         for comp_name, (comp_uts, _kind) in COMPOSITE_GROUPS.items():
-            col_idx = all_columns.index(comp_name)
+            col_idx = self._col_idx[comp_name]
             for u in comp_uts:
                 for x_idx, w in x_weights_abs[u]:
                     self.P_abs[x_idx, col_idx] += w
                 self.offset_abs[col_idx] += existing_abs[u]
+
+            # If the composite includes both aa_phes and e_phes, total new-build PHES is linear in x!
+            if "aa_phes" in comp_uts and "e_phes" in comp_uts:
+                for m in self._phes_nodes:
+                    if m["p_idx"] != -1:
+                        self.P_abs[m["p_idx"], col_idx] += 1.0
+            if "aa_phes_e" in comp_uts and "e_phes_e" in comp_uts:
+                for m in self._phes_nodes:
+                    if m["e_idx"] != -1:
+                        self.P_abs[m["e_idx"], col_idx] += 1.0
 
     def project(
         self,
@@ -262,23 +306,52 @@ class TechTaxonomy:
         include_existing: bool = True,
     ) -> pd.DataFrame:
         """
-        Projects an (N, n_vars) decision matrix into unit-type & composite columns.
+        Projects an (N, n_vars) decision matrix into unit-type & composite columns,
+        including exact vectorized piecewise apportionment of aa_phes and e_phes.
         """
         x_matrix = np.asarray(x_matrix, dtype=npfloat)
         if x_matrix.ndim == 1:
             x_matrix = x_matrix[np.newaxis, :]
 
         scaler = self.scenario.abs_rel_scaler.astype(npfloat)
-
-        # Convert input to absolute space
         x_in = (x_matrix * scaler) if input_space == "rel" else x_matrix
 
-        # Perform matrix projection natively in absolute space
         projected = x_in @ self.P_abs
         if include_existing:
             projected += self.offset_abs
 
-        # Scale to dimensionless relative space if requested
+        # Vectorized piecewise apportionment for aa_phes, aa_phes_e, e_phes, e_phes_e
+        if self._phes_nodes:
+            idx_aap = self._col_idx["aa_phes"]
+            idx_aae = self._col_idx["aa_phes_e"]
+            idx_ep = self._col_idx["e_phes"]
+            idx_ee = self._col_idx["e_phes_e"]
+
+            for m in self._phes_nodes:
+                tot_p = x_in[:, m["p_idx"]] if m["p_idx"] != -1 else np.zeros(len(x_in), dtype=npfloat)
+                tot_e = x_in[:, m["e_idx"]] if m["e_idx"] != -1 else np.zeros(len(x_in), dtype=npfloat)
+                e_aa_max = m["e_aa_max"]
+                p_aa_max = m["p_aa_max"]
+                p_e_max = m["p_e_max"]
+
+                e_aa = np.minimum(tot_e, e_aa_max)
+                e_e = np.maximum(0.0, tot_e - e_aa)
+
+                raw_p_aa = np.where(
+                    tot_e > 0.0,
+                    tot_p * (e_aa / np.maximum(tot_e, 1e-12)),
+                    tot_p if e_aa_max > 0.0 else 0.0,
+                )
+                min_p_aa = np.maximum(0.0, tot_p - p_e_max)
+                max_p_aa = np.minimum(tot_p, p_aa_max)
+                p_aa = np.clip(raw_p_aa, min_p_aa, max_p_aa)
+                p_e = tot_p - p_aa
+
+                projected[:, idx_aap] += p_aa
+                projected[:, idx_aae] += e_aa
+                projected[:, idx_ep] += p_e
+                projected[:, idx_ee] += e_e
+
         if output_space == "rel":
             projected /= self.system_mean_demand_gw
 
