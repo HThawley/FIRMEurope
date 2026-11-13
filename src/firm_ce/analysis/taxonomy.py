@@ -62,6 +62,7 @@ TECH_COLORS: Dict[str, str] = {
     "nuclear": "#E11D48",
     "nuclear_lte": "#FB7185",
     "ccgt": "#78716C",
+    "ocgt": "#5A5652",
     "bess": "#A855F7",
     "bess_e": "#9333EA",
     "bess2h": "#C084FC",
@@ -117,6 +118,7 @@ COMPOSITE_GROUPS: Dict[str, Tuple[Tuple[str, ...], str]] = {
         ),
         "line_power",
     ),
+    "fossil_gas": (("ocgt", "ccgt"), "node_power"),
 }
 
 
@@ -243,7 +245,7 @@ class TechTaxonomy:
                 self.P_abs[x_idx, col_idx] += w
             self.offset_abs[col_idx] = existing_abs[ut]
 
-        for comp_name, (comp_uts, kind) in COMPOSITE_GROUPS.items():
+        for comp_name, (comp_uts, _kind) in COMPOSITE_GROUPS.items():
             col_idx = all_columns.index(comp_name)
             for u in comp_uts:
                 for x_idx, w in x_weights_abs[u]:
@@ -267,10 +269,10 @@ class TechTaxonomy:
             x_matrix = x_matrix[np.newaxis, :]
 
         scaler = self.scenario.abs_rel_scaler.astype(npfloat)
-        
+
         # Convert input to absolute space
         x_in = (x_matrix * scaler) if input_space == "rel" else x_matrix
-        
+
         # Perform matrix projection natively in absolute space
         projected = x_in @ self.P_abs
         if include_existing:

@@ -430,7 +430,7 @@ def run_monte_carlo(
 #   details = pd.read_csv(details_path, header=None)
 #   # Columns follow ExtractDetailsTensor:
 #   #   0 lcoe | 1 penalties | 2 nuclear | 3 nuclear_lte | 4 nphes
-#   #   5 biomass | 6 biogas | 7 ccgt | (8+ currently unused: zero-VOM techs)
+#   #   5 biomass | 6 biogas | 7 ocgt | (8+ currently unused: zero-VOM techs)
 #
 #   # ALIGNMENT: details.bin rows correspond to population.bin rows, not to
 #   # mga-noptima.csv rows. Match on x (hash of the rounded x vector), e.g.

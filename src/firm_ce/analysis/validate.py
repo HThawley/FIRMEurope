@@ -540,8 +540,8 @@ class ValidationTensor:
                 )
 
         # Peak dispatch: Mpeak (intervals, nodes, npeak) vs Cpeak (nodes, npeak)
-        # Ordering confirmed from StaticTensor: 0=biomass, 1=biogas, 2=ccgt
-        peak_names = {0: "biomass", 1: "biogas", 2: "ccgt"}
+        # Ordering confirmed from StaticTensor: 0=biomass, 1=biogas, 2=ocgt
+        peak_names = {0: "biomass", 1: "biogas", 2: "ocgt"}
         for s in range(static.npeak):
             pname = peak_names.get(s, f"peak_{s}")
             for n in range(nodes):

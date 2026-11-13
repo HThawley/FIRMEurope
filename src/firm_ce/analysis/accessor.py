@@ -97,7 +97,7 @@ class Accessor:
 
     @staticmethod
     def is_solar(asset: Any) -> bool:
-        return getattr(asset, "unit_type", None) == "solar"
+        return getattr(asset, "unit_type", None) in ("pv_track", "pv_fixed")
 
     @staticmethod
     def is_ror(asset: Any) -> bool:
@@ -105,7 +105,7 @@ class Accessor:
 
     @staticmethod
     def is_wind(asset: Any) -> bool:
-        return getattr(asset, "unit_type", None) == "wind"
+        return getattr(asset, "unit_type", None) in ("onsw", "offw")
 
     @staticmethod
     def is_baseload(asset: Any) -> bool:

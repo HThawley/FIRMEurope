@@ -256,7 +256,7 @@ def plot_solutions(
                 annualize=True,
             ),
         ]
-        scenario.display.plot_summary(custom_storage_spec, solutions=[0], chart_type="treemap")
+        scenario.display.plot_summary(custom_storage_spec, solutions=[0], chart_type="pie")
 
 
 def plot_heatmaps(
@@ -291,7 +291,7 @@ def plot_heatmaps(
     # Pairwise trade-off grid with Pareto frontier
     scenario.explorer.plot_pairgrid(
         vars=["solar", "wind", "nuke_all", "nphes_e", "trans"],
-        z="ccgt",
+        z="ocgt",
         agg="min",
         space="rel",
         threshold=1.11,
@@ -302,7 +302,7 @@ def plot_heatmaps(
     # Pairwise trade-off grid with Pareto frontier
     scenario.explorer.plot_pairgrid(
         vars=["solar", "wind", "nuke_all", "nphes_e", "trans"],
-        z="ccgt",
+        z="ocgt",
         agg="min",
         space="rel",
         threshold=mga_rel,
@@ -313,7 +313,7 @@ def plot_heatmaps(
     scenario.explorer.plot_surface(
         x="cl_recharg_e",
         y="trans",
-        z="ccgt",
+        z="ocgt",
         aggs=('min'),
         space="rel",
         threshold=mga_rel,
@@ -327,10 +327,10 @@ def plot_heatmaps(
     )
 
 
-def plot_behaviours(scenario):
+def plot_behaviours(scenario, idx: int = 0):
     # --- Operational Behaviour Traces ---
     # Select the scalar Solution object (raising NotImplementedError if a SolutionTensor is passed)
-    active_sol = scenario.solution if scenario.config.type == "single_time" else scenario.noptima[0]
+    active_sol = scenario.solution if scenario.config.type == "single_time" else scenario.noptima[idx]
     behav = Behaviour(scenario, active_sol, units="GW")
 
     # 1. Time-of-day average behaviour (discharge vs charging) of all storages
@@ -385,9 +385,99 @@ def plot_behaviours(scenario):
         include_demand=False,
     )
 
+    # 6. Nodal/Regional seasonal comparison (e.g., Germany & France in Winter vs Summer)
+    behav.plot_daily_average(
+        technologies="all",
+        periods=["winter", "summer"],
+        nodes=["DEU", "FRA"],
+        include_demand=True,
+        include_curtailment=True,
+    )
+
+    # 7. System-wide co-located storage-charging-storage: Diurnal profile (Presentation 1)
+    behav.plot_storage_cross_charging(
+        nodes=None,               # System-wide sum of node-level overlaps
+        period="all",
+        view="daily_average",
+        group_by="subtech",
+        rechargeable_only=True,
+    )
+
+    # 8. System-wide co-located storage-charging-storage: Pairwise GWh/yr matrix (Presentation 2)
+    behav.plot_storage_cross_charging(
+        nodes=None,
+        period="all",
+        view="pair_matrix",
+        group_by="subtech",
+        rechargeable_only=True,
+    )
+
+    behav.plot_storage_charging_sources(
+        storages="all",
+        sources="all",
+        period="all",
+        view="stacked_bar",
+        storage_group_by="subtech",
+        rechargeable_only=True,
+        normalize=True,
+    )
+
+    behav.plot_storage_charging_sources(
+        storages="all",
+        sources="all",
+        period="all",
+        view="matrix",
+        storage_group_by="subtech",
+        rechargeable_only=True,
+    )
+
+    # 9. Print tabular summary of Gas run hours/yr, duty cycle (%), overall CF (%),
+    #    and average output (GW & % CF) while online across the top gas-capacity countries
+    gas_summary_by_node, _ = behav.compute_capacity_factor_metrics(
+        technologies="ocgt",
+        period="all",
+        assets=("generators",),
+        group_by="node",
+    )
+    print("\n--- Fossil Gas Operational Summary by Node (Top 10 by Capacity) ---")
+    print(
+        gas_summary_by_node.sort_values("capacity_gw", ascending=False)
+        .head(10)
+        .round(2)
+        .to_string()
+    )
+
+    # 10. 3-Panel System Dashboard for Gas & Peakers (Bioenergy + Fossil Gas):
+    #    Panel 1: Run hours/yr, Duty Cycle (%), CF While On (%), Overall CF (%)
+    #    Panel 2: Time-of-day % of fleet online
+    #    Panel 3: Time-of-day average output while online (solid) vs unconditional (dashed)
+    behav.plot_capacity_factors(
+        technologies=["nphes", "hydro", "ocgt"],
+        periods="all",
+        assets=("generators", "storages"),
+        group_by="subtech",
+        view="dashboard",
+        aggregate=False,
+        output_mode="cf_pct",  # Set to "power" to plot GW instead of % of nameplate
+    )
+
+    # 11. Seasonal diurnal comparison (Winter vs Summer) of Gas across major nodes
+    behav.plot_capacity_factors(
+        technologies="ocgt",
+        periods=["winter", "summer"],
+        nodes="all",
+        assets=("generators",),
+        group_by="node",
+        aggregate=True,
+        view="diurnal",
+        output_mode="power",   # Shows GW output while on (solid) vs overall (dashed)
+    )
+
+    plt.show()
+
 
 if __name__ == "__main__":
-    RUN_MODE = "results/firmeur_5yr_explor_20261023_155451"
+    RUN_MODE = r"results\firmeur_newcosts_20261105_135758"
 
     start_time = time.time()
     model = Model(model_location=RUN_MODE)
@@ -402,13 +492,14 @@ if __name__ == "__main__":
         indices = None
         if scenario.config.type.startswith("mhmga"):
             # indices = get_diverse_indices(scenario, xs, 47)
-            # indices=[0, 1,2,3,4,5,6,7,8,9,12,13,15,17,18,19,20,21,23,25,26]
-            indices=[0]
+            indices = list(range(29))
+            # indices = [0]
         # raise KeyboardInterrupt
         build_and_evaluate_solutions(scenario, xs=xs, mhmga_indices=indices)
 
+        # run_statistics(scenario, write=True)
         run_cost_monte_carlo(scenario, n_samples=10_000, rel_halfwidth=0.2)
-        plot_solutions(scenario, mga_rel=1.05)
-        plot_heatmaps(scenario, mga_rel=1.05)
+        plot_solutions(scenario, mga_rel=1.11)
+        plot_heatmaps(scenario, mga_rel=1.1)
         plot_behaviours(scenario)
         plt.show()
