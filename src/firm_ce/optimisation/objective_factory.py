@@ -1,26 +1,26 @@
 from dataclasses import dataclass
-from typing import Callable, Tuple, Any, Optional
+from typing import Any, Callable, Optional, Tuple
 import numpy as np
 
 from firm_ce.common.typing import npfloat, npintp
-from firm_ce.backend.scalar.single_time import evaluate_vectorised_xs as default_st_obj
-from firm_ce.backend.scalar.mhmga import (
+from firm_ce.scalar.wrappers import (
+    evaluate_vectorised_xs as default_st_obj,
+    mga_scalar_wrapper_scaled,
     mga_wrapper as default_mga_obj,
     mga_wrapper_with_details,
-    mga_scalar_wrapper_scaled,
 )
-from firm_ce.backend.tensor.mhmga import (
-    mga_tensor_wrapper,
-    mga_tensor_wrapper_with_details,
-    mga_tensor_wrapper_scaled,
-)
-from firm_ce.backend.tensor.solution import (
-    N_ENERGY_COMPONENTS,
-    NORM_RELATIVE,
-    NORM_ABSOLUTE,
+from firm_ce.tensor.solution import (
+    AGG_NODE,
     AGG_NONE,
     AGG_UNIT_TYPE,
-    AGG_NODE,
+    N_ENERGY_COMPONENTS,
+    NORM_ABSOLUTE,
+    NORM_RELATIVE,
+)
+from firm_ce.tensor.wrappers import (
+    mga_tensor_wrapper,
+    mga_tensor_wrapper_scaled,
+    mga_tensor_wrapper_with_details,
 )
 
 
@@ -101,7 +101,7 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
     opt_type = config.type.lower()
     save_details = getattr(config, "save_details", False)
 
-    if opt_type in ("single_time", "near_optimum", "midpoint_explore"):
+    if opt_type == "single_time":
         if backend in ("scalar", "tensor"):
             return ObjectiveBundle(func=default_st_obj, fargs=_get_default_args(scenario, config))
         raise ValueError(f"Unknown backend '{backend}' for {opt_type}.")
@@ -154,9 +154,7 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
             nodal_demand_totals = scenario.get_nodal_demand_totals()
 
             if backend == "tensor":
-                norm_code, agg_code, scaled_ndim = _resolve_energy_space_dims(
-                    scenario, config, N_ENERGY_COMPONENTS
-                )
+                norm_code, agg_code, scaled_ndim = _resolve_energy_space_dims(scenario, config, N_ENERGY_COMPONENTS)
                 details_buf = _allocate_details_array(scenario, config, scaled_ndim) if save_details else None
                 det_arg = details_buf if save_details else np.empty((1, 1, 1), dtype=npfloat)
 
@@ -183,9 +181,7 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
                 n_sto_types = len({s.unit_type for s in scenario.fleet.storages.values()})
                 n_energy_types = n_gen_types + n_sto_types + 1
 
-                norm_code, agg_code, scaled_ndim = _resolve_energy_space_dims(
-                    scenario, config, n_energy_types
-                )
+                norm_code, agg_code, scaled_ndim = _resolve_energy_space_dims(scenario, config, n_energy_types)
                 details_buf = _allocate_details_array(scenario, config, scaled_ndim) if save_details else None
                 det_arg = details_buf if save_details else np.empty((1, 1, 1), dtype=npfloat)
 

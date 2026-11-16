@@ -17,7 +17,7 @@ from firm_ce.model import Model
 from firm_ce.common.constants import FASTMATH, BOUNDSCHECK
 from firm_ce.common.jit_overload import njit, prange
 from firm_ce.common.typing import npfloat
-from firm_ce.backend.scalar.single_time import Solution, evaluate_from_details
+from firm_ce.scalar.solution import Solution, evaluate_from_details
 
 
 def _try_path(folder, filename):
@@ -47,7 +47,7 @@ def evaluate_points(points, details, static, fleet, network, balancing_type, fix
 
 
 def approx_costs(scenario, config):
-    scenario.load_datafiles(model.datafile_filenames_dict, model.data_directory)
+    scenario.load_datafiles()
 
     pop_temp, ops_temp = False, False
     pop_path = _try_path(scenario.solution_dir, "latest_population.csv")

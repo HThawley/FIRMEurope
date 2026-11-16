@@ -1,35 +1,44 @@
 # type: ignore
 import gc
-from typing import Dict
-from re import sub
 import os
+from re import sub
+from typing import Dict
+
 import numpy as np
-from collections import defaultdict
 from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult
 
-from firm_ce.analysis.taxonomy import identify_tech
 from firm_ce.common.helpers import parse_comma_separated
-from firm_ce.common.typing import npfloat, npintp, nbintp, unicode_type, TypedDict
-from firm_ce.constructors.component_cons import construct_Fleet_object
-from firm_ce.constructors.parameter_cons import construct_ScenarioParameters_object
-from firm_ce.constructors.topology_cons import construct_Network_object
-from firm_ce.constructors.traces_cons import (
+from firm_ce.common.typing import npfloat, npintp
+from firm_ce.io.binary_logs import recover_interrupted_run
+from firm_ce.io.data_model import ModelData
+from firm_ce.io.file_manager import DataFile
+from firm_ce.io.traces import (
     load_datafiles_to_fuels,
     load_datafiles_to_generators,
-    load_datafiles_to_storages,
     load_datafiles_to_network,
+    load_datafiles_to_storages,
     unload_data_from_fuels,
     unload_data_from_generators,
-    unload_data_from_storages,
     unload_data_from_network,
+    unload_data_from_storages,
 )
-from firm_ce.system.tensor.static import StaticTensor
-from firm_ce.fast_methods import static_m
-from firm_ce.io.file_manager import DataFile
-from firm_ce.io.data_model import ModelData
 from firm_ce.optimisation.solver import get_solver
+from firm_ce.scalar.entities.components import construct_Fleet_object
+from firm_ce.scalar.entities.topology import construct_Network_object
+from firm_ce.scalar.methods import static_m
 from firm_ce.system.config import ModelConfig
+from firm_ce.system.parameters import construct_ScenarioParameters_object
+from firm_ce.system.space import (
+    approximate_feasible_solution,
+    assign_indices_and_get_abs_bounds,
+    assign_unit_type_idx,
+    build_capacity_space_scaler,
+    construct_relative_space,
+    get_tech_index_map,
+    parse_x0,
+)
+from firm_ce.tensor.entities.static import StaticTensor
 
 
 class Scenario:
@@ -37,7 +46,7 @@ class Scenario:
         self,
         model_data: ModelData,
         config: ModelConfig,
-        scenario_id: int
+        scenario_id: int,
     ) -> None:
         self.data_status = False
         self.logger, self.results_dir = model_data.logger, model_data.results_dir
@@ -60,7 +69,7 @@ class Scenario:
             self.scenario_data,
             len(self.network.nodes),
             self.config.limit_timesteps,
-            self.config.interval_aggregation
+            self.config.interval_aggregation,
         )
         self.fleet = construct_Fleet_object(
             self.get_scenario_dicts(model_data.generators),
@@ -70,9 +79,11 @@ class Scenario:
             self.network.nodes,
         )
 
-        self.lower_bounds_abs, self.upper_bounds_abs = self.assign_indices_and_get_abs_bounds()
+        self.lower_bounds_abs, self.upper_bounds_abs, self.asset_node_map = assign_indices_and_get_abs_bounds(
+            self.fleet, self.network
+        )
 
-        self.x0_raw, self.x0_is_relative = self._get_x0(model_data.x0s)
+        self.x0_raw, self.x0_is_relative = parse_x0(self.name, model_data.x0s)
         self.x0_abs = np.array([], dtype=npfloat)
         self.x0_rel = np.array([], dtype=npfloat)
 
@@ -87,156 +98,35 @@ class Scenario:
         os.makedirs(self.solution_dir, exist_ok=True)
 
     def assign_indices_and_get_abs_bounds(self) -> tuple[NDArray[npfloat], NDArray[npfloat]]:
-        lower, upper = [], []
-        x_index = 0
-
-        # Canonical generator order matching StaticTensor offset chain
-        gen_order = (
-            "pv_fixed", "pv_track", "offw", "onsw",
-            "biogas", "biomass", "ocgt", "nuclear", "nuclear_lte",
-        )
-        g_by_type = defaultdict(list)
-        for gen in self.fleet.generators.values():
-            gen.candidate_x_idx = -1
-            if gen.max_build > 0:
-                g_by_type[gen.unit_type].append(gen)
-
-        g_unit_types = defaultdict(list)
-        for ut in list(gen_order) + [k for k in g_by_type if k not in gen_order]:
-            for gen in g_by_type[ut]:
-                gen.candidate_x_idx = x_index
-                lower.append(gen.min_build)
-                upper.append(gen.max_build)
-                g_unit_types[ut].append(gen.node.order)
-                x_index += 1
-
-        # Group storages in canonical order matching StaticTensor: new_phes -> bess2h -> bess4h
-        phes_by_node = defaultdict(list)
-        other_s_types = defaultdict(list)
-        for sto in self.fleet.storages.values():
-            sto.candidate_p_x_idx = -1
-            sto.candidate_e_x_idx = -1
-            if sto.unit_type in ("aa_phes", "e_phes"):
-                if sto.max_build_p > 0 or sto.max_build_e > 0:
-                    phes_by_node[sto.node.order].append(sto)
-            elif sto.max_build_p > 0:
-                other_s_types[sto.unit_type].append(sto)
-
-        s_unit_types = defaultdict(list)
-
-        # 1. Storage Power: new_phes (in node order)
-        for n_order in sorted(phes_by_node.keys()):
-            stos = phes_by_node[n_order]
-            min_p = sum(s.min_build_p for s in stos)
-            max_p = sum(s.max_build_p for s in stos)
-            if max_p > 0:
-                for s in stos:
-                    s.candidate_p_x_idx = x_index
-                lower.append(min_p)
-                upper.append(max_p)
-                s_unit_types["new_phes"].append(n_order)
-                x_index += 1
-
-        # 2. Storage Power: bess2h then bess4h (matching StaticTensor: b2p_offset then b4p_offset)
-        sto_order = ("bess2h", "bess4h")
-        for ut in list(sto_order) + [k for k in other_s_types if k not in sto_order]:
-            for sto in other_s_types[ut]:
-                sto.candidate_p_x_idx = x_index
-                lower.append(sto.min_build_p)
-                upper.append(sto.max_build_p)
-                s_unit_types[ut].append(sto.node.order)
-                x_index += 1
-
-        # 3. Storage Energy: new_phes (in same node order as power)
-        for n_order in sorted(phes_by_node.keys()):
-            stos = phes_by_node[n_order]
-            min_e = sum(s.min_build_e for s in stos)
-            max_e = sum(s.max_build_e for s in stos)
-            if max_e > 0:
-                for s in stos:
-                    s.candidate_e_x_idx = x_index
-                lower.append(min_e)
-                upper.append(max_e)
-                x_index += 1
-
-        # 4. Major Lines
-        for line in self.network.major_lines.values():
-            if line.max_build > 0:
-                line.candidate_x_idx = x_index
-                lower.append(line.min_build)
-                upper.append(line.max_build)
-                x_index += 1
-            else:
-                line.candidate_x_idx = -1
-
-        self.asset_node_map = TypedDict.empty(key_type=unicode_type, value_type=nbintp[:])
-        for k, v in g_unit_types.items():
-            self.asset_node_map[k] = np.array(v, dtype=npintp)
-        for k, v in s_unit_types.items():
-            self.asset_node_map[k] = np.array(v, dtype=npintp)
-
-        return np.array(lower, npfloat), np.array(upper, npfloat)
-
-    def scale_index(self, idx, denominator) -> None:
-        self.lower_bounds_rel[idx] = self.lower_bounds_abs[idx] / denominator
-        self.upper_bounds_rel[idx] = self.upper_bounds_abs[idx] / denominator
-        self.abs_rel_scaler[idx] = denominator
+        lower, upper, asset_node_map = assign_indices_and_get_abs_bounds(self.fleet, self.network)
+        self.asset_node_map = asset_node_map
+        return lower, upper
 
     def construct_relative_space(self) -> None:
         if not self.data_status:
             raise RuntimeError("Load datafiles before constructing relative space")
 
-        self.lower_bounds_rel = np.zeros_like(self.lower_bounds_abs)
-        self.upper_bounds_rel = np.zeros_like(self.upper_bounds_abs)
-        self.abs_rel_scaler = np.zeros_like(self.lower_bounds_abs)
-
-        processed_idx = set()
-        for gen in self.fleet.generators.values():
-            idx = gen.candidate_x_idx
-            if idx != -1 and idx not in processed_idx:
-                self.scale_index(idx, gen.node.mean_demand)
-                processed_idx.add(idx)
-
-        for sto in self.fleet.storages.values():
-            nodal_demand = sto.node.mean_demand
-            idx_p = sto.candidate_p_x_idx
-            if idx_p != -1 and idx_p not in processed_idx:
-                self.scale_index(idx_p, nodal_demand)
-                processed_idx.add(idx_p)
-
-            idx_e = sto.candidate_e_x_idx
-            if idx_e != -1 and idx_e not in processed_idx:
-                self.scale_index(idx_e, nodal_demand)
-                processed_idx.add(idx_e)
-
-        for line in self.network.major_lines.values():
-            idx = line.candidate_x_idx
-            if idx != -1 and idx not in processed_idx:
-                nodal_demand = max(line.node_start.mean_demand, line.node_end.mean_demand)
-                self.scale_index(idx, nodal_demand)
-                processed_idx.add(idx)
-
-        assert (
-            set(range(len(self.lower_bounds_abs))) == processed_idx
-        ), "Not all indices were processed in relative space construction"
-
+        self.lower_bounds_rel, self.upper_bounds_rel, self.abs_rel_scaler = construct_relative_space(
+            self.fleet,
+            self.network,
+            self.lower_bounds_abs,
+            self.upper_bounds_abs,
+        )
         self.relative_space_constructed = True
 
     def convert_x_to_rel(self, x_abs: NDArray[float]) -> NDArray[float]:
         if not self.relative_space_constructed:
-            raise RuntimeError("Must have called `scenario.construct_relative_space` before running arbitrary conversion")
-
-        x_rel = x_abs / self.abs_rel_scaler
-
-        return x_rel
+            raise RuntimeError(
+                "Must have called `scenario.construct_relative_space` before running arbitrary conversion"
+            )
+        return x_abs / self.abs_rel_scaler
 
     def convert_x_to_abs(self, x_rel: NDArray[float]) -> NDArray[float]:
         if not self.relative_space_constructed:
-            raise RuntimeError("Must have called `scenario.construct_relative_space` before running arbitrary conversion")
-
-        x_abs = x_rel * self.abs_rel_scaler
-
-        return x_abs
+            raise RuntimeError(
+                "Must have called `scenario.construct_relative_space` before running arbitrary conversion"
+            )
+        return x_rel * self.abs_rel_scaler
 
     def set_relative_scalers(self) -> None:
         if self.config.parameterisation == "relative":
@@ -259,9 +149,17 @@ class Scenario:
 
     def set_canonical_bounds_and_x0(self) -> None:
         if self.config.parameterisation == "relative":
-            self.lower_bounds, self.upper_bounds, self.x0 = self.lower_bounds_rel, self.upper_bounds_rel, self.x0_rel
+            self.lower_bounds, self.upper_bounds, self.x0 = (
+                self.lower_bounds_rel,
+                self.upper_bounds_rel,
+                self.x0_rel,
+            )
         elif self.config.parameterisation == "absolute":
-            self.lower_bounds, self.upper_bounds, self.x0 = self.lower_bounds_abs, self.upper_bounds_abs, self.x0_abs
+            self.lower_bounds, self.upper_bounds, self.x0 = (
+                self.lower_bounds_abs,
+                self.upper_bounds_abs,
+                self.x0_abs,
+            )
         else:
             raise ValueError(f"Unknown parameterisation type: {self.config.parameterisation}")
 
@@ -269,9 +167,7 @@ class Scenario:
         self.Nodel = [node.name for node in self.network.nodes.values()]
         self.Nodel_int = np.arange(len(self.Nodel), dtype=npintp)
 
-    def construct_tensors(
-        self,
-    ) -> None:
+    def construct_tensors(self) -> None:
         if not self.data_status:
             raise RuntimeError("Load datafiles before constructing tensors")
 
@@ -285,15 +181,11 @@ class Scenario:
             self.config.parameterisation == "relative",
         )
 
-    def deconstruct_tensors(
-        self,
-    ) -> None:
+    def deconstruct_tensors(self) -> None:
         if hasattr(self, "staticTensor"):
             del self.staticTensor
 
-    def load_datafiles(
-        self,
-    ) -> None:
+    def load_datafiles(self) -> None:
         datafiles = self._get_datafiles(self.model_data.datafiles, self.model_data.data_directory)
 
         yeartuple = None
@@ -332,7 +224,7 @@ class Scenario:
             datafiles,
             self.config.limit_timesteps,
             yeartuple,
-            self.config.interval_aggregation
+            self.config.interval_aggregation,
         )
 
         static_m.set_year_energy_demand(self.static, self.network.nodes)
@@ -392,7 +284,9 @@ class Scenario:
             or parse_comma_separated(imported_dict[idx]["scenarios"]) == ["all"]
         }
 
-    def _get_datafiles(self, datafile_filenames_dict: Dict[str, Dict[str, str]], data_directory: str) -> Dict[str, DataFile]:
+    def _get_datafiles(
+        self, datafile_filenames_dict: Dict[str, Dict[str, str]], data_directory: str
+    ) -> Dict[str, DataFile]:
         """Filter or prepare datafiles specific to this scenario."""
         return {
             idx: DataFile(datafile_filenames_dict[idx], data_directory)
@@ -401,138 +295,25 @@ class Scenario:
             or parse_comma_separated(datafile_filenames_dict[idx]["scenarios"]) == ["all"]
         }
 
-    def _get_x0(self, all_x0s: Dict[str, Dict[str, str]]) -> tuple[NDArray[npfloat], bool]:
-        for entry in all_x0s.values():
-            if entry["scenario"] == self.name:
-                try:
-                    x0_list = [float(x) for x in entry["x_0"].strip().split(",") if x.strip()]
-                except AttributeError:
-                    x0_list = []
-
-                is_relative = str(entry.get("is_relative", "false")).lower() in ("true", "1", "t", "yes", "y")
-                return np.array(x0_list, dtype=npfloat), is_relative
-        return np.array([], npfloat), False
-
-    def _approximate_feasible_solution(self) -> NDArray[npfloat]:
-        """ If no initial guess is provided, create an approximate feasible solution."""
+    def _approximate_feasible_solution(self) -> tuple[NDArray[npfloat], NDArray[npfloat]]:
         if not self.data_status:
             raise RuntimeError("Load datafiles before constructing approximate feasible solution")
         if not self.relative_space_constructed:
             raise RuntimeError(
                 "Must have called `scenario.construct_relative_space` before constructing approximate feasible solution"
             )
-
-        # Determine the size of the decision vector based on assigned indices
-        heuristic_x_rel = np.zeros_like(self.lower_bounds_abs, dtype=npfloat)
-
-        factors = {
-            # 'name': <approx energy fraction> / <approx capacity factor>
-            "ocgt": 0.05 / 0.05,
-            "pv_fixed": 0.3 / 0.15,
-            "pv_track": 0.2 / 0.15,
-            "onsw": 0.3 / 0.35,
-            "offw": 0.3 / 0.5,
-            "biogas": 0.02 / 0.2,
-            "biomass": 0.02 / 0.2,
-            "nuclear": 0.1 / 0.9,
-            "nuclear_lte": np.inf,
-            # storage
-            "bess2h": 0.33,
-            "bess4h": 0.33,
-            "aa_phes": 0.33,
-            "e_phes": 0.33,
-            # supply average load for 16 hours
-            "aa_phes_e": 16,
-            "e_phes_e": 16,
-        }
-
-        for gen in self.fleet.generators.values():
-            idx = gen.candidate_x_idx
-            if idx != -1:
-                heuristic_x_rel[idx] = factors[gen.unit_type]
-
-        for sto in self.fleet.storages.values():
-            idx_p = sto.candidate_p_x_idx
-            if idx_p != -1:
-                heuristic_x_rel[idx_p] = factors[sto.unit_type]
-
-            idx_e = sto.candidate_e_x_idx
-            if idx_e != -1:
-                heuristic_x_rel[idx_e] = factors[sto.unit_type + "_e"]
-
-        for line in self.network.major_lines.values():
-            idx = line.candidate_x_idx
-            if idx != -1:
-                heuristic_x_rel[idx] = 0.2
-
-        heuristic_x_rel = np.clip(heuristic_x_rel, self.lower_bounds_rel, self.upper_bounds_rel)
-        heuristic_x_abs = self.convert_x_to_abs(heuristic_x_rel)
-
-        return heuristic_x_rel, heuristic_x_abs
+        return approximate_feasible_solution(
+            self.fleet,
+            self.network,
+            self.lower_bounds_abs,
+            self.lower_bounds_rel,
+            self.upper_bounds_rel,
+            self.abs_rel_scaler,
+        )
 
     def assign_unit_type_idx(self) -> None:
-        """
-        Calculates exact memory requirements for operational data and assigns
-        1D array offsets to each asset/unit_type based on the active backend.
-        """
-        backend = getattr(self.config, "backend", "scalar").lower()
-
-        if backend == "tensor":
-            tensor_unit_types = [
-                "nuclear",
-                "nuclear_lte",
-                "aa_phes",
-                "e_phes",
-                "biomass",
-                "biogas",
-                "ocgt",
-                # -- Zero-VOM technologies in current model --
-                # "pv_fixed",
-                # "pv_track",
-                # "offw",
-                # "onsw",
-                # "bess4h",
-                # "bess2h",
-                # "lines",
-            ]
-            # Reserve 0 for lcoe, 1 for penalties
-            self.unit_type_idx = {ut: idx for idx, ut in enumerate(tensor_unit_types, start=2)}
-            self.details_length = 2 + len(tensor_unit_types)
-            return
-
-        # --- Scalar Backend ---
-        gen_types = sorted(list(set(g.unit_type for g in self.fleet.generators.values())))
-        sto_types = sorted(list(set(s.unit_type for s in self.fleet.storages.values())))
-
-        line_types_set = set(line.unit_type for line in self.network.major_lines.values())
-        line_types_set.update(line.unit_type for line in self.network.minor_lines.values())
-        line_types = sorted(list(line_types_set))
-
-        self.unit_type_idx = {}
-        current_idx = 2
-
-        for t in gen_types:
-            self.unit_type_idx[t] = current_idx
-            current_idx += 2
-
-        for t in sto_types:
-            self.unit_type_idx[t] = current_idx
-            current_idx += 1
-
-        for t in line_types:
-            self.unit_type_idx[t] = current_idx
-            current_idx += 1
-
-        self.details_length = current_idx
-
-        for g in self.fleet.generators.values():
-            g.unit_type_idx = self.unit_type_idx[g.unit_type]
-        for s in self.fleet.storages.values():
-            s.unit_type_idx = self.unit_type_idx[s.unit_type]
-        for line in self.network.major_lines.values():
-            line.unit_type_idx = self.unit_type_idx[line.unit_type]
-        for line in self.network.minor_lines.values():
-            line.unit_type_idx = self.unit_type_idx[line.unit_type]
+        backend = getattr(self.config, "backend", "scalar")
+        self.unit_type_idx, self.details_length = assign_unit_type_idx(self.fleet, self.network, backend)
 
     def get_nodal_demand_totals(self) -> np.ndarray:
         """
@@ -553,86 +334,7 @@ class Scenario:
         space_norm: str | None = None,
         space_agg: str | None = None,
     ) -> np.ndarray:
-        space_norm = (space_norm or getattr(self.config, "mga_space_norm", self.config.parameterisation)).lower()
-        space_agg = (space_agg or getattr(self.config, "mga_space_agg", "unit_type")).lower()
-        param_mode = self.config.parameterisation.lower()
-
-        n_vars = len(self.lower_bounds_abs)
-
-        if param_mode == space_norm:
-            row_scale = np.ones(n_vars, dtype=npfloat)
-        elif param_mode == "relative" and space_norm == "absolute":
-            row_scale = self.abs_rel_scaler.astype(npfloat)
-        elif param_mode == "absolute" and space_norm == "relative":
-            row_scale = (1.0 / self.abs_rel_scaler).astype(npfloat)
-        else:
-            raise ValueError(f"Unknown norm/parameterisation combination: {param_mode} -> {space_norm}")
-
-        if space_agg == "none":
-            return row_scale if not np.allclose(row_scale, 1.0) else np.ones(n_vars, dtype=npfloat)
-
-        if space_agg == "unit_type":
-            groups = defaultdict(list)
-            for gen in self.fleet.generators.values():
-                if gen.candidate_x_idx != -1:
-                    groups[gen.unit_type].append(gen.candidate_x_idx)
-            for sto in self.fleet.storages.values():
-                ut_key = "phes" if sto.unit_type in ("aa_phes", "e_phes") else sto.unit_type
-                if sto.candidate_p_x_idx != -1 and sto.candidate_p_x_idx not in groups[f"{ut_key}_power"]:
-                    groups[f"{ut_key}_power"].append(sto.candidate_p_x_idx)
-                if sto.candidate_e_x_idx != -1 and sto.candidate_e_x_idx not in groups[f"{ut_key}_energy"]:
-                    groups[f"{ut_key}_energy"].append(sto.candidate_e_x_idx)
-            for line in self.network.major_lines.values():
-                if line.candidate_x_idx != -1:
-                    groups[line.unit_type].append(line.candidate_x_idx)
-
-            k_dims = len(groups)
-            proj = np.zeros((n_vars, k_dims), dtype=npfloat)
-            for k, (_, indices) in enumerate(groups.items()):
-                weight = (1.0 / len(indices)) if space_norm == "relative" else 1.0
-                proj[indices, k] = row_scale[indices] * weight
-
-            self.projection_groups = groups
-            return proj
-
-        if space_agg == "node":
-            n_nodes = len(self.network.nodes)
-            proj = np.zeros((n_vars, n_nodes), dtype=npfloat)
-            node_var_counts = np.zeros(n_nodes, dtype=npfloat)
-            seen_sto_idx = set()
-
-            for gen in self.fleet.generators.values():
-                if gen.candidate_x_idx != -1:
-                    n = gen.node.order
-                    proj[gen.candidate_x_idx, n] = row_scale[gen.candidate_x_idx]
-                    node_var_counts[n] += 1.0
-
-            for sto in self.fleet.storages.values():
-                n = sto.node.order
-                if sto.candidate_p_x_idx != -1 and sto.candidate_p_x_idx not in seen_sto_idx:
-                    proj[sto.candidate_p_x_idx, n] = row_scale[sto.candidate_p_x_idx]
-                    node_var_counts[n] += 1.0
-                    seen_sto_idx.add(sto.candidate_p_x_idx)
-                if sto.candidate_e_x_idx != -1 and sto.candidate_e_x_idx not in seen_sto_idx:
-                    proj[sto.candidate_e_x_idx, n] = row_scale[sto.candidate_e_x_idx]
-                    node_var_counts[n] += 1.0
-                    seen_sto_idx.add(sto.candidate_e_x_idx)
-
-            for line in self.network.major_lines.values():
-                if line.candidate_x_idx != -1:
-                    u, v = line.node_start.order, line.node_end.order
-                    proj[line.candidate_x_idx, u] = 0.5 * row_scale[line.candidate_x_idx]
-                    proj[line.candidate_x_idx, v] = 0.5 * row_scale[line.candidate_x_idx]
-                    node_var_counts[u] += 0.5
-                    node_var_counts[v] += 0.5
-
-            if space_norm == "relative":
-                for n in range(n_nodes):
-                    if node_var_counts[n] > 0:
-                        proj[:, n] /= node_var_counts[n]
-            return proj
-
-        raise ValueError(f"Unknown mga_space_agg: '{space_agg}'")
+        return build_capacity_space_scaler(self, space_norm, space_agg)
 
     def inspect_mhmga_recombination(
         self,
@@ -657,8 +359,8 @@ class Scenario:
         x = x.astype(npfloat)
 
         if self.config.backend == "tensor":
-            from firm_ce.backend.tensor.solution import SolutionTensor, EvaluateTensor, prep_solution_for_postprocessing
-            from firm_ce.constructors.tensor_to_scalar import map_tensor_to_scalar
+            from firm_ce.tensor.solution import EvaluateTensor, SolutionTensor, prep_solution_for_postprocessing
+            from firm_ce.tensor.to_scalar import map_tensor_to_scalar
 
             print(f"Building and evaluating tensor solution for scenario: '{self.name}'")
             solutionTensor = SolutionTensor(x, self.staticTensor)
@@ -667,7 +369,7 @@ class Scenario:
             solution = map_tensor_to_scalar(self, solutionTensor)
 
         elif self.config.backend == "scalar":
-            from firm_ce.backend.scalar.solution import Solution, evaluate
+            from firm_ce.scalar.solution import Solution, evaluate
 
             print(f"Building and evaluating scalar solution for scenario: '{self.name}'")
             solution = Solution(
@@ -693,19 +395,18 @@ class Scenario:
         xs = xs.astype(npfloat)
 
         if self.config.backend == "tensor":
-            from firm_ce.backend.tensor.solution import build_eval_and_return_solutions, prep_solution_for_postprocessing
-            from firm_ce.constructors.tensor_to_scalar import map_tensor_to_scalar
+            from firm_ce.tensor.solution import build_eval_and_return_solutions, prep_solution_for_postprocessing
+            from firm_ce.tensor.to_scalar import map_tensor_to_scalar
 
             print(f"Building and evaluating tensor noptima for scenario: '{self.name}'")
-            solutionTensors = build_eval_and_return_solutions(xs, self.staticTensor)  # dict
-            # dict -> list
+            solutionTensors = build_eval_and_return_solutions(xs, self.staticTensor)
             solutionTensors = [solutionTensors[j] for j in range(len(xs))]
             for sol in solutionTensors:
                 prep_solution_for_postprocessing(sol)
             solutions = [map_tensor_to_scalar(self, sol) for sol in solutionTensors]
 
         elif self.config.backend == "scalar":
-            from firm_ce.backend.scalar.solution import build_eval_and_return_solutions
+            from firm_ce.scalar.solution import build_eval_and_return_solutions
 
             print(f"Building and evaluating scalar noptima for scenario: '{self.name}'")
             solutions = build_eval_and_return_solutions(
@@ -715,8 +416,7 @@ class Scenario:
                 self.network,
                 self.config.balancing_type,
                 self.config.fixed_costs_threshold,
-            )  # dict
-            # dict -> list
+            )
             solutions = [solutions[j] for j in range(len(xs))]
             solutionTensors = None
         else:
@@ -730,26 +430,7 @@ class Scenario:
         return solutions, solutionTensors
 
     def get_tech_index_map(self) -> dict:
-        """Maps technology categories to their specific column indices in the x vector."""
-        tech_map = defaultdict(list)
-
-        for gen in self.fleet.generators.values():
-            if gen.candidate_x_idx != -1:
-                tech = identify_tech(gen.name)
-                tech_map[tech].append(gen.candidate_x_idx)
-
-        for sto in self.fleet.storages.values():
-            tech = identify_tech(sto.name)
-            if sto.candidate_p_x_idx != -1 and sto.candidate_p_x_idx not in tech_map[f"{tech} Power (GW)"]:
-                tech_map[f"{tech} Power (GW)"].append(sto.candidate_p_x_idx)
-            if sto.candidate_e_x_idx != -1 and sto.candidate_e_x_idx not in tech_map[f"{tech} Energy (GWh)"]:
-                tech_map[f"{tech} Energy (GWh)"].append(sto.candidate_e_x_idx)
-
-        for line in self.network.major_lines.values():
-            if line.candidate_x_idx != -1:
-                tech_map["Transmission (GW)"].append(line.candidate_x_idx)
-
-        return dict(tech_map)
+        return get_tech_index_map(self.fleet, self.network)
 
     def solve(self) -> OptimizeResult:
         self.create_solution_directory()
@@ -760,7 +441,6 @@ class Scenario:
 
     def recover_logs(self) -> NDArray[npfloat] | None:
         """Cleans up binary logs and converts them to CSV after an interrupted run."""
-        from firm_ce.optimisation.solver import recover_interrupted_run
         return recover_interrupted_run(self.solution_dir)
 
     def polish(self, initial_population: NDArray[npfloat]) -> OptimizeResult:

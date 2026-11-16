@@ -10,10 +10,6 @@ from numpy.typing import NDArray
 
 from firm_ce.common.constants import JIT_ENABLED, BITDEPTH
 
-EvaluationRecord_Type = Tuple[str, str, float, float, float, NDArray[np.float64], NDArray[np.float32]]
-BroadOptimumVars_Type = Tuple[int, str, bool, str]
-BandCandidates_Type = Dict[str, Tuple[List[float], List[float]]]
-
 if JIT_ENABLED:
     from numba.core.types import DictType, ListType, UniTuple, boolean, float64, float32, int64, int32, unicode_type
     from numba.typed.typeddict import Dict as TypedDict

@@ -11,11 +11,11 @@ from firm_ce.model import Model
 from firm_ce.common.typing import npfloat
 from firm_ce.analysis.statistics import Statistics
 from firm_ce.analysis.validate import Validation, ValidationTensor
-from firm_ce.analysis.display import Display, MetricSpec
-from firm_ce.analysis.display_presets import is_rechargeable_storage
-from firm_ce.analysis.space_explorer import SpaceExplorer
 from firm_ce.analysis.cost_uncertainty import MCConfig, run_monte_carlo
-from firm_ce.analysis.behaviour import Behaviour
+from firm_ce.viz.display import Display
+from firm_ce.viz.presets import MetricSpec, is_rechargeable_storage
+from firm_ce.viz.space_explorer import SpaceExplorer
+from firm_ce.viz.behaviour_plots import Behaviour
 
 
 def resolve_single_solution_x(scenario, run_mode: str, x_loc: str | None = None, x0_fallback: bool = True) -> np.ndarray:

@@ -1,14 +1,14 @@
 # type: ignore
-import os
 from datetime import datetime
+import os
 from warnings import warn
 import numpy as np
 
 from firm_ce.analysis.accessor import Accessor
-from firm_ce.backend.scalar.solution import Solution_InstanceType, evaluate
-from firm_ce.backend.tensor.solution import EvaluateTensor, SolutionTensorType
 from firm_ce.common.constants import VALIDATION_TOL
+from firm_ce.scalar.solution import Solution_InstanceType, evaluate
 from firm_ce.system.scenario import Scenario
+from firm_ce.tensor.solution import EvaluateTensor, SolutionTensorType
 
 TENSOR_STOR_NAMES = {0: "olphes", 1: "clphes_new_phes", 2: "bess4h", 3: "bess2h"}
 TENSOR_HYD_NAMES = {0: "pondage", 1: "reservoir"}
@@ -243,7 +243,9 @@ class Validation(_BaseValidation):
             inflows = self.accessor.get_inflow_trace(asset) * res if self.accessor.has_inflows(asset) else 0.0
 
             expected_delta = (charge * eff_c - discharge / eff_d) * res + inflows
-            expected_next_se = np.clip(se[:-1] + (expected_delta[1:] if np.ndim(expected_delta) > 0 else 0.0), 0.0, cap)
+            expected_next_se = np.clip(
+                se[:-1] + (expected_delta[1:] if np.ndim(expected_delta) > 0 else 0.0), 0.0, cap
+            )
 
             mismatch = np.abs(se[1:] - expected_next_se)
             exceedance = np.maximum(mismatch - VALIDATION_TOL, 0)
@@ -281,7 +283,9 @@ class Validation(_BaseValidation):
             if not gens:
                 continue
 
-            total_dispatch_power = sum((self.accessor.get_power_trace(g) for g in gens), start=np.zeros_like(rem_energy))
+            total_dispatch_power = sum(
+                (self.accessor.get_power_trace(g) for g in gens), start=np.zeros_like(rem_energy)
+            )
             expected_change = -total_dispatch_power * res
             actual_change = rem_energy[1:] - rem_energy[:-1]
             exc = np.maximum(np.abs(actual_change - expected_change[1:]) - VALIDATION_TOL, 0)
@@ -408,9 +412,15 @@ class ValidationTensor(_BaseValidation):
         nodel = self.scenario.Nodel
 
         total_gen = (
-            o.Mpfix + o.Mpsat + o.Moffw + o.Monsw + o.Mnuke
-            + np.sum(o.Mpeak, axis=2) + np.sum(o.Mdischarge, axis=2)
-            + np.sum(o.Mhydro, axis=2) + s.Mror
+            o.Mpfix
+            + o.Mpsat
+            + o.Moffw
+            + o.Monsw
+            + o.Mnuke
+            + np.sum(o.Mpeak, axis=2)
+            + np.sum(o.Mdischarge, axis=2)
+            + np.sum(o.Mhydro, axis=2)
+            + s.Mror
         )
         total_load = s.Mload + np.sum(o.Mcharge, axis=2)
         nodal_balance = total_gen + o.Mimport - total_load
@@ -465,7 +475,9 @@ class ValidationTensor(_BaseValidation):
         for stor_idx in range(s.nstor):
             sname = TENSOR_STOR_NAMES.get(stor_idx, f"stor_{stor_idx}")
             for n in range(s.nodes):
-                exc = np.maximum(np.abs(o.Mstorage[1:, n, stor_idx] - expected_energy[:, n, stor_idx]) - VALIDATION_TOL, 0)
+                exc = np.maximum(
+                    np.abs(o.Mstorage[1:, n, stor_idx] - expected_energy[:, n, stor_idx]) - VALIDATION_TOL, 0
+                )
                 if np.any(exc > 0):
                     max_v, count, _, t2 = get_exceedance_stats(exc)
                     self._log(
