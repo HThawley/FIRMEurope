@@ -297,15 +297,24 @@ def calculate_variable_costs(solution: Solution_InstanceType) -> None:
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def calculate_partial_costs(solution: Solution_InstanceType) -> None:
+    solution.x_lcoe[:] = 0.0
     for generator in solution.fleet.generators.values():
-        solution.x_lcoe[generator.candidate_x_idx] = generator_m.get_partial_cost(generator, solution.static.year_float)
+        if generator.candidate_x_idx != -1:
+            solution.x_lcoe[generator.candidate_x_idx] += generator_m.get_partial_cost(
+                generator, solution.static.year_float
+            )
 
     for storage in solution.fleet.storages.values():
-        solution.x_lcoe[storage.candidate_p_x_idx] = storage_m.get_partial_cost_power(storage, solution.static.year_float)
-        solution.x_lcoe[storage.candidate_e_x_idx] = storage_m.get_partial_cost_energy(storage)
+        if storage.candidate_p_x_idx != -1:
+            solution.x_lcoe[storage.candidate_p_x_idx] += storage_m.get_partial_cost_power(
+                storage, solution.static.year_float
+            )
+        if storage.candidate_e_x_idx != -1:
+            solution.x_lcoe[storage.candidate_e_x_idx] += storage_m.get_partial_cost_energy(storage)
 
     for line in solution.network.major_lines.values():
-        solution.x_lcoe[line.candidate_x_idx] = line_m.get_partial_cost(line, solution.static.year_float)
+        if line.candidate_x_idx != -1:
+            solution.x_lcoe[line.candidate_x_idx] += line_m.get_partial_cost(line, solution.static.year_float)
 
     return None
 

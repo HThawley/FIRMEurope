@@ -12,7 +12,15 @@ from firm_ce.analysis.display_presets import (
     is_hydro_asset,
     is_rechargeable_storage,
 )
-from firm_ce.analysis.taxonomy import COMPOSITE_GROUPS, PlotStyle, get_color, get_hatch
+from firm_ce.analysis.taxonomy import (
+    COMPOSITE_GROUPS,
+    PlotStyle,
+    identify_tech,
+    get_color,
+    get_hatch,
+    get_subtech_label,
+    resolve_asset_label,
+)
 from firm_ce.backend.scalar.solution import Solution, evaluate
 from firm_ce.common.constants import LEAPDAYS
 from firm_ce.common.typing import npfloat, npintp
@@ -151,55 +159,10 @@ class Behaviour:
             raise ValueError(f"Year '{year}' out of range.")
         return np.asarray(self.static.year_of_interval) == year_idx
 
-    def _resolve_label(
-        self,
-        asset,
-        group_by: Union[str, Callable],
-        aggregate: Union[bool, str] = False,
-        technologies: Union[str, Sequence[str], Callable] = "all",
-    ) -> str:
-        if isinstance(aggregate, str) and aggregate:
-            return aggregate
-        if aggregate is True:
-            if isinstance(technologies, str) and technologies.lower() not in ("all", "generators", "storages"):
-                return technologies.replace("_", " ").title()
-            if isinstance(technologies, Sequence) and not isinstance(technologies, str) and len(technologies) == 1:
-                return str(technologies[0]).replace("_", " ").title()
-            return "Aggregated Selection"
-        if callable(group_by):
-            return group_by(asset)
-        match group_by:
-            case "tech":
-                return self.scenario.identify_tech(asset.name)
-            case "subtech":
-                return self._get_subtech_label(asset)
-            case "unit_type":
-                return str(getattr(asset, "unit_type", asset.name))
-            case "node":
-                return asset.node.name
-            case "asset":
-                return asset.name
-            case _:
-                raise ValueError(f"Unknown group_by mode: '{group_by}'")
-
-    def _get_subtech_label(self, asset) -> str:
-        base = self.scenario.identify_tech(asset.name) if getattr(asset, "object_class", "") != "line" else ""
-        raw_type = str(getattr(asset, "unit_type", "")).lower()
-        if base in ("Biomass", "Biogas"):
-            return "Bioenergy"
-        if is_rechargeable_storage(asset, base):
-            return {
-                "aa_phes": "AA PHES",
-                "e_phes": "E PHES",
-                "clphes": "Closed-loop PHES",
-                "olphes": "Open-loop PHES",
-            }.get(raw_type, "Battery" if ("bess" in raw_type or raw_type == "battery") else base)
-        return base
-
     def _matches_tech_filter(self, asset, technologies, group_by) -> bool:
         if technologies is None or technologies == "all":
             return True
-        base_tech = self.scenario.identify_tech(asset.name) if getattr(asset, "object_class", "") != "line" else ""
+        base_tech = identify_tech(asset.name) if getattr(asset, "object_class", "") != "line" else ""
         if callable(technologies):
             return technologies(asset, base_tech)
         if isinstance(technologies, str):
@@ -231,8 +194,8 @@ class Behaviour:
             asset.name.lower(),
             str(getattr(asset, "unit_type", "")).lower(),
             base_tech.lower(),
-            self._get_subtech_label(asset).lower(),
-            str(self._resolve_label(asset, group_by)).lower(),
+            get_subtech_label(asset).lower(),
+            str(resolve_asset_label(asset, group_by)).lower(),
         }
         return bool(allowed & candidates)
 
@@ -269,7 +232,7 @@ class Behaviour:
                 if not self._matches_tech_filter(asset, technologies, group_by):
                     continue
 
-                label = self._resolve_label(asset, group_by, aggregate=aggregate)
+                label = resolve_asset_label(asset, group_by, aggregate=aggregate)
                 if metric == "dispatch_and_charge":
                     if getattr(asset, "object_class", "") == "generator":
                         _add(label, self.accessor.get_generation_trace(asset))
@@ -436,14 +399,6 @@ class Behaviour:
                 fig.savefig(save_path, dpi=self.style.dpi, bbox_inches="tight")
             return fig, axis
 
-    # ==========================================================================
-    # 4. Co-Located Storage-Charging-Storage
-    # ==========================================================================
-
-# ==========================================================================
-    # 4. Nodal Storage Charging Source Attribution & Cross-Charging
-    # ==========================================================================
-
     def compute_storage_charging_sources(
         self,
         storages: Union[str, Sequence[str], Callable] = "all",
@@ -511,8 +466,8 @@ class Behaviour:
             sto_c_src: Dict[str, NDArray[npfloat]] = {}
 
             for sto in node_stos:
-                base_tech = self.scenario.identify_tech(sto.name)
-                s_lbl = self._resolve_label(sto, source_group_by)
+                base_tech = identify_tech(sto.name)
+                s_lbl = resolve_asset_label(sto, source_group_by)
                 d_val = self.accessor.get_discharge_trace(sto)
                 c_val = np.abs(self.accessor.get_charge_trace(sto))
 
@@ -524,7 +479,7 @@ class Behaviour:
                 if not self._matches_tech_filter(sto, storages, storage_group_by):
                     continue
 
-                c_lbl = self._resolve_label(
+                c_lbl = resolve_asset_label(
                     sto, storage_group_by, aggregate=aggregate_storages, technologies=storages
                 )
                 c_group[c_lbl] = c_group[c_lbl] + c_val if c_lbl in c_group else c_val.copy()
@@ -555,7 +510,7 @@ class Behaviour:
                         gen, sources, source_group_by
                     ):
                         continue
-                    g_lbl = self._resolve_label(gen, source_group_by)
+                    g_lbl = resolve_asset_label(gen, source_group_by)
                     g_val = self.accessor.get_generation_trace(gen)
                     if np.max(g_val[mask]) > self.accessor.tolerance:
                         raw_gen_pool[g_lbl] = raw_gen_pool[g_lbl] + g_val if g_lbl in raw_gen_pool else g_val.copy()
@@ -724,104 +679,6 @@ class Behaviour:
             if save_path:
                 fig.savefig(save_path, dpi=self.style.dpi, bbox_inches="tight")
             return fig, axis
-
-    def compute_storage_cross_charging(
-        self,
-        *,
-        nodes: Union[str, Sequence[str], None] = None,
-        period="all",
-        group_by: Literal["subtech", "unit_type", "tech", "asset"] = "subtech",
-        rechargeable_only: bool = False,
-    ) -> Tuple[Dict[str, NDArray[npfloat]], pd.DataFrame]:
-        """
-        Evaluates co-located simultaneous discharging and charging node-by-node:
-            O_n(t) = min(sum_i D_{n,i}(t), sum_j C_{n,j}(t))
-            O_{n, i->j}(t) = O_n(t) * (D_{n,i}(t) / D_n(t)) * (C_{n,j}(t) / C_n(t))  for i != j
-        and sums both the pairwise time-series traces and the annualised GWh/yr
-        (Discharger x Charger) matrix across the requested `nodes`.
-        """
-        mask = self._resolve_period_mask(period)
-        n_selected = int(np.sum(mask))
-        if n_selected == 0:
-            raise ValueError(f"Period '{period}' matched 0 intervals.")
-
-        years_equiv = (n_selected * self.resolution) / 8760.0
-        to_gwh_yr = (1.0 / self.accessor.factor) * self.resolution / max(years_equiv, 1e-9)
-
-        target_node_ids = {n.id for n in self._resolve_nodes(nodes)}
-        storages_by_node: Dict[str, List[object]] = {}
-        for sto in self.accessor.get_assets("storages").values():
-            if sto.node.id not in target_node_ids:
-                continue
-            if rechargeable_only and not is_rechargeable_storage(sto, self.scenario.identify_tech(sto.name)):
-                continue
-            storages_by_node.setdefault(sto.node.name, []).append(sto)
-
-        pair_traces: Dict[str, NDArray[npfloat]] = {}
-        matrix_accum: Dict[Tuple[str, str], float] = {}
-        all_labels = set()
-
-        for sto_list in storages_by_node.values():
-            if len(sto_list) < 2:
-                continue
-
-            d_group: Dict[str, NDArray[npfloat]] = {}
-            c_group: Dict[str, NDArray[npfloat]] = {}
-            for sto in sto_list:
-                lbl = self._resolve_label(sto, group_by)
-                all_labels.add(lbl)
-                d_val = self.accessor.get_discharge_trace(sto)
-                c_val = np.abs(self.accessor.get_charge_trace(sto))
-                d_group[lbl] = d_group[lbl] + d_val if lbl in d_group else d_val.copy()
-                c_group[lbl] = c_group[lbl] + c_val if lbl in c_group else c_val.copy()
-
-            labels = sorted(d_group.keys())
-            if len(labels) < 2:
-                continue
-
-            # Net out any internal simultaneous D & C within the same group_by label at this node
-            net_dc = np.vstack([d_group[k] - c_group[k] for k in labels])
-            D_mat = np.maximum(0.0, net_dc)
-            C_mat = np.maximum(0.0, -net_dc)
-
-            D_tot = D_mat.sum(axis=0)
-            C_tot = C_mat.sum(axis=0)
-            overlap_n = np.minimum(D_tot, C_tot)
-
-            active = (overlap_n > self.accessor.tolerance) & mask
-            if not np.any(active):
-                continue
-
-            inv_D = np.where(active, 1.0 / np.maximum(D_tot, 1e-12), 0.0)
-            inv_C = np.where(active, 1.0 / np.maximum(C_tot, 1e-12), 0.0)
-
-            for i, lbl_d in enumerate(labels):
-                d_share = D_mat[i] * inv_D
-                if not np.any(d_share > 0):
-                    continue
-                for j, lbl_c in enumerate(labels):
-                    if i == j:
-                        continue
-                    pair_ov = overlap_n * d_share * (C_mat[j] * inv_C)
-                    if np.max(pair_ov) <= self.accessor.tolerance:
-                        continue
-
-                    pair_key = f"{lbl_d} \u2192 {lbl_c}"
-                    if pair_key in pair_traces:
-                        pair_traces[pair_key] += pair_ov
-                    else:
-                        pair_traces[pair_key] = pair_ov.copy()
-
-                    matrix_accum[(lbl_d, lbl_c)] = matrix_accum.get((lbl_d, lbl_c), 0.0) + float(
-                        np.sum(pair_ov) * to_gwh_yr
-                    )
-
-        ordered = sorted(all_labels)
-        matrix_df = pd.DataFrame(0.0, index=ordered, columns=ordered)
-        for (lbl_d, lbl_c), val in matrix_accum.items():
-            matrix_df.loc[lbl_d, lbl_c] = val
-
-        return pair_traces, matrix_df
 
     def plot_storage_cross_charging(
         self,
@@ -1032,7 +889,7 @@ class Behaviour:
                 thresh = max(active_rel_tol * cap, self.accessor.tolerance)
                 is_on = (trace > thresh).astype(npfloat)
 
-                label = self._resolve_label(asset, group_by, aggregate=aggregate, technologies=technologies)
+                label = resolve_asset_label(asset, group_by, aggregate=aggregate, technologies=technologies)
                 if label not in groups:
                     groups[label] = {
                         "capacity": cap,

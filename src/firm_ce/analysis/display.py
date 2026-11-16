@@ -15,7 +15,14 @@ from firm_ce.common.typing import npfloat
 from firm_ce.system.config import ModelConfig
 from firm_ce.system.scenario import Scenario
 
-from firm_ce.analysis.taxonomy import PlotStyle, TECH_COLORS, TECH_HATCHES, get_color, get_hatch
+from firm_ce.analysis.taxonomy import (
+    PlotStyle,
+    get_color,
+    get_hatch,
+    get_subtech_label,
+    identify_tech,
+    resolve_asset_label,
+)
 from firm_ce.analysis.display_presets import (
     MAP_SPECS,
     SUMMARY_PRESETS,
@@ -76,7 +83,6 @@ class Display:
 
         self._accessor_cache: Dict[int, Accessor] = {}
         self._load_map_data(map_path)
-        self._init_colors()
 
     # --------------------------------------------------------------------------
     # Registration & Configuration
@@ -152,36 +158,20 @@ class Display:
 
     @staticmethod
     def _get_build_power_capacity(accessor: Accessor, asset, build: str = "all") -> float:
-        match str(build).lower():
-            case "none" | "all":
-                return accessor.get_power_capacity(asset)
-            case "new_build":
-                return accessor.get_new_build_capacity(asset, "power")
-            case "existing" | "initial":
-                return accessor.get_existing_capacity(asset, "power")
-            case _:
-                raise ValueError(f"Unknown build filter: '{build}'")
+        return accessor.get_capacity(asset, "power", build=build)
 
     @staticmethod
     def _get_build_energy_capacity(accessor: Accessor, asset, build: str = "all") -> float:
-        match str(build).lower():
-            case "none" | "all":
-                return accessor.get_energy_capacity(asset)
-            case "new_build":
-                return accessor.get_new_build_capacity(asset, "energy")
-            case "existing" | "initial":
-                return accessor.get_existing_capacity(asset, "energy")
-            case _:
-                raise ValueError(f"Unknown build filter: '{build}'")
+        return accessor.get_capacity(asset, "energy", build=build)
 
     def _resolve_label(self, asset, group_by: Union[str, Callable]) -> str:
         if callable(group_by):
             return group_by(asset)
         match group_by:
             case "tech":
-                return self.scenario.identify_tech(asset.name)
+                return identify_tech(asset.name)
             case "subtech":
-                return self._get_display_label(asset)
+                return get_subtech_label(asset)
             case "node":
                 return asset.node.name if hasattr(asset, "node") else f"{asset.node_start.name}-{asset.node_end.name}"
             case _:
@@ -197,12 +187,12 @@ class Display:
         if spec.metric == "none":
             return {}
 
-        label = self._resolve_label(asset, spec.group_by)
+        label = resolve_asset_label(asset, spec.group_by)
 
         if spec.metric == "storage_sources":
             out = {}
-            raw_type = str(getattr(asset, "unit_type", "")).lower()
-            if raw_type in ("clphes", "olphes", "aa_phes", "e_phes", "bess2h", "bess4h") or "bess" in raw_type:
+            base_tech = identify_tech(getattr(asset, "name", ""))
+            if is_rechargeable_storage(asset, base_tech):
                 out[f"{label} (Electrical)"] = abs(accessor.get_charge_gross(asset)) * scale
                 if accessor.has_inflows(asset):
                     out[f"{label} (Inflows)"] = accessor.get_inflow_gross(asset) * scale
@@ -255,7 +245,7 @@ class Display:
 
         for asset_class in spec.assets:
             for asset in accessor.get_assets(asset_class).values():
-                base_tech = self.scenario.identify_tech(asset.name) if asset_class != "major_lines" else ""
+                base_tech = identify_tech(asset.name) if asset_class != "major_lines" else ""
                 if not spec.asset_filter(asset, base_tech):
                     continue
 
@@ -801,8 +791,8 @@ class Display:
                     height,
                     width=bar_width,
                     bottom=bottom,
-                    color=self._get_color(tech),
-                    hatch=self._get_hatch(tech),
+                    color=get_color(tech),
+                    hatch=get_hatch(tech),
                     edgecolor="black",
                     linewidth=0.5,
                     zorder=3,
@@ -815,7 +805,7 @@ class Display:
                     # Ensure parent storage color is still represented in legend if it didn't discharge
                     if base_tech not in legend_handles:
                         legend_handles[base_tech] = plt.Rectangle(
-                            (0, 0), 1, 1, facecolor=self._get_color(base_tech), edgecolor="black", linewidth=0.5
+                            (0, 0), 1, 1, facecolor=get_color(base_tech), edgecolor="black", linewidth=0.5
                         )
                         if base_tech not in pos_keys:
                             pos_keys.insert(0, base_tech)
@@ -974,8 +964,8 @@ class Display:
             )
             labels = [k for k, _ in sorted_items]
             values = [v for _, v in sorted_items]
-            colors = [self._get_color(k) for k in labels]
-            hatches = [self._get_hatch(k) for k in labels]
+            colors = [get_color(k) for k in labels]
+            hatches = [get_hatch(k) for k in labels]
             scale = np.sqrt(total / unit_maxes[unit])
 
             if chart_type == "pie":
@@ -1026,8 +1016,8 @@ class Display:
                 radius = 100_000 * chart_scale * np.sqrt(sum(filtered_mix.values()) / max_total)
                 keys = sorted(filtered_mix.keys())
                 values = [filtered_mix[k] for k in keys]
-                colors = [self._get_color(k) for k in keys]
-                hatches = [self._get_hatch(k) for k in keys]
+                colors = [get_color(k) for k in keys]
+                hatches = [get_hatch(k) for k in keys]
                 self._draw_pie(ax, values, x, y, radius, colors, hatches)
 
         if legend:
@@ -1183,8 +1173,8 @@ class Display:
 
         keys = sorted(mix.keys())
         values = [mix[k] for k in keys]
-        colors = [self._get_color(k) for k in keys]
-        hatches = [self._get_hatch(k) for k in keys]
+        colors = [get_color(k) for k in keys]
+        hatches = [get_hatch(k) for k in keys]
 
         bar_width = width_m / (len(keys) + 1)
         x_start = xpos - (width_m / 2)
@@ -1269,7 +1259,9 @@ class Display:
         self.solution = self.noptima[0]
 
     def _load_map_data(self, filepath: str):
-        self.map_data = gpd.read_file(filepath).to_crs(epsg=3035)
+        gdf = gpd.read_file(filepath).to_crs(epsg=3035)
+        active_nodes = {node.name.lower() for node in self.solution.network.nodes.values()}
+        self.map_data = gdf[gdf["ISO3"].str.lower().isin(active_nodes)].copy()
         self.centroids = self._calculate_centroids()
 
     def _calculate_centroids(self) -> Dict[str, Tuple[float, float]]:
@@ -1285,46 +1277,6 @@ class Display:
                 centroids[node.name] = (0.0, 0.0)
         return centroids
 
-    def _get_display_label(self, asset) -> str:
-        base = self.scenario.identify_tech(asset.name) if getattr(asset, "object_class", "") != "line" else ""
-        raw_type = str(getattr(asset, "unit_type", "")).lower()
-
-        if base in ("Biomass", "Biogas"):
-            return "Bioenergy"
-
-        if is_rechargeable_storage(asset, base):
-            if raw_type == "aa_phes":
-                return "AA PHES"
-            if raw_type == "e_phes":
-                return "E PHES"
-            if raw_type == "clphes":
-                return "Closed-loop PHES"
-            if raw_type == "olphes":
-                return "Open-loop PHES"
-            if "bess" in raw_type or raw_type == "battery":
-                return "Battery"
-
-        if getattr(asset, "object_class", "") == "line":
-            tx_map = {
-                "ac_ohl_transmission": "AC OHL",
-                "ac_ohl_mountain_transmission": "AC OHL (Mountain)",
-                "dc_subsea_transmission": "DC Subsea",
-                "dc_underground_transmission": "DC Underground",
-            }
-            return tx_map.get(raw_type, raw_type)
-
-        return base
-
-    def _init_colors(self):
-        self.tech_colors = dict(TECH_COLORS)
-        self.tech_hatches = dict(TECH_HATCHES)
-
-    def _get_color(self, tech: str) -> str:
-        return get_color(tech)
-
-    def _get_hatch(self, tech: str) -> str | None:
-        return get_hatch(tech)
-
     def _add_legend(self, ax: plt.Axes, data_dict: dict, reverse: bool = False):
         present_techs = {tech for mix in data_dict.values() for tech in mix.keys()}
         handles, labels = [], []
@@ -1335,8 +1287,8 @@ class Display:
                     (0, 0),
                     1,
                     1,
-                    facecolor=self._get_color(tech),
-                    hatch=self._get_hatch(tech),
+                    facecolor=get_color(tech),
+                    hatch=get_hatch(tech),
                     edgecolor="black",
                     linewidth=0.5,
                 )

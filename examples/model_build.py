@@ -10,7 +10,7 @@ import time
 from firm_ce.model import Model
 
 start_time = time.time()
-model = Model()
+model = Model(logging_flag=False)
 model_build_time = time.time()
 
 print(model.scenarios)

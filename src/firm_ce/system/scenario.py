@@ -8,6 +8,7 @@ from collections import defaultdict
 from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult
 
+from firm_ce.analysis.taxonomy import identify_tech
 from firm_ce.common.helpers import parse_comma_separated
 from firm_ce.common.typing import npfloat, npintp, nbintp, unicode_type, TypedDict
 from firm_ce.constructors.component_cons import construct_Fleet_object
@@ -89,19 +90,27 @@ class Scenario:
         lower, upper = [], []
         x_index = 0
 
-        # Ensure generator unit_types are contiguous in x
-        g_unit_types = defaultdict(list)
+        # Canonical generator order matching StaticTensor offset chain
+        gen_order = (
+            "pv_fixed", "pv_track", "offw", "onsw",
+            "biogas", "biomass", "ocgt", "nuclear", "nuclear_lte",
+        )
+        g_by_type = defaultdict(list)
         for gen in self.fleet.generators.values():
+            gen.candidate_x_idx = -1
             if gen.max_build > 0:
-                g_unit_types[gen.unit_type].append(gen.node.order)
+                g_by_type[gen.unit_type].append(gen)
+
+        g_unit_types = defaultdict(list)
+        for ut in list(gen_order) + [k for k in g_by_type if k not in gen_order]:
+            for gen in g_by_type[ut]:
                 gen.candidate_x_idx = x_index
                 lower.append(gen.min_build)
                 upper.append(gen.max_build)
+                g_unit_types[ut].append(gen.node.order)
                 x_index += 1
-            else:
-                gen.candidate_x_idx = -1
 
-        # Group new-build PHES (aa_phes, e_phes) by node so each node gets 1 power and 1 energy variable
+        # Group storages in canonical order matching StaticTensor: new_phes -> bess2h -> bess4h
         phes_by_node = defaultdict(list)
         other_s_types = defaultdict(list)
         for sto in self.fleet.storages.values():
@@ -110,15 +119,13 @@ class Scenario:
             if sto.unit_type in ("aa_phes", "e_phes"):
                 if sto.max_build_p > 0 or sto.max_build_e > 0:
                     phes_by_node[sto.node.order].append(sto)
-            else:
-                if sto.max_build_p > 0:
-                    other_s_types[sto.unit_type].append(sto)
+            elif sto.max_build_p > 0:
+                other_s_types[sto.unit_type].append(sto)
 
         s_unit_types = defaultdict(list)
 
-        # 1. Storage Power: new-build PHES (sum of AA and E power bounds per node)
-        phes_nodes_sorted = sorted(phes_by_node.keys())
-        for n_order in phes_nodes_sorted:
+        # 1. Storage Power: new_phes (in node order)
+        for n_order in sorted(phes_by_node.keys()):
             stos = phes_by_node[n_order]
             min_p = sum(s.min_build_p for s in stos)
             max_p = sum(s.max_build_p for s in stos)
@@ -130,17 +137,18 @@ class Scenario:
                 s_unit_types["new_phes"].append(n_order)
                 x_index += 1
 
-        # 2. Storage Power: other candidate storages (bess2h, bess4h)
-        for unit_type, stos in other_s_types.items():
-            for sto in stos:
+        # 2. Storage Power: bess2h then bess4h (matching StaticTensor: b2p_offset then b4p_offset)
+        sto_order = ("bess2h", "bess4h")
+        for ut in list(sto_order) + [k for k in other_s_types if k not in sto_order]:
+            for sto in other_s_types[ut]:
                 sto.candidate_p_x_idx = x_index
                 lower.append(sto.min_build_p)
                 upper.append(sto.max_build_p)
-                s_unit_types[unit_type].append(sto.node.order)
+                s_unit_types[ut].append(sto.node.order)
                 x_index += 1
 
-        # 3. Storage Energy: new-build PHES (sum of AA and E energy bounds per node)
-        for n_order in phes_nodes_sorted:
+        # 3. Storage Energy: new_phes (in same node order as power)
+        for n_order in sorted(phes_by_node.keys()):
             stos = phes_by_node[n_order]
             min_e = sum(s.min_build_e for s in stos)
             max_e = sum(s.max_build_e for s in stos)
@@ -151,17 +159,7 @@ class Scenario:
                 upper.append(max_e)
                 x_index += 1
 
-        # 4. Storage Energy: other candidate storages with duration == 0 (if any)
-        for unit_type, stos in other_s_types.items():
-            for sto in stos:
-                if sto.max_build_e > 0 and sto.duration == 0:
-                    sto.candidate_e_x_idx = x_index
-                    lower.append(sto.min_build_e)
-                    upper.append(sto.max_build_e)
-                    s_unit_types[unit_type].append(sto.node.order)
-                    x_index += 1
-
-        # 5. Major Lines
+        # 4. Major Lines
         for line in self.network.major_lines.values():
             if line.max_build > 0:
                 line.candidate_x_idx = x_index
@@ -731,36 +729,17 @@ class Scenario:
             self.solutionTensor = solutionTensors[0] if solutionTensors is not None else None
         return solutions, solutionTensors
 
-    @staticmethod
-    def identify_tech(name: str) -> str:
-        """Maps asset attributes to simplified plotting categories."""
-        name_lower = name.lower()
-        if any(x in name_lower for x in ("solar", "pv", "fix", "sat")): return "Utility Solar"
-        if "roof" in name_lower: return "Rooftop Solar"
-        if any(x in name_lower for x in ("onshore", "onsw")): return "Onshore Wind"
-        if any(x in name_lower for x in ("offshore", "offw")): return "Offshore Wind"
-        if any(x in name_lower for x in ("hydro", "ror", "pond")): return "Hydro"
-        if any(x in name_lower for x in ("nuke", "nuclear")): return "Nuclear"
-        if any(x in name_lower for x in ("gas", "ccgt", "ocgt")): return "Fossil Gas"
-        if "biomass" in name_lower: return "Biomass"
-        if "biogas" in name_lower: return "Biogas"
-        if "coal" in name_lower: return "Coal"
-        if "bess" in name_lower: return "Battery"
-        if "phes" in name_lower: return "PHES"
-        if "geo" in name_lower: return "Geothermal"
-        return "Other"
-
     def get_tech_index_map(self) -> dict:
         """Maps technology categories to their specific column indices in the x vector."""
         tech_map = defaultdict(list)
 
         for gen in self.fleet.generators.values():
             if gen.candidate_x_idx != -1:
-                tech = self.identify_tech(gen.name)
+                tech = identify_tech(gen.name)
                 tech_map[tech].append(gen.candidate_x_idx)
 
         for sto in self.fleet.storages.values():
-            tech = self.identify_tech(sto.name)
+            tech = identify_tech(sto.name)
             if sto.candidate_p_x_idx != -1 and sto.candidate_p_x_idx not in tech_map[f"{tech} Power (GW)"]:
                 tech_map[f"{tech} Power (GW)"].append(sto.candidate_p_x_idx)
             if sto.candidate_e_x_idx != -1 and sto.candidate_e_x_idx not in tech_map[f"{tech} Energy (GWh)"]:

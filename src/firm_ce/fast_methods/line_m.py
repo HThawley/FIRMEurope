@@ -73,6 +73,7 @@ def create_dynamic_copy(
     )
     line_copy.unit_type_idx = line_instance.unit_type_idx
     line_copy.candidate_x_idx = line_instance.candidate_x_idx
+    line_copy.relative_scaler = line_instance.relative_scaler
     return line_copy
 
 

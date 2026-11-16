@@ -12,6 +12,7 @@ from firm_ce.system.scalar.components import (
     Storage_InstanceType
 )
 from firm_ce.system.scalar.topology import Line_InstanceType, Node_InstanceType
+from firm_ce.system.tensor.costs import apportion_new_phes
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
@@ -83,34 +84,6 @@ def build_capacities(
     decision_x: nbfloat[:],
     resolution: nbfloat,
 ) -> None:
-    """
-    The candidate solution defines new build capacity for each Generator, Storage, and Line (major_lines) object. This
-    function modifies each Generator and Storage object in the Fleet to build new capacity and updates the
-    residual_load at corresponding nodes.
-
-    Parameters:
-    -------
-    fleet_instance (Fleet_InstanceType): A dynamic instance of the Fleet jitclass.
-    decision_x (nbfloat[:]): A 1-dimensional array containing the candidate solution for the differential
-        evolution. The candidate solution defines new build capacity for each decision variable (either power
-        or energy capacity).
-    resolution (nbfloat[]): A scalar containing the resolution for every time interval
-
-    Returns:
-    -------
-    None.
-
-    Side-effects:
-    -------
-    Attributes modified for each Generator instance in Fleet.generators: new_build, capacity, line, node, lt_generation.
-    Attributes modified for each Line instance referenced in Generator.line: new_build, capacity, lt_flows.
-    Attributes modified for each Node instance referenced in Generator.node: residual_load.
-    Attributes modified for each Line instance referenced in Generator.line: new_build, capacity, lt_flows.
-    Attributes modified for each Node instance referenced in Generator.node: residual_load.
-    Attributes modified for each Storage instance in Fleet.storages: power_capacity, new_build_p, energy_capacity, new_build_e,
-        line.
-    Attributes modified for each Line instance referenced in Storage.line: new_build, capacity.
-    """
     if fleet_instance.static_instance:
         raise_static_modification_error()
 
@@ -119,10 +92,38 @@ def build_capacities(
             generator_m.build_capacity(generator, decision_x[generator.candidate_x_idx], resolution)
 
     for storage in fleet_instance.storages.values():
-        if storage.candidate_p_x_idx != -1:
-            storage_m.build_capacity(storage, decision_x[storage.candidate_p_x_idx], "power")
-        if storage.candidate_e_x_idx != -1:
-            storage_m.build_capacity(storage, decision_x[storage.candidate_e_x_idx], "energy")
+        ut = storage.unit_type
+        if ut == "aa_phes" or ut == "e_phes":
+            n_order = storage.node.order
+            scaler = storage.node.relative_scaler
+            tot_p = decision_x[storage.candidate_p_x_idx] * scaler if storage.candidate_p_x_idx != -1 else 0.0
+            tot_e = decision_x[storage.candidate_e_x_idx] * scaler if storage.candidate_e_x_idx != -1 else 0.0
+
+            e_aa_max = 0.0
+            for other in fleet_instance.storages.values():
+                if other.node.order == n_order and other.unit_type == "aa_phes":
+                    e_aa_max = other.max_build_e
+                    break
+
+            p_aa, e_aa, p_e, e_e = apportion_new_phes(tot_p, tot_e, e_aa_max)
+            if ut == "aa_phes":
+                storage_m.build_capacity_abs(storage, p_aa, "power")
+                storage_m.build_capacity_abs(storage, e_aa, "energy")
+            else:
+                storage_m.build_capacity_abs(storage, p_e, "power")
+                storage_m.build_capacity_abs(storage, e_e, "energy")
+
+            # Set endogenous duration for scalar merit-order sorting, nudging e_phes so aa_phes dispatches first
+            if storage.power_capacity > TOLERANCE:
+                dur = storage.energy_capacity / storage.power_capacity
+                # In node_m.py, longest-to-shortest sort puts larger duration first (-1e-6 on e_phes);
+                # if shortest-to-longest sort is used, +1e-6 on e_phes puts aa_phes first.
+                storage.duration = (dur - 1e-6) if ut == "e_phes" else dur
+        else:
+            if storage.candidate_p_x_idx != -1:
+                storage_m.build_capacity(storage, decision_x[storage.candidate_p_x_idx], "power")
+            if storage.candidate_e_x_idx != -1:
+                storage_m.build_capacity(storage, decision_x[storage.candidate_e_x_idx], "energy")
     return None
 
 

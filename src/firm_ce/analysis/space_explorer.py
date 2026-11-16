@@ -39,8 +39,8 @@ def _pareto_frontier_2d(points: np.ndarray, maximize_x: bool = True, maximize_y:
 
 class EnsembleDataset:
     """
-    Fast loader and projector for MHMGA historical populations (`population.bin` / `.csv`)
-    and operational details (`details.bin` / `.csv`).
+    Chunked, memory-safe loader and projector for MHMGA historical populations
+    (`population.bin` / `.csv`) and operational details (`details.bin` / `.csv`).
     """
 
     def __init__(
@@ -49,6 +49,7 @@ class EnsembleDataset:
         max_relaxation: float | None = 1.25,
         precision: int | None = 1,
         include_details: bool = True,
+        chunk_size: int = 250_000,
     ):
         self.scenario = scenario
         if not scenario.data_status:
@@ -57,78 +58,19 @@ class EnsembleDataset:
         self.taxonomy = TechTaxonomy(scenario)
         self.precision = precision
 
-        raw_pop, raw_det = self._load_feasible_arrays(max_relaxation, include_details)
-        self.opt_lcoe = float(raw_pop[:, 0].min()) if len(raw_pop) > 0 else np.nan
-
-        param_mode = "rel" if scenario.config.parameterisation == "relative" else "abs"
-        meta = raw_pop[:, :3]
-        x_raw = raw_pop[:, 3:]
-
-        self.df_abs = self.taxonomy.project(x_raw, meta, input_space=param_mode, output_space="abs")
-        self.df_rel = self.taxonomy.project(x_raw, meta, input_space=param_mode, output_space="rel")
-
-        # Attach operational details if available
-        if raw_det is not None:
-            for ut_name, col_idx in scenario.unit_type_idx.items():
-                if col_idx < raw_det.shape[1]:
-                    col_label = f"gen_{ut_name}"
-                    self.df_abs[col_label] = raw_det[:, col_idx]
-                    self.df_rel[col_label] = raw_det[:, col_idx] / scenario.static.mean_annual_demand_mwh
+        self.df_abs, self.df_rel, self.opt_lcoe = self._build_projected_frames(
+            max_relaxation=max_relaxation,
+            include_details=include_details,
+            chunk_size=chunk_size,
+        )
 
         if precision is not None:
             self.df_abs = self.df_abs.round(precision)
             self.df_rel = self.df_rel.round(precision)
 
-    def _load_feasible_arrays(
-        self, max_relaxation: float | None, include_details: bool
-    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-        sol_dir = self.scenario.solution_dir
-        n_vars = len(self.scenario.lower_bounds_abs)
-        pop_cols = n_vars + 3
-
-        bin_path = os.path.join(sol_dir, "population.bin")
-        csv_path = os.path.join(sol_dir, "population.csv")
-
-        if os.path.exists(bin_path) and os.path.getsize(bin_path) > 0:
-            n_rows = os.path.getsize(bin_path) // (np.dtype(npfloat).itemsize * pop_cols)
-            pop_mmap = np.memmap(bin_path, dtype=npfloat, mode="r", shape=(n_rows, pop_cols))
-        elif os.path.exists(csv_path):
-            pop_mmap = pd.read_csv(csv_path, header=None, dtype=npfloat).to_numpy()
-        else:
-            raise FileNotFoundError(f"Neither population.bin nor population.csv found in '{sol_dir}'.")
-
-        feas_mask = pop_mmap[:, 1] <= TOLERANCE
-        if not np.any(feas_mask):
-            raise RuntimeError("No feasible solutions found in population history.")
-
-        opt_lcoe = pop_mmap[feas_mask, 0].min()
-        if max_relaxation is not None:
-            feas_mask = feas_mask & (pop_mmap[:, 0] <= opt_lcoe * max_relaxation)
-
-        filtered_pop = np.array(pop_mmap[feas_mask], dtype=npfloat)
-
-        # Optional details loading
-        filtered_det = None
-        if include_details:
-            det_cols = self.scenario.details_length
-            det_bin = os.path.join(sol_dir, "details.bin")
-            det_csv = os.path.join(sol_dir, "details.csv")
-            if os.path.exists(det_bin) and os.path.getsize(det_bin) > 0:
-                n_det_rows = os.path.getsize(det_bin) // (np.dtype(npfloat).itemsize * det_cols)
-                if n_det_rows == len(pop_mmap):
-                    det_mmap = np.memmap(det_bin, dtype=npfloat, mode="r", shape=(n_det_rows, det_cols))
-                    filtered_det = np.array(det_mmap[feas_mask], dtype=npfloat)
-            elif os.path.exists(det_csv):
-                det_arr = pd.read_csv(det_csv, header=None, dtype=npfloat).to_numpy()
-                if len(det_arr) == len(pop_mmap):
-                    filtered_det = det_arr[feas_mask]
-
-        return filtered_pop, filtered_det
-
     def _build_projected_frames(
         self, max_relaxation: float | None, include_details: bool, chunk_size: int = 250_000
     ) -> Tuple[pd.DataFrame, pd.DataFrame, float]:
-        """Chunked projection in EnsembleDataset (caps peak RAM at < ~1 GB for 20M rows * 500 columns)"""
         sol_dir = self.scenario.solution_dir
         n_vars = len(self.scenario.lower_bounds_abs)
         pop_cols = n_vars + 3
@@ -137,7 +79,6 @@ class EnsembleDataset:
         csv_path = os.path.join(sol_dir, "population.csv")
         param_mode = "rel" if self.scenario.config.parameterisation == "relative" else "abs"
 
-        # First pass: find global optimal LCOE & load/mmap source
         if os.path.exists(bin_path) and os.path.getsize(bin_path) > 0:
             n_rows = os.path.getsize(bin_path) // (np.dtype(npfloat).itemsize * pop_cols)
             pop_mmap = np.memmap(bin_path, dtype=npfloat, mode="r", shape=(n_rows, pop_cols))
@@ -147,7 +88,6 @@ class EnsembleDataset:
             opt_lcoe = float(feas_costs.min())
             max_cost = opt_lcoe * max_relaxation if max_relaxation is not None else np.inf
 
-            # Optional details memmap
             det_mmap = None
             det_bin = os.path.join(sol_dir, "details.bin")
             if include_details and os.path.exists(det_bin) and os.path.getsize(det_bin) > 0:
@@ -178,8 +118,7 @@ class EnsembleDataset:
 
             return pd.concat(abs_chunks, ignore_index=True), pd.concat(rel_chunks, ignore_index=True), opt_lcoe
 
-        elif os.path.exists(csv_path):
-            # Stream CSV in chunks to avoid pd.read_csv memory spike
+        if os.path.exists(csv_path):
             opt_lcoe = np.inf
             for chunk_df in pd.read_csv(csv_path, header=None, usecols=[0, 1], dtype=npfloat, chunksize=chunk_size):
                 c = chunk_df.to_numpy()

@@ -95,15 +95,10 @@ def map_tensor_to_scalar(
     c = solutionTensor.static.costs
     for sto in solution.fleet.storages.values():
         n = sto.node.order
-        p_idx = sto.candidate_p_x_idx
-        e_idx = sto.candidate_e_x_idx
-
-        raw_p = npfloat(x_abs[p_idx]) if p_idx != -1 else npfloat(0.0)
-        raw_e = npfloat(x_abs[e_idx]) if e_idx != -1 else npfloat(0.0)
 
         if sto.unit_type in ("aa_phes", "e_phes"):
             p_aa, e_aa, p_e, e_e = apportion_new_phes(
-                raw_p, raw_e, c.E_aa_max[n], c.P_aa_max[n], c.P_e_max[n]
+                assets.CnphP[n], assets.CnphE[n], c.E_aa_max[n]
             )
             if sto.unit_type == "aa_phes":
                 sto.new_build_p = p_aa
@@ -112,8 +107,10 @@ def map_tensor_to_scalar(
                 sto.new_build_p = p_e
                 sto.new_build_e = e_e
         else:
-            sto.new_build_p = raw_p
-            sto.new_build_e = raw_e
+            p_idx = sto.candidate_p_x_idx
+            e_idx = sto.candidate_e_x_idx
+            sto.new_build_p = npfloat(x_abs[p_idx]) if p_idx != -1 else npfloat(0.0)
+            sto.new_build_e = npfloat(x_abs[e_idx]) if e_idx != -1 else npfloat(0.0)
 
         sto.power_capacity = sto.initial_power_capacity + sto.new_build_p
         sto.energy_capacity = sto.initial_energy_capacity + sto.new_build_e

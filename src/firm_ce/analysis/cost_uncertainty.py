@@ -65,9 +65,7 @@ def _summarise(sol) -> dict:
     clphes_gen = np.zeros(nodes, dtype=np.float64)
 
     for n in range(nodes):
-        pa, ea, pe, ee = apportion_new_phes(
-            a.CnphP[n], a.CnphE[n], c.E_aa_max[n], c.P_aa_max[n], c.P_e_max[n]
-        )
+        pa, ea, pe, ee = apportion_new_phes(a.CnphP[n], a.CnphE[n], c.E_aa_max[n])
         p_aa[n], e_aa[n], p_e[n], e_e[n] = pa, ea, pe, ee
         if p_aa[n] > 0.0:
             clphes_gen[n] = (sol.nodal_aaph_gen[n] / p_aa[n]) * s.EstorageP[n, 1]
@@ -118,7 +116,7 @@ def cost_terms(q: dict, static) -> list[tuple[str, np.ndarray]]:
         # ---- variable (energy x $/unit) ----
         ("V_nuke", f(E[:, 4]) * f(c.Vnuke)),
         ("V_nlte", f(E[:, 5]) * f(c.Vnlte)),
-        ("V_clphes", f(q["clphes_gen"]) * f(c.Vclphes)),
+        # ("V_clphes", f(q["clphes_gen"]) * f(c.Vclphes)),
         ("V_ph", f(q["aaph_gen"] + q["eph_gen"]) * f(c.Vph)),
         ("V_biom", f(E[:, 6]) * f(c.Vbiom)),
         ("V_biog", f(E[:, 7]) * f(c.Vbiog)),

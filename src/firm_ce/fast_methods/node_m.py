@@ -18,6 +18,8 @@ def create_dynamic_copy(node_instance: Node_InstanceType) -> Node_InstanceType:
     node_copy.data_status = node_instance.data_status
     node_copy.data = node_instance.data  # This remains static
     node_copy.residual_load = node_instance.residual_load.copy()
+    node_copy.mean_demand = node_instance.mean_demand
+    node_copy.relative_scaler = node_instance.relative_scaler
     return node_copy
 
 

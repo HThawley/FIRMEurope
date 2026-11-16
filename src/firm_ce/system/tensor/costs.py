@@ -43,26 +43,25 @@ def apportion_new_phes(
     tot_p: nbfloat,
     tot_e: nbfloat,
     e_aa_max: nbfloat,
-    p_aa_max: nbfloat,
-    p_e_max: nbfloat,
 ) -> tuple[nbfloat, nbfloat, nbfloat, nbfloat]:
     """
     Allocates new-build PHES energy to Class AA first (up to e_aa_max), with residual
-    to Class E. Apportions power at equal storage duration, clamped to individual
-    class power bounds [p_aa_max, p_e_max] so neither class exceeds its max_build_p.
+    to Class E. Apportions power strictly at equal storage duration.
+    Note: where power capacity expansion potential assumptions differ between AA and E,
+    the apportionment of power may lead to infeasible solutions.
     """
     e_aa = min(tot_e, e_aa_max)
     e_e = max(npfloat(0.0), tot_e - e_aa)
 
     if tot_e > npfloat(0.0):
-        raw_p_aa = tot_p * (e_aa / tot_e)
+        aa_frac = e_aa / tot_e
+        p_aa = tot_p * aa_frac
+        p_e = tot_p - p_aa
     else:
-        raw_p_aa = tot_p if e_aa_max > npfloat(0.0) else npfloat(0.0)
-
-    min_p_aa = max(npfloat(0.0), tot_p - p_e_max)
-    max_p_aa = min(tot_p, p_aa_max)
-    p_aa = min(max(raw_p_aa, min_p_aa), max_p_aa)
-    p_e = tot_p - p_aa
+        if e_aa_max > npfloat(0.0):
+            p_aa, p_e = tot_p, npfloat(0.0)
+        else:
+            p_aa, p_e = npfloat(0.0), tot_p
 
     return p_aa, e_aa, p_e, e_e
 

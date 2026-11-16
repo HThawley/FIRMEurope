@@ -159,9 +159,7 @@ def CalculateCost(
 
         # Apportion new-build PHES into AA and E
         # Class AA and class E have equal storage duration - class AA built until Energy limit
-        p_aa, e_aa, p_e, e_e = apportion_new_phes(
-            a.CnphP[n], a.CnphE[n], c.E_aa_max[n], c.P_aa_max[n], c.P_e_max[n]
-        )
+        p_aa, e_aa, p_e, e_e = apportion_new_phes(a.CnphP[n], a.CnphE[n], c.E_aa_max[n])
 
         # Apportion closed-loop PHES discharge (s=1) across clphes, aa_phes, and e_phes by power capacity
         tot_s1_dis = solution.nodal_aaph_gen[n]

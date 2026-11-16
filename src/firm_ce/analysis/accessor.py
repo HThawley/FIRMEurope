@@ -1,11 +1,10 @@
-import numpy as np
 from typing import Any
+import numpy as np
 from numpy.typing import NDArray
 
-from firm_ce.common.typing import npfloat
-from firm_ce.common.helpers import safe_divide_array
 from firm_ce.common.constants import TOLERANCE
-
+from firm_ce.common.helpers import safe_divide_array
+from firm_ce.common.typing import npfloat
 
 asset_class_to_display = {
     "generators": "Generator",
@@ -16,8 +15,30 @@ asset_class_to_display = {
     "fuels": "Fuel",
 }
 
+_CAP_ATTR_MAP = {
+    ("generator", "power", "total"): "capacity",
+    ("generator", "power", "new"): "new_build",
+    ("generator", "power", "existing"): "initial_capacity",
+    ("generator", "power", "min"): "min_build",
+    ("generator", "power", "max"): "max_build",
+    ("line", "power", "total"): "capacity",
+    ("line", "power", "new"): "new_build",
+    ("line", "power", "existing"): "initial_capacity",
+    ("line", "power", "min"): "min_build",
+    ("line", "power", "max"): "max_build",
+    ("storage", "power", "total"): "power_capacity",
+    ("storage", "power", "new"): "new_build_p",
+    ("storage", "power", "existing"): "initial_power_capacity",
+    ("storage", "power", "min"): "min_build_p",
+    ("storage", "power", "max"): "max_build_p",
+    ("storage", "energy", "total"): "energy_capacity",
+    ("storage", "energy", "new"): "new_build_e",
+    ("storage", "energy", "existing"): "initial_energy_capacity",
+    ("storage", "energy", "min"): "min_build_e",
+    ("storage", "energy", "max"): "max_build_e",
+}
 
-# --- Data Retrievers ---
+
 class Accessor:
     def __init__(self, solution, units=1.0):
         self.solution = solution
@@ -54,6 +75,18 @@ class Accessor:
             "line_use": (self._line_use_trace_single, ("major_lines",)),
         }
 
+    def __getattr__(self, name: str):
+        """Dynamically resolves `get_<metric>_trace` and `get_<metric>_gross` calls."""
+        if name.startswith("get_") and name.endswith("_trace"):
+            metric = name[4:-6]
+            if metric in self._trace_registry:
+                return lambda asset="system": self.get_trace(metric, asset)
+        if name.startswith("get_") and name.endswith("_gross"):
+            metric = name[4:-6]
+            if metric in self._trace_registry:
+                return lambda asset="system": self.get_gross(metric, asset)
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
     def update_units(self, units: Any):
         if isinstance(units, str):
             match units.lower():
@@ -77,7 +110,7 @@ class Accessor:
 
     @staticmethod
     def is_system(asset: Any) -> bool:
-        return (isinstance(asset, str) and asset.lower() == "system")
+        return isinstance(asset, str) and asset.lower() == "system"
 
     @staticmethod
     def is_flexible(asset: Any) -> bool:
@@ -135,14 +168,9 @@ class Accessor:
     def is_node(asset: Any) -> bool:
         return getattr(asset, "object_class", None) == "node"
 
-    @staticmethod
-    def get_zero(*args) -> float:
-        return 0.0
-
     # -- Objects --
     @staticmethod
     def get_assets_from_solution(solution, asset_class: str, errors: str = "raise") -> dict[str, Any]:
-        """Static method version of get_assets."""
         match asset_class:
             case "generators" | "storages" | "fuels":
                 return getattr(solution.fleet, asset_class)
@@ -152,207 +180,118 @@ class Accessor:
                 return _handle_errors(errors, f"Unknown asset class for asset retrieval: {asset_class}")
 
     def get_assets(self, asset_class: str, errors: str = "raise") -> dict[str, Any]:
-        """Returns the assets for a given asset class."""
         return self.get_assets_from_solution(self.solution, asset_class, errors=errors)
 
     @staticmethod
     def get_display_name(asset_class: str) -> str:
         return asset_class_to_display.get(asset_class, asset_class)
 
-    # -- Capacity --
+    # -- Unified Capacity & Build Retrieval --
     @staticmethod
-    def get_power_capacity(asset: Any, errors: str = "raise") -> float:
-        """Safe retrieval of installed capacity in GW."""
-        match asset.object_class:
-            case "generator" | "line":
-                return asset.capacity
-            case "storage":
-                return asset.power_capacity
-            case _:
-                return _handle_errors(
-                    errors, f"Unknown asset type for capacity retrieval: {asset.name} ({asset.object_class})"
-                )
+    def _lookup_cap(asset: Any, kind: str, build: str = "total", errors: str = "raise") -> float:
+        key = (getattr(asset, "object_class", None), kind.lower(), build.lower())
+        attr = _CAP_ATTR_MAP.get(key)
+        if attr is not None:
+            return getattr(asset, attr)
+        return _handle_errors(
+            errors,
+            f"Asset '{getattr(asset, 'name', asset)}' ({getattr(asset, 'object_class', None)}) "
+            f"does not support {build} {kind} capacity.",
+        )
 
-    @staticmethod
-    def get_energy_capacity(asset: Any, errors: str = "raise") -> float:
-        """Safe retrieval of installed capacity in GWh."""
-        match asset.object_class:
-            case "generator" | "line":
-                return _handle_errors(
-                    errors, f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity."
-                )
-            case "storage":
-                return asset.energy_capacity
-            case _:
-                return _handle_errors(
-                    errors, f"Unknown asset type for capacity retrieval: {asset.name} ({asset.object_class})"
-                )
+    @classmethod
+    def get_power_capacity(cls, asset: Any, errors: str = "raise") -> float:
+        return cls._lookup_cap(asset, "power", "total", errors)
 
-    def get_capacity(self, asset: Any, attribute: str, errors: str = "raise") -> float:
-        """Safe retrieval of installed capacity in GW / GWh."""
-        match attribute.lower():
-            case "power":
-                return self.get_power_capacity(asset, errors=errors)
-            case "energy":
-                return self.get_energy_capacity(asset, errors=errors)
-            case _:
-                return _handle_errors(errors, f"Unknown attribute for capacity retrieval: '{attribute}'")
+    @classmethod
+    def get_energy_capacity(cls, asset: Any, errors: str = "raise") -> float:
+        return cls._lookup_cap(asset, "energy", "total", errors)
 
-    @staticmethod
-    def get_new_build_power(asset: Any, errors: str = "raise") -> float:
-        """Safe retrieval of new build capacity in GW."""
-        match asset.object_class:
-            case "generator" | "line":
-                return asset.new_build
-            case "storage":
-                return asset.new_build_p
-            case _:
-                return _handle_errors(
-                    errors, f"Unknown asset type for new_build (power) retrieval: {asset.name} ({asset.object_class})"
-                )
+    @classmethod
+    def get_capacity(cls, asset: Any, attribute: str, build: str = "total", errors: str = "raise") -> float:
+        b_norm = {"all": "total", "none": "total", "new_build": "new", "initial": "existing"}.get(
+            build.lower(), build.lower()
+        )
+        return cls._lookup_cap(asset, attribute, b_norm, errors)
 
-    @staticmethod
-    def get_new_build_energy(asset: Any, errors: str = "raise") -> float:
-        """Safe retrieval of new build capacity in GWh."""
-        match asset.object_class:
-            case "generator" | "line":
-                return _handle_errors(
-                    errors, f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity."
-                )
-            case "storage":
-                return asset.new_build_e
-            case _:
-                return _handle_errors(
-                    errors, f"Unknown asset type for new_build (energy) retrieval: {asset.name} ({asset.object_class})"
-                )
+    @classmethod
+    def get_new_build_power(cls, asset: Any, errors: str = "raise") -> float:
+        return cls._lookup_cap(asset, "power", "new", errors)
 
-    def get_new_build_capacity(self, asset: Any, attribute: str, errors: str = "raise") -> float:
-        """Safe retrieval of new build capacity in GW / GWh."""
-        match attribute.lower():
-            case "power":
-                return self.get_new_build_power(asset, errors=errors)
-            case "energy":
-                return self.get_new_build_energy(asset, errors=errors)
-            case _:
-                return _handle_errors(errors, f"Unknown attribute for capacity retrieval: {attribute}")
+    @classmethod
+    def get_new_build_energy(cls, asset: Any, errors: str = "raise") -> float:
+        return cls._lookup_cap(asset, "energy", "new", errors)
 
-    @staticmethod
-    def get_existing_power_capacity(asset: Any, errors: str = "raise") -> float:
-        match asset.object_class:
-            case "generator" | "line":
-                return asset.initial_capacity
-            case "storage":
-                return asset.initial_power_capacity
-            case _:
-                return _handle_errors(
-                    errors,
-                    f"Unknown asset type for existing capacity (power) retrieval: {asset.name} ({asset.object_class})",
-                )
+    @classmethod
+    def get_new_build_capacity(cls, asset: Any, attribute: str, errors: str = "raise") -> float:
+        return cls._lookup_cap(asset, attribute, "new", errors)
 
-    @staticmethod
-    def get_existing_energy_capacity(asset: Any, errors: str = "raise") -> float:
-        match asset.object_class:
-            case "generator" | "line":
-                return _handle_errors(
-                    errors, f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity."
-                )
-            case "storage":
-                return asset.initial_energy_capacity
-            case _:
-                return _handle_errors(
-                    errors,
-                    f"Unknown asset type for existing capacity (energy) retrieval: {asset.name} ({asset.object_class})",
-                )
+    @classmethod
+    def get_existing_power_capacity(cls, asset: Any, errors: str = "raise") -> float:
+        return cls._lookup_cap(asset, "power", "existing", errors)
 
-    def get_existing_capacity(self, asset: Any, attribute: str, errors: str = "raise") -> float:
-        match attribute.lower():
-            case "power":
-                return self.get_existing_power_capacity(asset, errors=errors)
-            case "energy":
-                return self.get_existing_energy_capacity(asset, errors=errors)
-            case _:
-                return _handle_errors(errors, f"Unknown attribute for capacity retrieval: '{attribute}'")
+    @classmethod
+    def get_existing_energy_capacity(cls, asset: Any, errors: str = "raise") -> float:
+        return cls._lookup_cap(asset, "energy", "existing", errors)
 
-    @staticmethod
-    def get_build_power(asset: Any, errors: str = "raise") -> tuple[float, float, float, float]:
-        """Returns the build limits for power capacity (existing, new_build, min_build, max_build)."""
-        match asset.object_class:
-            case "generator" | "line":
-                return asset.initial_capacity, asset.new_build, asset.min_build, asset.max_build
-            case "storage":
-                return asset.initial_power_capacity, asset.new_build_p, asset.min_build_p, asset.max_build_p
-            case _:
-                return _handle_errors(
-                    errors,
-                    f"Unknown asset type for build limits (power) retrieval: {asset.name} ({asset.object_class})",
-                    (np.nan, np.nan, np.nan, np.nan),
-                )
+    @classmethod
+    def get_existing_capacity(cls, asset: Any, attribute: str, errors: str = "raise") -> float:
+        return cls._lookup_cap(asset, attribute, "existing", errors)
 
-    @staticmethod
-    def get_build_energy(asset: Any, errors: str = "raise") -> tuple[float, float, float, float]:
-        """Returns the build limits for energy capacity (existing, new_build, min_build, max_build)."""
-        match asset.object_class:
-            case "storage":
-                return asset.initial_energy_capacity, asset.new_build_e, asset.min_build_e, asset.max_build_e
-            case "generator" | "line":
-                return _handle_errors(
-                    errors,
-                    f"Asset: {asset.name} ({asset.object_class}) does not have energy capacity.",
-                    (np.nan, np.nan, np.nan, np.nan),
-                )
-            case _:
-                return _handle_errors(
-                    errors,
-                    f"Unknown asset type for build limits (energy) retrieval: {asset.name} ({asset.object_class})",
-                    (np.nan, np.nan, np.nan, np.nan),
-                )
+    @classmethod
+    def get_build(cls, asset: Any, attribute: str, errors: str = "raise") -> tuple[float, float, float, float]:
+        """Returns (existing, new_build, min_build, max_build) for 'power' or 'energy'."""
+        kind = attribute.lower()
+        if (getattr(asset, "object_class", None), kind, "total") not in _CAP_ATTR_MAP:
+            return _handle_errors(
+                errors,
+                f"Asset: {getattr(asset, 'name', asset)} ({getattr(asset, 'object_class', None)}) "
+                f"does not have {kind} build limits.",
+                (np.nan, np.nan, np.nan, np.nan),
+            )
+        return (
+            cls._lookup_cap(asset, kind, "existing", errors),
+            cls._lookup_cap(asset, kind, "new", errors),
+            cls._lookup_cap(asset, kind, "min", errors),
+            cls._lookup_cap(asset, kind, "max", errors),
+        )
 
-    def get_build(self, asset: Any, attribute: str, errors: str = "raise") -> tuple[float, float, float, float]:
-        """Returns the build limits for capacity (existing, new_build, min_build, max_build)."""
-        match attribute.lower():
-            case "power":
-                return self.get_build_power(asset, errors=errors)
-            case "energy":
-                return self.get_build_energy(asset, errors=errors)
-            case _:
-                return _handle_errors(errors, f"Unknown attribute for build limits retrieval: '{attribute}'")
+    @classmethod
+    def get_build_power(cls, asset: Any, errors: str = "raise") -> tuple[float, float, float, float]:
+        return cls.get_build(asset, "power", errors=errors)
 
+    @classmethod
+    def get_build_energy(cls, asset: Any, errors: str = "raise") -> tuple[float, float, float, float]:
+        return cls.get_build(asset, "energy", errors=errors)
+
+    # -- Costs --
     @staticmethod
     def get_annualised_build_cost(asset: Any, errors: str = "raise") -> float:
-        """Safe retrieval of total annualised capital costs (Power + Energy)."""
         if hasattr(asset, "lt_costs"):
-            p_cost = getattr(asset.lt_costs, "annualised_build_p", 0.0)
-            e_cost = getattr(asset.lt_costs, "annualised_build_e", 0.0)
-            return p_cost + e_cost
-
+            return getattr(asset.lt_costs, "annualised_build_p", 0.0) + getattr(
+                asset.lt_costs, "annualised_build_e", 0.0
+            )
         return _handle_errors(errors, f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
 
     @staticmethod
     def get_fixed_om_cost(asset: Any, errors: str = "raise") -> float:
-        """Safe retrieval of fixed operations & maintenance costs."""
         if hasattr(asset, "lt_costs"):
             return getattr(asset.lt_costs, "fom", 0.0)
-
         return _handle_errors(errors, f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
 
     @staticmethod
     def get_variable_om_cost(asset: Any, errors: str = "raise") -> float:
-        """Safe retrieval of variable operations & maintenance costs."""
         if hasattr(asset, "lt_costs"):
             return getattr(asset.lt_costs, "vom", 0.0)
-
         return _handle_errors(errors, f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
 
     @staticmethod
     def get_fuel_cost(asset: Any, errors: str = "raise") -> float:
-        """Safe retrieval of total fuel costs."""
         if hasattr(asset, "lt_costs"):
             return getattr(asset.lt_costs, "fuel", 0.0)
-
         return _handle_errors(errors, f"Asset {asset.name} ({asset.object_class}) does not have 'lt_costs'.")
 
     def get_all_costs(self, asset: Any, errors: str = "raise") -> dict[str, float]:
-        """Returns a dictionary containing all standard long-term costs for an asset."""
         return {
             "Annualised Build": self.get_annualised_build_cost(asset, errors=errors),
             "Fixed O&M": self.get_fixed_om_cost(asset, errors=errors),
@@ -360,7 +299,7 @@ class Accessor:
             "Fuel Cost": self.get_fuel_cost(asset, errors=errors),
         }
 
-    # -- Other static attributes --
+    # -- Efficiencies --
     @staticmethod
     def get_charge_efficiency(asset: Any) -> float:
         _check_asset_has_attr(asset, "charge_efficiency")
@@ -395,9 +334,7 @@ class Accessor:
                     case "round":
                         return self.get_round_efficiency(asset)
                     case _:
-                        raise ValueError(
-                            "Cannot retrieve efficiency of storage object. Supply attribute (charge, discharge, round)."
-                        )
+                        raise ValueError("Supply attribute ('charge', 'discharge', 'round') for storage efficiency.")
             case _:
                 raise ValueError(f"Unknown asset type for efficiency retrieval: {asset.name} ({asset.object_class})")
 
@@ -409,21 +346,14 @@ class Accessor:
         return np.zeros(self.solution.static.intervals_count, dtype=npfloat)
 
     def _trace_to_gross(self, trace: NDArray[npfloat]) -> npfloat:
-        """Returns the total energy (xWh) or volume for a given time series."""
         return np.sum(trace) * self.resolution
 
     def get_trace(self, metric: str, asset: Any = "system") -> NDArray[npfloat]:
-        """
-        Universal time-series dispatcher.
-        `asset` can be an individual asset (Generator, Storage, Line, Fuel),
-        a `Node` object, or `"system"`.
-        """
         if metric not in self._trace_registry:
             raise ValueError(f"Unknown trace metric: '{metric}'. Valid options: {list(self._trace_registry.keys())}")
 
         single_fn, agg_classes = self._trace_registry[metric]
 
-        # System-wide ("system") scope
         if self.is_system(asset):
             if agg_classes is None:
                 raise ValueError(f"Metric '{metric}' cannot be aggregated to the system level.")
@@ -433,26 +363,19 @@ class Accessor:
                     total += single_fn(a)
             return total
 
-        # 2. Nodal scope
         if self.is_node(asset):
             if agg_classes is None or "nodes" in agg_classes:
                 return single_fn(asset)
             if any(cls in ("major_lines", "minor_lines", "fuels") for cls in agg_classes):
                 raise ValueError(f"Metric '{metric}' is defined on {agg_classes} and cannot be aggregated by Node.")
-
             total = self._zeros()
             for a in self._get_assets_at_node_cached(asset.id, agg_classes):
                 total += single_fn(a)
             return total
 
-        # 3. Single asset scope
         return single_fn(asset)
 
     def get_gross(self, metric: str, asset: Any = "system") -> npfloat:
-        """
-        Universal gross energy dispatcher (xWh).
-        Integrates `get_trace(metric, asset)` over the simulation period.
-        """
         if metric in ("storage_level", "remaining_energy", "retention"):
             raise ValueError(f"Metric '{metric}' is a state/ratio trace and cannot be integrated to gross energy.")
         return self._trace_to_gross(self.get_trace(metric, asset))
@@ -467,10 +390,9 @@ class Accessor:
                 if self.is_flexible(asset):
                     _check_asset_has_attr(asset, "dispatch_power")
                     return asset.dispatch_power * self.factor
-                else:
-                    _check_asset_has_attr(asset, "data")
-                    _check_asset_has_attr(asset, "capacity")
-                    return asset.data * asset.capacity * self.factor
+                _check_asset_has_attr(asset, "data")
+                _check_asset_has_attr(asset, "capacity")
+                return asset.data * asset.capacity * self.factor
             case "storage":
                 _check_asset_has_attr(asset, "dispatch_power")
                 return asset.dispatch_power * self.factor
@@ -481,45 +403,37 @@ class Accessor:
                 raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not support power trace.")
 
     def _dispatch_trace_single(self, asset: Any) -> NDArray[npfloat]:
-        """Positive power output from either a generator or a storage asset."""
         if not (self.is_generator(asset) or self.is_storage(asset)):
             raise ValueError(f"Asset {asset.name} ({asset.object_class}) is neither a Generator nor a Storage.")
         return np.maximum(0.0, self._power_trace_single(asset))
 
     def _generation_trace_single(self, asset: Any) -> NDArray[npfloat]:
-        """Positive power output strictly from a generator."""
         if not self.is_generator(asset):
             raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Generator.")
         return np.maximum(0.0, self._power_trace_single(asset))
 
     def _discharge_trace_single(self, asset: Any) -> NDArray[npfloat]:
-        """Positive power output strictly from a storage asset."""
         if not self.is_storage(asset):
             raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Storage.")
         return np.maximum(0.0, self._power_trace_single(asset))
 
     def _charge_trace_single(self, asset: Any) -> NDArray[npfloat]:
-        """Negative power component (charging load <= 0) strictly for a storage asset."""
         if not self.is_storage(asset):
             raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Storage.")
         return np.minimum(0.0, self._power_trace_single(asset))
 
     def _charge_loss_trace_single(self, asset: Any) -> NDArray[npfloat]:
-        """Thermodynamic power lost while charging (xW >= 0)."""
         eff = self.get_charge_efficiency(asset)
         return (1.0 - eff) * np.abs(self._charge_trace_single(asset))
 
     def _discharge_loss_trace_single(self, asset: Any) -> NDArray[npfloat]:
-        """Thermodynamic power lost while discharging (xW >= 0)."""
         eff = self.get_discharge_efficiency(asset)
         return (1.0 / eff - 1.0) * self._discharge_trace_single(asset)
 
     def _storage_loss_trace_single(self, asset: Any) -> NDArray[npfloat]:
-        """Total thermodynamic power loss (charging + discharging, xW >= 0)."""
         return self._charge_loss_trace_single(asset) + self._discharge_loss_trace_single(asset)
 
     def _inflow_trace_single(self, asset: Any) -> NDArray[npfloat]:
-        """Inflow power equivalent (xW) for reservoir storages."""
         if not self.is_storage(asset):
             raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Storage.")
         if not self.has_inflows(asset):
@@ -528,21 +442,19 @@ class Accessor:
         return asset.data * self.factor / self.resolution
 
     def _storage_level_trace_single(self, asset: Any) -> NDArray[npfloat]:
-        """Stored energy time series (xWh) at the end of each interval."""
         if not self.is_storage(asset):
             raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Storage.")
         _check_asset_has_attr(asset, "stored_energy")
         return asset.stored_energy * self.factor
 
     def _spillage_trace_single(self, asset: Any) -> NDArray[npfloat]:
-        """Spilled inflow power time series (xW) for a storage asset."""
         if not self.is_storage(asset):
             raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Storage.")
         if not self.has_inflows(asset):
             return self._zeros()
 
-        inflows = self._inflow_trace_single(asset) * self.resolution  # xWh
-        stored = self._storage_level_trace_single(asset)  # xWh (end of interval)
+        inflows = self._inflow_trace_single(asset) * self.resolution
+        stored = self._storage_level_trace_single(asset)
 
         delta_e = np.empty_like(stored)
         initial_soc = 0.5 * self.get_energy_capacity(asset) * self.factor
@@ -583,7 +495,6 @@ class Accessor:
         return asset.deficits * self.factor
 
     def _net_flow_trace_single(self, asset: Any) -> NDArray[npfloat]:
-        """Positive = Net Import, Negative = Net Export."""
         if not self.is_node(asset):
             raise ValueError(f"Asset {asset.name} ({asset.object_class}) is not a Node.")
         _check_asset_has_attr(asset, "imports_exports")
@@ -663,155 +574,6 @@ class Accessor:
         return gen_trace * retention_trace
 
     # =========================================================================
-    # --- Convenience Trace & Gross Wrappers ---
-    # =========================================================================
-
-    def get_power_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("power", asset)
-
-    def get_dispatch_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("dispatch", asset)
-
-    def get_generation_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("generation", asset)
-
-    def get_discharge_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("discharge", asset)
-
-    def get_charge_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("charge", asset)
-
-    def get_charge_loss_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("charge_loss", asset)
-
-    def get_discharge_loss_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("discharge_loss", asset)
-
-    def get_storage_loss_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("storage_loss", asset)
-
-    def get_inflow_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("inflow", asset)
-
-    def get_spillage_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("spillage", asset)
-
-    def get_storage_level_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("storage_level", asset)
-
-    def get_remaining_energy_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("remaining_energy", asset)
-
-    def get_demand_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("demand", asset)
-
-    def get_deficit_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("deficit", asset)
-
-    def get_curtail_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("curtail", asset)
-
-    def get_net_flow_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("net_flow", asset)
-
-    def get_import_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("import", asset)
-
-    def get_export_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("export", asset)
-
-    def get_retention_trace(self, node: Any) -> NDArray[npfloat]:
-        return self.get_trace("retention", node)
-
-    def get_nominal_curtailment_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("nominal_curtailment", asset)
-
-    def get_expected_curtailment_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("expected_curtailment", asset)
-
-    def get_post_curtailment_power_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("post_curtailment_power", asset)
-
-    def get_local_consumption_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("local_consumption", asset)
-
-    def get_transmission_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("transmission", asset)
-
-    def get_line_loss_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("line_loss", asset)
-
-    def get_line_use_trace(self, asset: Any = "system") -> NDArray[npfloat]:
-        return self.get_trace("line_use", asset)
-
-    # -- Gross Energy Wrappers --
-    def get_power_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("power", asset)
-
-    def get_dispatch_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("dispatch", asset)
-
-    def get_generation_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("generation", asset)
-
-    def get_discharge_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("discharge", asset)
-
-    def get_charge_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("charge", asset)
-
-    def get_charge_loss_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("charge_loss", asset)
-
-    def get_discharge_loss_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("discharge_loss", asset)
-
-    def get_storage_loss_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("storage_loss", asset)
-
-    def get_inflow_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("inflow", asset)
-
-    def get_spillage_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("spillage", asset)
-
-    def get_demand_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("demand", asset)
-
-    def get_deficit_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("deficit", asset)
-
-    def get_curtail_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("curtail", asset)
-
-    def get_import_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("import", asset)
-
-    def get_export_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("export", asset)
-
-    def get_nominal_curtailment_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("nominal_curtailment", asset)
-
-    def get_expected_curtailment_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("expected_curtailment", asset)
-
-    def get_post_curtailment_power_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("post_curtailment_power", asset)
-
-    def get_local_consumption_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("local_consumption", asset)
-
-    def get_transmission_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("transmission", asset)
-
-    def get_line_loss_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("line_loss", asset)
-
-    def get_line_use_gross(self, asset: Any = "system") -> npfloat:
-        return self.get_gross("line_use", asset)
-
-    # =========================================================================
     # --- Internal Curtailment & Caching Helpers ---
     # =========================================================================
 
@@ -836,21 +598,16 @@ class Accessor:
         if cache_key in self._curtailment_cache:
             return self._curtailment_cache[cache_key]
 
-        assets = []
-        for asset_class in asset_classes:
-            for asset in self.get_assets(asset_class).values():
-                if asset.node.id == node_id:
-                    assets.append(asset)
-
+        assets = [
+            asset
+            for asset_class in asset_classes
+            for asset in self.get_assets(asset_class).values()
+            if asset.node.id == node_id
+        ]
         self._curtailment_cache[cache_key] = assets
         return assets
 
     def _compute_nodal_tier_data(self, node: Any) -> tuple[dict, dict]:
-        """
-        Calculates dispatch and allocated curtailment for each priority tier at a node.
-        Returns:
-            (tier_dispatch_traces, tier_curtailment_traces)
-        """
         cache_key = f"tier_data_{node.id}"
         if cache_key in self._curtailment_cache:
             return self._curtailment_cache[cache_key]
@@ -862,16 +619,15 @@ class Accessor:
         tier_gen = {1: zeros.copy(), 2: zeros.copy(), 3: zeros.copy(), 4: zeros.copy()}
 
         for asset in assets:
-            tier = self._get_asset_tier(asset)
-            tier_gen[tier] += self._dispatch_trace_single(asset)
+            tier_gen[self._get_asset_tier(asset)] += self._dispatch_trace_single(asset)
 
         tier_curtailment = {}
         remaining_curtail = curtail.copy()
 
         for tier in range(1, 5):
-            allocated_curtailment = np.minimum(remaining_curtail, tier_gen[tier])
-            tier_curtailment[tier] = allocated_curtailment
-            remaining_curtail -= allocated_curtailment
+            allocated = np.minimum(remaining_curtail, tier_gen[tier])
+            tier_curtailment[tier] = allocated
+            remaining_curtail -= allocated
 
         if np.any(remaining_curtail > self.tolerance):
             bad_idx = int(np.argmax(remaining_curtail))
@@ -885,8 +641,7 @@ class Accessor:
         return result
 
 
-# -- General Utility Helpers --
-def _check_asset_has_attr(asset: Any, attr: str, raise_if_missing: bool = True):
+def _check_asset_has_attr(asset: Any, attr: str, raise_if_missing: bool = True) -> bool:
     if not hasattr(asset, attr):
         if raise_if_missing:
             raise ValueError(f"Asset {asset.name} ({asset.object_class}) does not have '{attr}' attribute.")
@@ -894,7 +649,7 @@ def _check_asset_has_attr(asset: Any, attr: str, raise_if_missing: bool = True):
     return True
 
 
-def _check_asset_has_data(asset: Any, raise_if_missing: bool = True):
+def _check_asset_has_data(asset: Any, raise_if_missing: bool = True) -> bool:
     _check_asset_has_attr(asset, "data", raise_if_missing=raise_if_missing)
     if not asset.data_status:
         if raise_if_missing:
@@ -906,6 +661,6 @@ def _check_asset_has_data(asset: Any, raise_if_missing: bool = True):
 def _handle_errors(errors: str, message: str, coerce_value=np.nan):
     if errors == "raise":
         raise ValueError(message)
-    elif errors == "coerce":
+    if errors == "coerce":
         return coerce_value
     raise ValueError(f"Unknown error handling method. Expected 'raise' or 'coerce'. Got: {errors}")

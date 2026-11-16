@@ -290,7 +290,7 @@ def plot_heatmaps(
 
     # Pairwise trade-off grid with Pareto frontier
     scenario.explorer.plot_pairgrid(
-        vars=["solar", "wind", "nuke_all", "nphes_e", "trans"],
+        vars=["solar", "wind", "nuke_all", "new_phes_e", "trans"],
         z="ocgt",
         agg="min",
         space="rel",
@@ -301,7 +301,7 @@ def plot_heatmaps(
 
     # Pairwise trade-off grid with Pareto frontier
     scenario.explorer.plot_pairgrid(
-        vars=["solar", "wind", "nuke_all", "nphes_e", "trans"],
+        vars=["solar", "wind", "nuke_all", "new_phes_e", "trans"],
         z="ocgt",
         agg="min",
         space="rel",
@@ -389,7 +389,7 @@ def plot_behaviours(scenario, idx: int = 0):
     behav.plot_daily_average(
         technologies="all",
         periods=["winter", "summer"],
-        nodes=["DEU", "FRA"],
+        nodes=["DEU", "CHE"],
         include_demand=True,
         include_curtailment=True,
     )
@@ -452,7 +452,7 @@ def plot_behaviours(scenario, idx: int = 0):
     #    Panel 2: Time-of-day % of fleet online
     #    Panel 3: Time-of-day average output while online (solid) vs unconditional (dashed)
     behav.plot_capacity_factors(
-        technologies=["nphes", "hydro", "ocgt"],
+        technologies=["new_phes", "hydro", "ocgt"],
         periods="all",
         assets=("generators", "storages"),
         group_by="subtech",
@@ -477,13 +477,13 @@ def plot_behaviours(scenario, idx: int = 0):
 
 
 if __name__ == "__main__":
-    RUN_MODE = r"results\firmeur_newcosts_20261105_135758"
+    RUN_MODE = r"results\firmeur_test_20261113_144908"
 
     start_time = time.time()
     model = Model(model_location=RUN_MODE)
     print(f"Model build time: {time.time() - start_time:.4f} seconds")
 
-    for name in ("7percent",):
+    for name in ("test",):
         scenario = model.scenarios[name]
         scenario.load_datafiles()
 
@@ -496,6 +496,14 @@ if __name__ == "__main__":
             # indices = [0]
         # raise KeyboardInterrupt
         build_and_evaluate_solutions(scenario, xs=xs, mhmga_indices=indices)
+
+        run_statistics(scenario, write=True)
+
+        # quick hack
+        nopt = scenario.noptimaTensors[0].lcoe
+        dup_mask = np.isclose([n.lcoe for n in scenario.noptimaTensors], nopt, rtol=1e-6)
+        scenario.noptima = [n for n, dup in zip(scenario.noptima, dup_mask) if not dup]
+        scenario.noptimaTensors = [n for n, dup in zip(scenario.noptimaTensors, dup_mask) if not dup]
 
         # run_statistics(scenario, write=True)
         run_cost_monte_carlo(scenario, n_samples=10_000, rel_halfwidth=0.2)

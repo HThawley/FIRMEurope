@@ -3,6 +3,7 @@ from typing import Callable, Dict, List, Literal, Sequence, Union
 
 AssetClass = Literal["generators", "storages", "major_lines"]
 MetricType = Literal[
+    "none",
     "power_capacity",
     "energy_capacity",
     "dispatch",

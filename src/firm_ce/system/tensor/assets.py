@@ -61,84 +61,87 @@ class AssetTensor:
         self.CstorageE = static.EstorageE.copy()
         self.Clines = static.Elines.copy()
 
+        rel = static.relative_param
+        scaler = static.abs_rel_scaler
+
         for i in range(static.pfix_len):
             x_idx = static.pfix_offset + i
             node_idx = static.pfix_nodes[i]
-            self.Cpfix[node_idx] += x[x_idx] * static.abs_rel_scaler[x_idx]
+            self.Cpfix[node_idx] += x[x_idx] * (scaler[x_idx] if rel else npfloat(1.0))
 
         for i in range(static.psat_len):
             x_idx = static.psat_offset + i
             node_idx = static.psat_nodes[i]
-            self.Cpsat[node_idx] += x[x_idx] * static.abs_rel_scaler[x_idx]
+            self.Cpsat[node_idx] += x[x_idx] * (scaler[x_idx] if rel else npfloat(1.0))
 
         for i in range(static.offw_len):
             x_idx = static.offw_offset + i
             node_idx = static.offw_nodes[i]
-            self.Coffw[node_idx] += x[x_idx] * static.abs_rel_scaler[x_idx]
+            self.Coffw[node_idx] += x[x_idx] * (scaler[x_idx] if rel else npfloat(1.0))
 
         for i in range(static.onsw_len):
             x_idx = static.onsw_offset + i
             node_idx = static.onsw_nodes[i]
-            self.Consw[node_idx] += x[x_idx] * static.abs_rel_scaler[x_idx]
+            self.Consw[node_idx] += x[x_idx] * (scaler[x_idx] if rel else npfloat(1.0))
 
         for i in range(static.biog_len):
             x_idx = static.biog_offset + i
             node_idx = static.biog_nodes[i]
-            self.Cpeak[node_idx, 1] += x[x_idx] * static.abs_rel_scaler[x_idx]
+            self.Cpeak[node_idx, 1] += x[x_idx] * (scaler[x_idx] if rel else npfloat(1.0))
 
         for i in range(static.biom_len):
             x_idx = static.biom_offset + i
             node_idx = static.biom_nodes[i]
-            self.Cpeak[node_idx, 0] += x[x_idx] * static.abs_rel_scaler[x_idx]
+            self.Cpeak[node_idx, 0] += x[x_idx] * (scaler[x_idx] if rel else npfloat(1.0))
 
         for i in range(static.ocgt_len):
             x_idx = static.ocgt_offset + i
             node_idx = static.ocgt_nodes[i]
-            self.Cpeak[node_idx, 2] += x[x_idx] * static.abs_rel_scaler[x_idx]
+            self.Cpeak[node_idx, 2] += x[x_idx] * (scaler[x_idx] if rel else npfloat(1.0))
 
         for i in range(static.nuke_len):
             x_idx = static.nuke_offset + i
             node_idx = static.nuke_nodes[i]
-            self.Cnuke[node_idx] += x[x_idx] * static.abs_rel_scaler[x_idx]
+            self.Cnuke[node_idx] += x[x_idx] * (scaler[x_idx] if rel else npfloat(1.0))
 
         for i in range(static.nlte_len):
             x_idx = static.nlte_offset + i
             node_idx = static.nlte_nodes[i]
-            _cap = x[x_idx] * static.abs_rel_scaler[x_idx]
+            _cap = x[x_idx] * (scaler[x_idx] if rel else npfloat(1.0))
             self.Cnuke[node_idx] += _cap
             self.Cnlte[node_idx] += _cap
 
         for i in range(static.php_len):
             x_idx = static.php_offset + i
             node_idx = static.php_nodes[i]
-            _cap = x[x_idx] * static.abs_rel_scaler[x_idx]
+            _cap = x[x_idx] * (scaler[x_idx] if rel else npfloat(1.0))
             self.CnphP[node_idx] = _cap
             self.CstorageP[node_idx, 1] += _cap
 
         for i in range(static.b4p_len):
             x_idx = static.b4p_offset + i
             node_idx = static.b4p_nodes[i]
-            _cap = x[x_idx] * static.abs_rel_scaler[x_idx]
+            _cap = x[x_idx] * (scaler[x_idx] if rel else npfloat(1.0))
             self.CstorageP[node_idx, 2] += _cap
             self.CstorageE[node_idx, 2] += 4.0 * _cap
 
         for i in range(static.b2p_len):
             x_idx = static.b2p_offset + i
             node_idx = static.b2p_nodes[i]
-            _cap = x[x_idx] * static.abs_rel_scaler[x_idx]
+            _cap = x[x_idx] * (scaler[x_idx] if rel else npfloat(1.0))
             self.CstorageP[node_idx, 3] += _cap
             self.CstorageE[node_idx, 3] += 2.0 * _cap
 
         for i in range(static.phe_len):
             x_idx = static.phe_offset + i
             node_idx = static.phe_nodes[i]
-            _cap = x[x_idx] * static.abs_rel_scaler[x_idx]
+            _cap = x[x_idx] * (scaler[x_idx] if rel else npfloat(1.0))
             self.CnphE[node_idx] += _cap
             self.CstorageE[node_idx, 1] += _cap
 
         for i in range(static.nhvi):
             x_idx = static.lines_offset + i
-            self.Clines[i] += x[x_idx] * static.abs_rel_scaler[x_idx]
+            self.Clines[i] += x[x_idx] * (scaler[x_idx] if rel else npfloat(1.0))
 
         # reservoir hydro (h=1), open-loop PHES (s=0), and closed-loop PHES (s=1)
         self.Clongdur = self.ChydP[:, 1] + self.CstorageP[:, 0] + self.CstorageP[:, 1]

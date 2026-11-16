@@ -2,7 +2,7 @@
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Literal, Tuple, Union
+from typing import Callable, Dict, List, Literal, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -13,7 +13,7 @@ from firm_ce.common.typing import npfloat
 
 
 # ==============================================================================
-# 1. Shared Styling & Palettes
+# 1. Shared Styling, Palettes & Label Resolution
 # ==============================================================================
 
 TECH_COLORS: Dict[str, str] = {
@@ -71,6 +71,8 @@ TECH_COLORS: Dict[str, str] = {
     "bess4h": "#7E22CE",
     "bess2h_e": "#C084FC",
     "bess4h_e": "#7E22CE",
+    "phes": "#6366F1",
+    "phes_e": "#4F46E5",
     "aa_phes": "#3730A3",
     "aa_phes_e": "#312E81",
     "e_phes": "#4338CA",
@@ -94,8 +96,20 @@ TECH_HATCHES: Dict[str, str] = {
     "Spillage": "oo",
 }
 
-# Composite definitions: {composite_name: (tuple_of_component_unit_types, category_kind)}
-# category_kind is "node_power", "node_energy", or "line_power"
+SUBTECH_MAP: Dict[str, str] = {
+    "aa_phes": "AA PHES",
+    "e_phes": "E PHES",
+    "clphes": "Closed-loop PHES",
+    "olphes": "Open-loop PHES",
+    "bess2h": "Battery",
+    "bess4h": "Battery",
+    "battery": "Battery",
+    "ac_ohl_transmission": "AC OHL",
+    "ac_ohl_mountain_transmission": "AC OHL (Mountain)",
+    "dc_subsea_transmission": "DC Subsea",
+    "dc_underground_transmission": "DC Underground",
+}
+
 COMPOSITE_GROUPS: Dict[str, Tuple[Tuple[str, ...], str]] = {
     "solar": (("pv_fixed", "pv_track"), "node_power"),
     "wind": (("onsw", "offw"), "node_power"),
@@ -126,6 +140,89 @@ COMPOSITE_GROUPS: Dict[str, Tuple[Tuple[str, ...], str]] = {
     ),
     "fossil_gas": (("ocgt", "ccgt"), "node_power"),
 }
+
+
+def identify_tech(name: str) -> str:
+    """Maps asset names to simplified top-level technology categories."""
+    name_lower = name.lower()
+    if any(x in name_lower for x in ("solar", "pv", "fix", "sat")):
+        return "Utility Solar"
+    if "roof" in name_lower:
+        return "Rooftop Solar"
+    if any(x in name_lower for x in ("onshore", "onsw")):
+        return "Onshore Wind"
+    if any(x in name_lower for x in ("offshore", "offw")):
+        return "Offshore Wind"
+    if any(x in name_lower for x in ("hydro", "ror", "pond")):
+        return "Hydro"
+    if any(x in name_lower for x in ("nuke", "nuclear")):
+        return "Nuclear"
+    if any(x in name_lower for x in ("gas", "ccgt", "ocgt")):
+        return "Fossil Gas"
+    if "biomass" in name_lower:
+        return "Biomass"
+    if "biogas" in name_lower:
+        return "Biogas"
+    if "coal" in name_lower:
+        return "Coal"
+    if "bess" in name_lower:
+        return "Battery"
+    if "phes" in name_lower:
+        return "PHES"
+    if "geo" in name_lower:
+        return "Geothermal"
+    return "Other"
+
+
+def get_subtech_label(asset: object) -> str:
+    """Resolves human-readable sub-technology labels across generators, storages, and lines."""
+    obj_cls = getattr(asset, "object_class", "")
+    raw_type = str(getattr(asset, "unit_type", "")).lower()
+    if obj_cls == "line":
+        return SUBTECH_MAP.get(raw_type, raw_type)
+
+    base = identify_tech(getattr(asset, "name", ""))
+    if base in ("Biomass", "Biogas"):
+        return "Bioenergy"
+    if raw_type in SUBTECH_MAP:
+        return SUBTECH_MAP[raw_type]
+    if "bess" in raw_type:
+        return "Battery"
+    return base
+
+
+def resolve_asset_label(
+    asset: object,
+    group_by: Union[str, Callable],
+    *,
+    aggregate: Union[bool, str] = False,
+    technologies: Union[str, Sequence[str], Callable] = "all",
+) -> str:
+    """Unified label resolver for Behaviour and Display."""
+    if isinstance(aggregate, str) and aggregate:
+        return aggregate
+    if aggregate is True:
+        if isinstance(technologies, str) and technologies.lower() not in ("all", "generators", "storages"):
+            return technologies.replace("_", " ").title()
+        if isinstance(technologies, Sequence) and not isinstance(technologies, str) and len(technologies) == 1:
+            return str(technologies[0]).replace("_", " ").title()
+        return "Aggregated Selection"
+    if callable(group_by):
+        return group_by(asset)
+
+    match group_by:
+        case "tech":
+            return identify_tech(getattr(asset, "name", "")) if getattr(asset, "object_class", "") != "line" else ""
+        case "subtech":
+            return get_subtech_label(asset)
+        case "unit_type":
+            return str(getattr(asset, "unit_type", asset.name))
+        case "node":
+            return asset.node.name if hasattr(asset, "node") else f"{asset.node_start.name}-{asset.node_end.name}"
+        case "asset":
+            return asset.name
+        case _:
+            raise ValueError(f"Unknown group_by mode: '{group_by}'")
 
 
 @dataclass
@@ -171,15 +268,14 @@ def get_hatch(tech: str) -> str | None:
 
 
 # ==============================================================================
-# 2. TechTaxonomy & Linear Projection Engine
+# 2. TechTaxonomy & Linear/Piecewise Projection Engine
 # ==============================================================================
 
 
 class TechTaxonomy:
     """
-    Single source of truth for mapping the ~450 nodal decision variables and existing
-    fleet capacities into unit-type and composite columns under both Absolute (GW/GWh)
-    and Relative (dimensionless total-system-demand-normalised) parameterisations.
+    Maps nodal decision variables and existing fleet capacities into unit-type and
+    composite columns under Absolute (GW/GWh) and Relative parameterisations.
     """
 
     def __init__(self, scenario):
@@ -331,20 +427,14 @@ class TechTaxonomy:
                 tot_p = x_in[:, m["p_idx"]] if m["p_idx"] != -1 else np.zeros(len(x_in), dtype=npfloat)
                 tot_e = x_in[:, m["e_idx"]] if m["e_idx"] != -1 else np.zeros(len(x_in), dtype=npfloat)
                 e_aa_max = m["e_aa_max"]
-                p_aa_max = m["p_aa_max"]
-                p_e_max = m["p_e_max"]
 
                 e_aa = np.minimum(tot_e, e_aa_max)
                 e_e = np.maximum(0.0, tot_e - e_aa)
-
-                raw_p_aa = np.where(
+                p_aa = np.where(
                     tot_e > 0.0,
                     tot_p * (e_aa / np.maximum(tot_e, 1e-12)),
                     tot_p if e_aa_max > 0.0 else 0.0,
                 )
-                min_p_aa = np.maximum(0.0, tot_p - p_e_max)
-                max_p_aa = np.minimum(tot_p, p_aa_max)
-                p_aa = np.clip(raw_p_aa, min_p_aa, max_p_aa)
                 p_e = tot_p - p_aa
 
                 projected[:, idx_aap] += p_aa
