@@ -26,6 +26,8 @@ def Interconnection(
     path_lines = solution.operations.path_lines
 
     total_surplus = Surplust.sum()
+    if total_surplus <= TOLERANCE:
+        return
 
     for line in range(nhvi):
         line_eff = solution.static.line_efficiencies[line]
@@ -107,7 +109,7 @@ def Interconnection(
                         parent_line[nxt] = line
 
             if best_surplus_node == -1:
-                break
+                return
 
             curr = best_surplus_node
             path_len = 0

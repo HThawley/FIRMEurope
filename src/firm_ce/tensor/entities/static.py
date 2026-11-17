@@ -45,6 +45,12 @@ if JIT_ENABLED:
         ("TSnuke", nbfloat[:, :]),
         ("TSnlte", nbfloat[:, :]),
         ("TSphes_inflow", nbfloat[:, :]),
+        # (nodes,) pre-summed capacity factor traces over horizon
+        ("TSpfix_sum", nbfloat[:]),
+        ("TSpsat_sum", nbfloat[:]),
+        ("TSoffw_sum", nbfloat[:]),
+        ("TSonsw_sum", nbfloat[:]),
+        ("TSnuke_sum", nbfloat[:]),
         # (intervals, nodes, hydro_type)
         ("TShyd_inflow", nbfloat[:, :, :]),
         # (years, npeak)
@@ -357,6 +363,12 @@ class StaticTensor:
         safe_divide_2d_1d(self.TSonsw, counts[3], self.TSonsw)
         safe_divide_2d_1d(self.TSnuke, counts[4], self.TSnuke)
         safe_divide_2d_1d(self.TSnlte, counts[5], self.TSnlte)
+
+        self.TSpfix_sum = self.TSpfix.sum(axis=0).astype(npfloat)
+        self.TSpsat_sum = self.TSpsat.sum(axis=0).astype(npfloat)
+        self.TSoffw_sum = self.TSoffw.sum(axis=0).astype(npfloat)
+        self.TSonsw_sum = self.TSonsw.sum(axis=0).astype(npfloat)
+        self.TSnuke_sum = self.TSnuke.sum(axis=0).astype(npfloat)
 
         for sto in fleet.storages.values():
             n = sto.node.order

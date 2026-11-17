@@ -1,7 +1,14 @@
 from numba import njit  # type: ignore
 
 from firm_ce.common.constants import FASTMATH, BOUNDSCHECK, TOLERANCE
-from firm_ce.tensor.dynamics import CommitTrickle, DispatchPeak, GetPeakHeadroom, UpdateSOCt, UpdateUnbalancedt
+from firm_ce.tensor.dynamics import (
+    CommitTrickle,
+    DispatchPeak,
+    GetPeakHeadroom,
+    UpdateSOCt,
+    UpdateUnbalancedt,
+    any_gt_1d,
+)
 from firm_ce.tensor.interconnection import Interconnection
 
 STALL_WINDOW = 24  # daily
@@ -15,7 +22,6 @@ STALL_CHECKPOINT_SENTINEL = 1e18  # approx inf
 def ReversePassHydro(solution):
     nodes = solution.static.nodes
     rolling_deficits = solution.operations.rolling_deficits
-    node_precharge_fill = solution.operations.fill_buffer
 
     rolling_deficits.fill(0.0)
 
@@ -30,15 +36,18 @@ def ReversePassHydro(solution):
         UpdateHydroMinFuture(solution, t)
         UpdateStorageMinMaxFuture(solution, t)
 
+        has_rolling_def = False
         for n in range(nodes):
             if solution.operations.Mdeficit[t, n] > TOLERANCE:
                 rolling_deficits[n] += solution.operations.Mdeficit[t, n]
+            if rolling_deficits[n] > TOLERANCE:
+                has_rolling_def = True
 
-        if (rolling_deficits > TOLERANCE).any():
-            SetupPrechargePools(solution, t)
+        if has_rolling_def:
+            has_fill = SetupPrechargePools(solution, t)
             SetupStorageDonors(solution, t)
 
-            if (node_precharge_fill > TOLERANCE).any():
+            if has_fill:
                 TrickleStorageHydro(solution, t)
 
         intervals_since_stall_check += 1
@@ -51,7 +60,6 @@ def ReversePassHydro(solution):
 def ReversePassPeak(solution):
     nodes = solution.static.nodes
     rolling_deficits = solution.operations.rolling_deficits
-    node_precharge_fill = solution.operations.fill_buffer
 
     rolling_deficits.fill(0.0)
 
@@ -64,14 +72,15 @@ def ReversePassPeak(solution):
     for t in range(solution.static.intervals - 1, -1, -1):
         UpdateStorageMinMaxFuture(solution, t)
 
+        has_rolling_def = False
         for n in range(nodes):
             if solution.operations.Mdeficit[t, n] > TOLERANCE:
                 rolling_deficits[n] += solution.operations.Mdeficit[t, n]
+            if rolling_deficits[n] > TOLERANCE:
+                has_rolling_def = True
 
-        if (rolling_deficits > TOLERANCE).any():
-            SetupPrechargePools(solution, t)
-
-            if (node_precharge_fill > TOLERANCE).any():
+        if has_rolling_def:
+            if SetupPrechargePools(solution, t):
                 TricklePeak(solution, t)
 
         intervals_since_stall_check += 1
@@ -125,11 +134,12 @@ def SetupPrechargePools(solution, t):
     node_precharge_fill = solution.operations.fill_buffer
 
     node_precharge_fill.fill(0.0)
+    has_fill = False
 
     for n in range(nodes):
         for s in range(solution.static.nstor):
             solution.operations.precharge_flag[n, s] = False
-            solution.operations.charge_max_t[t, n, s] = 0.0
+            solution.operations.charge_max_t[n, s] = 0.0
 
         if rolling_deficits[n] > TOLERANCE:
             remaining_fill = rolling_deficits[n]
@@ -145,9 +155,12 @@ def SetupPrechargePools(solution, t):
                     allocated_deficit = min(remaining_fill, headroom)
                     required_generation = allocated_deficit / rt_eff
 
-                    solution.operations.charge_max_t[t, n, s] = required_generation
+                    solution.operations.charge_max_t[n, s] = required_generation
                     node_precharge_fill[n] += required_generation
                     remaining_fill -= allocated_deficit
+            if node_precharge_fill[n] > TOLERANCE:
+                has_fill = True
+    return has_fill
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
@@ -155,7 +168,7 @@ def SetupStorageDonors(solution, t):
     for n in range(solution.static.nodes):
         for s in range(solution.static.nstor):
             solution.operations.trickling_flag[n, s] = False
-            solution.operations.discharge_max_t[t, n, s] = 0.0
+            solution.operations.discharge_max_t[n, s] = 0.0
 
         if solution.operations.rolling_deficits[n] <= TOLERANCE:
             for s in range(solution.static.nstor):
@@ -169,7 +182,7 @@ def SetupStorageDonors(solution, t):
                 max_d = max(0.0, min(available_p_power, available_e_power))
                 if max_d > TOLERANCE:
                     solution.operations.trickling_flag[n, s] = True
-                    solution.operations.discharge_max_t[t, n, s] = max_d
+                    solution.operations.discharge_max_t[n, s] = max_d
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
@@ -179,9 +192,9 @@ def FillPrechargers(solution, t, n, transfer_amount):
 
     for s in range(solution.static.nstor - 1, -1, -1):
         if solution.operations.precharge_flag[n, s] and transfer_amount > TOLERANCE:
-            allocated = min(transfer_amount, solution.operations.charge_max_t[t, n, s])
+            allocated = min(transfer_amount, solution.operations.charge_max_t[n, s])
             solution.operations.Mcharge[t, n, s] += allocated
-            solution.operations.charge_max_t[t, n, s] -= allocated
+            solution.operations.charge_max_t[n, s] -= allocated
             transfer_amount -= allocated
 
             energy_added = allocated * solution.static.storage_charge_eff[s] * res
@@ -211,9 +224,9 @@ def DrainStorageDonors(solution, t, n, transfer_amount):
     res = solution.static.resolution
     for s in range(solution.static.nstor):
         if solution.operations.trickling_flag[n, s] and transfer_amount > TOLERANCE:
-            allocated = min(transfer_amount, solution.operations.discharge_max_t[t, n, s])
+            allocated = min(transfer_amount, solution.operations.discharge_max_t[n, s])
             solution.operations.Mdischarge[t, n, s] += allocated
-            solution.operations.discharge_max_t[t, n, s] -= allocated
+            solution.operations.discharge_max_t[n, s] -= allocated
             transfer_amount -= allocated
 
             energy_removed = allocated / solution.static.storage_discha_eff[s] * res
@@ -247,8 +260,10 @@ def TrickleStorageHydro(solution, t):  # noqa: C901
 
         for s in range(solution.static.nstor):
             if solution.operations.trickling_flag[n, s]:
-                surplus[n] += solution.operations.discharge_max_t[t, n, s]
+                surplus[n] += solution.operations.discharge_max_t[n, s]
 
+    has_surplus = False
+    has_fill = False
     for n in range(nodes):
         transfer = min(surplus[n], node_precharge_fill[n])
         if transfer > TOLERANCE:
@@ -259,8 +274,12 @@ def TrickleStorageHydro(solution, t):  # noqa: C901
             DrainHydroDonors(solution, t, n, rem_transfer)
 
             FillPrechargers(solution, t, n, transfer)
+        if surplus[n] > TOLERANCE:
+            has_surplus = True
+        if node_precharge_fill[n] > TOLERANCE:
+            has_fill = True
 
-    if (surplus > TOLERANCE).any() and (node_precharge_fill > TOLERANCE).any():
+    if has_surplus and has_fill:
         precharge_fill_orig[:] = node_precharge_fill
         surplus_orig[:] = surplus
 
@@ -286,7 +305,7 @@ def TrickleStorageHydro(solution, t):  # noqa: C901
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
 def TricklePeak(solution, t):
     for k in range(solution.static.npeak):
-        if not (solution.operations.fill_buffer > 1e-6).any():
+        if not any_gt_1d(solution.operations.fill_buffer, 1e-6):
             break
         LocalTrickleTier(solution, t, k)
         NetworkTrickleTier(solution, t, k)
@@ -402,7 +421,7 @@ def NetworkTrickleTier(solution, t, k):
     node_precharge_fill = solution.operations.fill_buffer
     precharge_fill_orig = solution.operations.fill_orig
 
-    if not ((surplus > 1e-6).any() and (node_precharge_fill > 1e-6).any()):
+    if not (any_gt_1d(surplus, 1e-6) and any_gt_1d(node_precharge_fill, 1e-6)):
         return
 
     surplus_orig[:] = surplus

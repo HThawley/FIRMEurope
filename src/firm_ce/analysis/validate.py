@@ -8,7 +8,7 @@ from firm_ce.analysis.accessor import Accessor
 from firm_ce.common.constants import VALIDATION_TOL
 from firm_ce.scalar.solution import Solution_InstanceType, evaluate
 from firm_ce.system.scenario import Scenario
-from firm_ce.tensor.solution import EvaluateTensor, SolutionTensorType
+from firm_ce.tensor.solution import EvaluateTensor, SolutionTensorType, prep_solution_for_postprocessing
 
 TENSOR_STOR_NAMES = {0: "olphes", 1: "clphes_new_phes", 2: "bess4h", 3: "bess2h"}
 TENSOR_HYD_NAMES = {0: "pondage", 1: "reservoir"}
@@ -309,6 +309,7 @@ class ValidationTensor(_BaseValidation):
         self.scenario = scenario
         if not getattr(self.solution, "evaluated", False):
             EvaluateTensor(solution)
+            prep_solution_for_postprocessing(solution)
 
     def _get_checks(self) -> dict:
         return {

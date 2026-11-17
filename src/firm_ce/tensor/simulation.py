@@ -2,7 +2,7 @@
 
 from firm_ce.common.constants import FASTMATH, BOUNDSCHECK, TOLERANCE
 from firm_ce.common.jit_overload import njit
-from firm_ce.tensor.dynamics import GetTotalPeakHeadroomBound, ResetAnnualBudgets
+from firm_ce.tensor.dynamics import GetTotalPeakHeadroomBound, ResetAnnualBudgets, any_gt_2d
 from firm_ce.tensor.forward_pass import ForwardPassPeak, ForwardPassRenewables
 from firm_ce.tensor.reverse_pass import ReversePassHydro, ReversePassPeak, UpdateDynamics
 
@@ -15,7 +15,7 @@ def Simulate(solution):
     ReversePassHydro(solution)  # trickle charge batteries
     UpdateDynamics(solution)  # update bookkeeping
 
-    if feasible_early_exit(solution, not (solution.operations.Mdeficit > TOLERANCE).any()):
+    if feasible_early_exit(solution, not any_gt_2d(solution.operations.Mdeficit, TOLERANCE)):
         return
 
     ForwardPassPeak(solution)  # Dispatch Biomass, Biogas, Gas against the remaining deficits

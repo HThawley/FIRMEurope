@@ -11,25 +11,22 @@ from firm_ce.tensor.entities.static import StaticTensorType
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def init_mnetload(
     Mnetload: nbfloat[:, :],
-    Mnuke: nbfloat[:, :],
     static: StaticTensorType,
     assets: AssetTensorType,
 ) -> None:
     """
-    Single TxN pass: computes Mnuke and Mnetload without any temporaries.
+    Single TxN pass: computes Mnetload without any temporaries.
     Inner loop is stride-1 along n for all arrays — auto-vectorises cleanly.
     """
     for t in range(static.intervals):
         for n in range(static.nodes):
-            nuke = assets.Cnuke[n] * static.TSnuke[t, n]
-            Mnuke[t, n] = nuke
             Mnetload[t, n] = (
                 static.Mnetload_mror[t, n]
                 - assets.Cpfix[n] * static.TSpfix[t, n]
                 - assets.Cpsat[n] * static.TSpsat[t, n]
                 - assets.Coffw[n] * static.TSoffw[t, n]
                 - assets.Consw[n] * static.TSonsw[t, n]
-                - nuke
+                - assets.Cnuke[n] * static.TSnuke[t, n]
             )
 
 
@@ -90,9 +87,9 @@ if JIT_ENABLED:
         ("hydro_min_future", nbfloat[:, :]),
         ("storage_min_future", nbfloat[:, :]),
         ("storage_max_future", nbfloat[:, :]),
-        # (intervals, nodes, nstor)
-        ("charge_max_t", nbfloat[:, :, :]),
-        ("discharge_max_t", nbfloat[:, :, :]),
+        # (nodes, nstor)
+        ("charge_max_t", nbfloat[:, :]),
+        ("discharge_max_t", nbfloat[:, :]),
         # (nodes, nhydro)
         ("hydro_headroom", nbfloat[:, :]),
         # (years, npeak-1)
@@ -116,28 +113,27 @@ class OperationTensor:
         nhyd = static.nhyd
         nstor = static.nstor
 
-        self.Mnuke = np.empty((intervals, nodes), dtype=npfloat)
         self.Mnetload = np.empty((intervals, nodes), dtype=npfloat)
-        init_mnetload(self.Mnetload, self.Mnuke, static, assets)
+        init_mnetload(self.Mnetload, static, assets)
         self.Mpeak = np.zeros((intervals, nodes, static.npeak), dtype=npfloat)
 
-        self.Munbalanced = self.Mnetload.copy()
-        self.Mdeficit = np.zeros((intervals, nodes), dtype=npfloat)
-        self.Mcurtail = np.zeros((intervals, nodes), dtype=npfloat)
+        self.Munbalanced = np.empty((intervals, nodes), dtype=npfloat)
+        self.Mdeficit = np.empty((intervals, nodes), dtype=npfloat)
+        self.Mcurtail = np.empty((intervals, nodes), dtype=npfloat)
 
         self.Mimport = np.zeros((intervals, nodes), dtype=npfloat)
         self.Tnetflow = np.zeros((intervals, nhvi), dtype=npfloat)
 
         self.Mdischarge = np.zeros((intervals, nodes, nstor), dtype=npfloat)
         self.Mcharge = np.zeros((intervals, nodes, nstor), dtype=npfloat)
-        self.Mstorage = np.zeros((intervals, nodes, nstor), dtype=npfloat)
+        self.Mstorage = np.empty((intervals, nodes, nstor), dtype=npfloat)
         self.Mstorage_init = npfloat(0.5) * assets.CstorageE
-        self.Mphes_spill = np.zeros((intervals, nodes), dtype=npfloat)
+        self.Mphes_spill = np.empty((intervals, nodes), dtype=npfloat)
 
-        self.Mhydro = np.zeros((intervals, nodes, nhyd), dtype=npfloat)
-        self.Mreservoir = np.zeros((intervals, nodes, nhyd), dtype=npfloat)
+        self.Mhydro = np.empty((intervals, nodes, nhyd), dtype=npfloat)
+        self.Mreservoir = np.empty((intervals, nodes, nhyd), dtype=npfloat)
         self.Mreservoir_init = npfloat(0.5) * assets.ChydE
-        self.Mhyd_spill = np.zeros((intervals, nodes, nhyd), dtype=npfloat)
+        self.Mhyd_spill = np.empty((intervals, nodes, nhyd), dtype=npfloat)
 
         self.has_deficit_t = False
         self.has_curtail_t = False
@@ -167,9 +163,8 @@ class OperationTensor:
         self.trickling_flag = np.zeros((nodes, nstor), dtype=np.bool_)
         self.storage_min_future = np.zeros((nodes, nstor), dtype=npfloat)
         self.storage_max_future = np.zeros((nodes, nstor), dtype=npfloat)
-
-        self.charge_max_t = np.zeros((intervals, nodes, nstor), dtype=npfloat)
-        self.discharge_max_t = np.zeros((intervals, nodes, nstor), dtype=npfloat)
+        self.charge_max_t = np.zeros((nodes, nstor), dtype=npfloat)
+        self.discharge_max_t = np.zeros((nodes, nstor), dtype=npfloat)
 
         self.remaining_peak_budget = np.zeros((static.years, static.npeak - 1), dtype=npfloat)
 
@@ -190,22 +185,14 @@ def reset_operations(
     Reinitialises a pre-allocated OperationTensor for a new solution vector.
     No heap allocation -- all writes go into existing arrays.
     """
-    init_mnetload(ops.Mnetload, ops.Mnuke, static, assets)
-    ops.Munbalanced[:] = ops.Mnetload
+    init_mnetload(ops.Mnetload, static, assets)
     ops.Mstorage_init[:] = npfloat(0.5) * assets.CstorageE
     ops.Mreservoir_init[:] = npfloat(0.5) * assets.ChydE
 
-    ops.Mdeficit.fill(npfloat(0.0))
-    ops.Mcurtail.fill(npfloat(0.0))
     ops.Mimport.fill(npfloat(0.0))
     ops.Tnetflow.fill(npfloat(0.0))
     ops.Mdischarge.fill(npfloat(0.0))
     ops.Mcharge.fill(npfloat(0.0))
-    ops.Mstorage.fill(npfloat(0.0))
-    ops.Mphes_spill.fill(npfloat(0.0))
-    ops.Mhydro.fill(npfloat(0.0))
-    ops.Mreservoir.fill(npfloat(0.0))
-    ops.Mhyd_spill.fill(npfloat(0.0))
     ops.Mpeak.fill(npfloat(0.0))
 
     ops.charge_max_t.fill(npfloat(0.0))

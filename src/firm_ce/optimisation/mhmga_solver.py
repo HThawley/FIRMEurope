@@ -39,9 +39,8 @@ class MhmgaSolverBase(BaseSolver):
 
     def _write_mhmga_config_summary(self) -> None:
         write_mhmga_config_summary(
-            self.scenario.solution_dir,
-            self.config,
             self.scenario,
+            self.config,
             self.details,
         )
 

@@ -11,13 +11,27 @@ from firm_ce.tensor.solution import (
     ExtractEnergySpaceTensor,
     ResetSolution,
     SolutionTensor,
+    SolutionTensorType,
 )
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
+def create_solution_pool(
+    x0: nbfloat[:],
+    static: StaticTensorType,
+):
+    x0 = x0.astype(nbfloat)
+    pool = TypedList.empty_list(SolutionTensorType)
+    for _ in range(NUM_THREADS):
+        pool.append(SolutionTensor(x0, static))
+    return pool
 
 
 @njit(parallel=True, fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def _eval_mga_population_core(
     xs: nbfloat[:, :],
     static: StaticTensorType,
+    pool,
     save_details: boolean,
     details: nbfloat[:, :, :],
     return_scaled: boolean,
@@ -36,8 +50,7 @@ def _eval_mga_population_core(
     pop_size = details.shape[1]
 
     n_workers = min(NUM_THREADS, n_points)
-    pool = TypedList()
-    for _ in range(n_workers):
+    while len(pool) < n_workers:
         pool.append(SolutionTensor(xs[0], static))
 
     for j in prange(n_points):
@@ -68,11 +81,12 @@ def _eval_mga_population_core(
 def mga_tensor_wrapper(
     xs: nbfloat[:, :],
     static: StaticTensorType,
+    pool,
 ) -> tuple[nbfloat[:], nbfloat[:]]:
     dummy_details = np.empty((1, 1, 1), dtype=npfloat)
     dummy_demand = np.empty(1, dtype=npfloat)
     lcoe, penalties, _ = _eval_mga_population_core(
-        xs, static, False, dummy_details, False, dummy_demand, 0, 0, 1
+        xs, static, pool, False, dummy_details, False, dummy_demand, 0, 0, 1
     )
     return lcoe, penalties
 
@@ -81,11 +95,12 @@ def mga_tensor_wrapper(
 def mga_tensor_wrapper_with_details(
     xs: nbfloat[:, :],
     static: StaticTensorType,
+    pool,
     details: nbfloat[:, :, :],
 ) -> tuple[nbfloat[:], nbfloat[:]]:
     dummy_demand = np.empty(1, dtype=npfloat)
     lcoe, penalties, _ = _eval_mga_population_core(
-        xs, static, True, details, False, dummy_demand, 0, 0, 1
+        xs, static, pool, True, details, False, dummy_demand, 0, 0, 1
     )
     return lcoe, penalties
 
@@ -94,6 +109,7 @@ def mga_tensor_wrapper_with_details(
 def mga_tensor_wrapper_scaled(
     xs: nbfloat[:, :],
     static: StaticTensorType,
+    pool,
     nodal_demand_totals: nbfloat[:],
     norm_mode: nbintp,
     agg_mode: nbintp,
@@ -104,6 +120,7 @@ def mga_tensor_wrapper_scaled(
     return _eval_mga_population_core(
         xs,
         static,
+        pool,
         save_details,
         details,
         True,

@@ -5,7 +5,7 @@ from firm_ce.common.constants import JIT_ENABLED, NUM_THREADS, FASTMATH, BOUNDSC
 from firm_ce.common.jit_overload import jitclass, njit, prange
 from firm_ce.common.typing import boolean, nbfloat, npfloat, TypedDict, nbintp, npintp
 from firm_ce.system.costs_common import apportion_new_phes
-from firm_ce.tensor.entities.assets import AssetTensor, AssetTensorType
+from firm_ce.tensor.entities.assets import AssetTensor, AssetTensorType, reset_assets
 from firm_ce.tensor.entities.operations import OperationTensor, OperationTensorType, reset_operations
 from firm_ce.tensor.entities.static import StaticTensorType
 from firm_ce.tensor.simulation import Simulate
@@ -85,10 +85,10 @@ else:
     SolutionTensorType = SolutionTensor
 
 
-@njit
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def ResetSolution(solution: SolutionTensor, x: np.ndarray[npfloat]) -> None:
     solution.x = x
-    solution.assets = AssetTensor(x, solution.static)
+    reset_assets(solution.assets, x, solution.static)
     reset_operations(solution.operations, solution.static, solution.assets)
     solution.nodal_energy[:, :] = npfloat(0.0)
     solution.nodal_aaph_gen[:] = npfloat(0.0)
@@ -119,11 +119,6 @@ def CalculateCost(
     # Single-pass time accumulation over intervals into nodal_energy (shape: nodes x 14)
     for t in range(s.intervals):
         for n in range(s.nodes):
-            E[n, 0] += s.TSpfix[t, n]
-            E[n, 1] += s.TSpsat[t, n]
-            E[n, 2] += s.TSoffw[t, n]
-            E[n, 3] += s.TSonsw[t, n]
-            E[n, 4] += o.Mnuke[t, n]
             E[n, 6] += o.Mpeak[t, n, 0]
             E[n, 7] += o.Mpeak[t, n, 1]
             E[n, 8] += o.Mpeak[t, n, 2]
@@ -137,17 +132,16 @@ def CalculateCost(
     cost = s.legacy_costs
 
     for n in range(s.nodes):
-        # Convert VRE capacity factor time-sums into gross energy
-        E[n, 0] *= a.Cpfix[n]
-        E[n, 1] *= a.Cpsat[n]
-        E[n, 2] *= a.Coffw[n]
-        E[n, 3] *= a.Consw[n]
+        # Convert pre-summed VRE capacity factors into gross energy
+        E[n, 0] = s.TSpfix_sum[n] * a.Cpfix[n]
+        E[n, 1] = s.TSpsat_sum[n] * a.Cpsat[n]
+        E[n, 2] = s.TSoffw_sum[n] * a.Coffw[n]
+        E[n, 3] = s.TSonsw_sum[n] * a.Consw[n]
 
-        # Apportion total nuclear generation (currently in E[n, 4]) between new nuke and LTE nuke
-        tot_nuke_gen = E[n, 4]
-        nuke_ratio = tot_nuke_gen / a.Cnuke[n] if a.Cnuke[n] > 0.0 else npfloat(0.0)
-        E[n, 4] = nuke_ratio * (a.Cnuke[n] - a.Cnlte[n])
-        E[n, 5] = nuke_ratio * a.Cnlte[n]
+        # Apportion total nuclear generation between new nuke and LTE nuke using pre-summed nuclear CF
+        nuke_cf_sum = s.TSnuke_sum[n] if a.Cnuke[n] > 0.0 else npfloat(0.0)
+        E[n, 4] = nuke_cf_sum * (a.Cnuke[n] - a.Cnlte[n])
+        E[n, 5] = nuke_cf_sum * a.Cnlte[n]
 
         # Apportion new-build PHES into AA and E
         p_aa, e_aa, p_e, e_e = apportion_new_phes(a.CnphP[n], a.CnphE[n], c.E_aa_max[n])
@@ -341,6 +335,7 @@ def prep_solution_for_postprocessing(
     o.Mpsat = s.TSpsat * a.Cpsat
     o.Moffw = s.TSoffw * a.Coffw
     o.Monsw = s.TSonsw * a.Consw
+    o.Mnuke = s.TSnuke * a.Cnuke
 
     return None
 

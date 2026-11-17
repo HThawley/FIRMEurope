@@ -4,6 +4,23 @@ from firm_ce.common.constants import FASTMATH, BOUNDSCHECK, TOLERANCE
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
+def any_gt_1d(arr, tol):
+    for i in range(arr.shape[0]):
+        if arr[i] > tol:
+            return True
+    return False
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
+def any_gt_2d(arr, tol):
+    for i in range(arr.shape[0]):
+        for j in range(arr.shape[1]):
+            if arr[i, j] > tol:
+                return True
+    return False
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
 def UpdateUnbalancedt(solution, t):
     for n in range(solution.static.nodes):
         solution.operations.Munbalanced[t, n] = solution.operations.Mnetload[t, n] - solution.operations.Mimport[t, n]
@@ -42,9 +59,13 @@ def GetNaiveCurtailDeficit(solution, t):
             solution.operations.Mhydro[t, n, h] = min_hyd
             unbal -= min_hyd
 
-        # Lock in must-run open-loop PHES (s=0) generation floor
+        # Lock in must-run open-loop PHES (s=0) generation floor & zero remaining storage slots for step t
         min_phes = GetPhesMinGen(solution, t, n)
         solution.operations.Mdischarge[t, n, 0] = min_phes
+        solution.operations.Mcharge[t, n, 0] = 0.0
+        for s in range(1, solution.static.nstor):
+            solution.operations.Mdischarge[t, n, s] = 0.0
+            solution.operations.Mcharge[t, n, s] = 0.0
         unbal -= min_phes
 
         if unbal > TOLERANCE:
@@ -55,6 +76,98 @@ def GetNaiveCurtailDeficit(solution, t):
             solution.operations.Mdeficit[t, n] = 0.0
             solution.operations.Mcurtail[t, n] = -unbal
             has_curtail = True
+        else:
+            solution.operations.Mdeficit[t, n] = 0.0
+            solution.operations.Mcurtail[t, n] = 0.0
+
+    solution.operations.has_deficit_t = has_deficit
+    solution.operations.has_curtail_t = has_curtail
+
+
+@njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
+def UpdateLocalChargeDischarge(solution, t):
+    """
+    Fused local storage charge/discharge pass after initial network curtailment balancing.
+    Uses must-run hydro/PHES floors already populated by GetNaiveCurtailDeficit.
+    """
+    res = solution.static.resolution
+    has_deficit = False
+    has_curtail = False
+
+    for n in range(solution.static.nodes):
+        unbal = (
+            solution.operations.Munbalanced[t, n]
+            - solution.operations.Mhydro[t, n, 0]
+            - solution.operations.Mhydro[t, n, 1]
+            - solution.operations.Mdischarge[t, n, 0]
+        )
+
+        if unbal < -TOLERANCE:
+            # Charge shortest-duration storage first (bess2h -> bess4h -> clphes/nphes -> olphes)
+            for s in range(solution.static.nstor - 1, -1, -1):
+                prev_soc = (
+                    solution.operations.Mstorage_init[n, s] if t == 0 else solution.operations.Mstorage[t - 1, n, s]
+                )
+                if s == 0:
+                    prev_soc += solution.static.TSphes_inflow[t, n]
+
+                charge_cap = (solution.assets.CstorageE[n, s] - prev_soc) / solution.static.storage_charge_eff[s] / res
+                charge_amt = max(0.0, min(-unbal, solution.assets.CstorageP[n, s], charge_cap))
+                solution.operations.Mcharge[t, n, s] = charge_amt
+                unbal += charge_amt
+
+            solution.operations.Mdeficit[t, n] = 0.0
+            if unbal < -TOLERANCE:
+                solution.operations.Mcurtail[t, n] = -unbal
+                has_curtail = True
+            else:
+                solution.operations.Mcurtail[t, n] = 0.0
+
+        elif unbal > TOLERANCE:
+            # Pondage (h=0)
+            h = 0
+            prev_soc = (
+                solution.operations.Mreservoir_init[n, h] if t == 0 else solution.operations.Mreservoir[t - 1, n, h]
+            )
+            inflow_e = solution.static.TShyd_inflow[t, n, h]
+            rem_p = solution.assets.ChydP[n, h] - solution.operations.Mhydro[t, n, h]
+            rem_e = (prev_soc + inflow_e) / res - solution.operations.Mhydro[t, n, h]
+            discharge_amt = max(0.0, min(unbal, rem_p, rem_e))
+            solution.operations.Mhydro[t, n, h] += discharge_amt
+            unbal -= discharge_amt
+
+            # Storage: shortest duration first (s=3: bess2h -> s=2: bess4h -> s=1: clphes/nphes -> s=0: olphes)
+            for s in range(solution.static.nstor - 1, -1, -1):
+                prev_soc = (
+                    solution.operations.Mstorage_init[n, s] if t == 0 else solution.operations.Mstorage[t - 1, n, s]
+                )
+                if s == 0:
+                    prev_soc += solution.static.TSphes_inflow[t, n]
+
+                rem_p = solution.assets.CstorageP[n, s] - solution.operations.Mdischarge[t, n, s]
+                rem_e = prev_soc * solution.static.storage_discha_eff[s] / res - solution.operations.Mdischarge[t, n, s]
+                discharge_amt = max(0.0, min(unbal, rem_p, rem_e))
+                solution.operations.Mdischarge[t, n, s] += discharge_amt
+                unbal -= discharge_amt
+
+            # Reservoir (h=1)
+            h = 1
+            prev_soc = (
+                solution.operations.Mreservoir_init[n, h] if t == 0 else solution.operations.Mreservoir[t - 1, n, h]
+            )
+            inflow_e = solution.static.TShyd_inflow[t, n, h]
+            rem_p = solution.assets.ChydP[n, h] - solution.operations.Mhydro[t, n, h]
+            rem_e = (prev_soc + inflow_e) / res - solution.operations.Mhydro[t, n, h]
+            discharge_amt = max(0.0, min(unbal, rem_p, rem_e))
+            solution.operations.Mhydro[t, n, h] += discharge_amt
+            unbal -= discharge_amt
+
+            solution.operations.Mcurtail[t, n] = 0.0
+            if unbal > TOLERANCE:
+                solution.operations.Mdeficit[t, n] = unbal
+                has_deficit = True
+            else:
+                solution.operations.Mdeficit[t, n] = 0.0
         else:
             solution.operations.Mdeficit[t, n] = 0.0
             solution.operations.Mcurtail[t, n] = 0.0
@@ -77,8 +190,6 @@ def UpdateLocalCharge(solution, t):
             unbal -= solution.operations.Mhydro[t, n, h]
         for s in range(solution.static.nstor):
             unbal -= solution.operations.Mdischarge[t, n, s]
-        for k in range(solution.static.npeak):
-            unbal -= solution.operations.Mpeak[t, n, k]
 
         # Wipe local arrays to allow safe recalculation from scratch
         for s in range(solution.static.nstor):
@@ -175,10 +286,6 @@ def UpdateLocalDischarge(solution, t):
             solution.operations.Mhydro[t, n, h] += discharge_amt
             unbal -= discharge_amt
 
-            # Peak deduction
-            for k in range(solution.static.npeak):
-                unbal -= solution.operations.Mpeak[t, n, k]
-
             if unbal > TOLERANCE:
                 solution.operations.Mdeficit[t, n] = unbal
                 solution.operations.Mcurtail[t, n] = 0.0
@@ -201,7 +308,7 @@ def UpdateLocalDischarge(solution, t):
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
 def GetLongDurSurplust(solution, t, Msurplust):
     res = solution.static.resolution
-    Msurplust.fill(0.0)
+    has_surplus = False
     for n in range(solution.static.nodes):
         surplus = 0.0
         # Seasonal Reservoir (h=1)
@@ -222,12 +329,15 @@ def GetLongDurSurplust(solution, t, Msurplust):
             )
 
         Msurplust[n] = surplus
+        if surplus > TOLERANCE:
+            has_surplus = True
+    return has_surplus
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
 def GetShortDurSurplust(solution, t, Msurplust):
     res = solution.static.resolution
-    Msurplust.fill(0.0)
+    has_surplus = False
     for n in range(solution.static.nodes):
         surplus = 0.0
         # Pondage (h=0)
@@ -246,6 +356,9 @@ def GetShortDurSurplust(solution, t, Msurplust):
             )
 
         Msurplust[n] = surplus
+        if surplus > TOLERANCE:
+            has_surplus = True
+    return has_surplus
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")

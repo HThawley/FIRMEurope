@@ -18,6 +18,7 @@ from firm_ce.tensor.solution import (
     NORM_RELATIVE,
 )
 from firm_ce.tensor.wrappers import (
+    create_solution_pool,
     mga_tensor_wrapper,
     mga_tensor_wrapper_scaled,
     mga_tensor_wrapper_with_details,
@@ -133,10 +134,11 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
                 )
 
             elif backend == "tensor":
+                pool = create_solution_pool(scenario.x0, scenario.staticTensor)
                 if save_details:
                     return ObjectiveBundle(
                         func=mga_tensor_wrapper_with_details,
-                        fargs=(scenario.staticTensor, details_buf),
+                        fargs=(scenario.staticTensor, pool, details_buf),
                         return_scaled=False,
                         space_scaler=space_scaler,
                         scaled_ndim=scaled_ndim,
@@ -144,7 +146,7 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
                     )
                 return ObjectiveBundle(
                     func=mga_tensor_wrapper,
-                    fargs=(scenario.staticTensor,),
+                    fargs=(scenario.staticTensor, pool),
                     return_scaled=False,
                     space_scaler=space_scaler,
                     scaled_ndim=scaled_ndim,
@@ -154,12 +156,14 @@ def build_objective_bundle(scenario, config) -> ObjectiveBundle:
             nodal_demand_totals = scenario.get_nodal_demand_totals()
 
             if backend == "tensor":
+                pool = create_solution_pool(scenario.x0, scenario.staticTensor)
                 norm_code, agg_code, scaled_ndim = _resolve_energy_space_dims(scenario, config, N_ENERGY_COMPONENTS)
                 details_buf = _allocate_details_array(scenario, config, scaled_ndim) if save_details else None
                 det_arg = details_buf if save_details else np.empty((1, 1, 1), dtype=npfloat)
 
                 fargs = (
                     scenario.staticTensor,
+                    pool,
                     nodal_demand_totals,
                     norm_code,
                     agg_code,

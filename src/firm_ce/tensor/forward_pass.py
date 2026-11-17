@@ -8,9 +8,11 @@ from firm_ce.tensor.dynamics import (
     GetPeakHeadroom,
     GetShortDurSurplust,
     UpdateLocalCharge,
+    UpdateLocalChargeDischarge,
     UpdateLocalDischarge,
     UpdateSOCt,
     UpdateUnbalancedt,
+    any_gt_1d,
 )
 from firm_ce.tensor.interconnection import Interconnection
 
@@ -35,13 +37,11 @@ def ForwardPassRenewables(solution):  # noqa: C901
                 solution.operations.Mimport[t],
             )
             UpdateUnbalancedt(solution, t)
-        UpdateLocalCharge(solution, t)
-        UpdateLocalDischarge(solution, t)
+        UpdateLocalChargeDischarge(solution, t)
 
         # Fill deficits from network (short duration: pondage, B2, B4) reserves first
         if solution.operations.has_deficit_t:
-            GetShortDurSurplust(solution, t, working_buffer)
-            if (working_buffer > TOLERANCE).any():
+            if GetShortDurSurplust(solution, t, working_buffer):
                 Interconnection(
                     solution,
                     solution.operations.Mdeficit[t],
@@ -54,8 +54,7 @@ def ForwardPassRenewables(solution):  # noqa: C901
 
         # Fill deficits from network (long duration: clphes/nphes, olphes, reservoir) reserves
         if solution.operations.has_deficit_t:
-            GetLongDurSurplust(solution, t, working_buffer)
-            if (working_buffer > TOLERANCE).any():
+            if GetLongDurSurplust(solution, t, working_buffer):
                 Interconnection(
                     solution,
                     solution.operations.Mdeficit[t],
@@ -68,10 +67,14 @@ def ForwardPassRenewables(solution):  # noqa: C901
 
         # Push remaining curtailment to storage headroom
         if solution.operations.has_curtail_t:
+            has_headroom = False
             for n in range(nodes):
-                working_buffer[n] = GetForwardStorageHeadroom(solution, t, n)
+                hr = GetForwardStorageHeadroom(solution, t, n)
+                working_buffer[n] = hr
+                if hr > TOLERANCE:
+                    has_headroom = True
 
-            if (working_buffer > TOLERANCE).any():
+            if has_headroom:
                 Interconnection(
                     solution,
                     working_buffer,
@@ -88,11 +91,14 @@ def ForwardPassRenewables(solution):  # noqa: C901
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK)
 def ForwardPassPeak(solution):
     for t in range(solution.static.intervals):
+        if not any_gt_1d(solution.operations.Mdeficit[t], TOLERANCE):
+            continue
         for k in range(solution.static.npeak):
-            if not (solution.operations.Mdeficit[t] > TOLERANCE).any():
+            if not LocalDispatchPeakTier(solution, t, k):
                 break
-            LocalDispatchPeakTier(solution, t, k)
             NetworkDispatchPeakTier(solution, t, k)
+            if not any_gt_1d(solution.operations.Mdeficit[t], TOLERANCE):
+                break
         UpdateUnbalancedt(solution, t)
 
 
@@ -126,13 +132,19 @@ def GetForwardStorageHeadroom(solution, t, n):
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
 def LocalDispatchPeakTier(solution, t, k):
     nodes = solution.static.nodes
+    still_has_deficit = False
     for n in range(nodes):
-        if solution.operations.Mdeficit[t, n] > TOLERANCE:
+        def_n = solution.operations.Mdeficit[t, n]
+        if def_n > TOLERANCE:
             avail = GetPeakHeadroom(solution, t, n, k)
-            dispatched = min(solution.operations.Mdeficit[t, n], avail)
+            dispatched = min(def_n, avail)
             if dispatched > TOLERANCE:
                 DispatchPeak(solution, t, n, k, dispatched)
-                solution.operations.Mdeficit[t, n] -= dispatched
+                def_n -= dispatched
+                solution.operations.Mdeficit[t, n] = def_n
+            if def_n > TOLERANCE:
+                still_has_deficit = True
+    return still_has_deficit
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
@@ -141,14 +153,14 @@ def NetworkDispatchPeakTier(solution, t, k):
     working_buffer = solution.operations.surplus_buffer
     working_buffer_orig = solution.operations.surplus_orig
 
-    if not (solution.operations.Mdeficit[t] > TOLERANCE).any():
-        return
-
-    working_buffer.fill(0.0)
+    has_headroom = False
     for n in range(nodes):
-        working_buffer[n] = GetPeakHeadroom(solution, t, n, k)
+        hr = GetPeakHeadroom(solution, t, n, k)
+        working_buffer[n] = hr
+        if hr > TOLERANCE:
+            has_headroom = True
 
-    if (working_buffer > TOLERANCE).any():
+    if has_headroom:
         working_buffer_orig[:] = working_buffer
         Interconnection(
             solution,
