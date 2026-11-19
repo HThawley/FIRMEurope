@@ -78,7 +78,6 @@ class MhmgaSolverBase(BaseSolver):
         self.scenario.logger.info("[MHMGA] Initialising MGA algorithm for recombination inspection.")
 
         algorithm = self.instantiate_algorithm(log_path=None, init_callback=False)
-        algorithm.add_niches(diversity=1)
 
         config_hyperparameters = dict(
             max_iter=1,
@@ -96,7 +95,6 @@ class MhmgaSolverBase(BaseSolver):
             noptimal_abs=self.config.mga_noptimal_abs[0],
             violation_factor=PENALTY_MULTIPLIER,
             mutation_scaler="bounds",
-            objective_scaler=1.0,
             extrema_epsilon_rel=self.config.mga_extrema_epsilon_rel[0],
             extrema_epsilon_abs=self.config.mga_extrema_epsilon_abs[0],
         )
@@ -207,13 +205,19 @@ class MhmgaSolver(MhmgaSolverBase):
             starting_points=previous,
             starting_objectives=starting_objectives,
             starting_constraints=starting_constraints,
+        )
+        algorithm.configure(
             log_dir=log_path,
             log_freq=self.config.mga_log_freq,
             random_seed=None,
             parallelize=False,
             callback=self.callback,
+        )
+        algorithm.update_settings(
             include_obj_in_fitness=True,
             space_scaler=self.obj_bundle.space_scaler,
+            objective_scaler=1.0,
+            fitness_method=self.config.mga_fitness[0],
         )
 
         if init_callback:
@@ -304,9 +308,9 @@ class MhmgaSolver(MhmgaSolverBase):
                     if getattr(algorithm, "_stop_requested", False):
                         break
 
-                    algorithm.set_verbosity(
-                        self.config.mga_disp_rate[step],
-                        self.config.mga_verbose_level[step],
+                    algorithm.configure(
+                        disp_rate=self.config.mga_disp_rate[step],
+                        verbose=self.config.mga_verbose_level[step],
                     )
 
                     start_time_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
@@ -320,6 +324,11 @@ class MhmgaSolver(MhmgaSolverBase):
                         )
                         algorithm.add_niches(diversity=self.config.mga_new_div_niches[step])
 
+                    algorithm.update_settings(
+                        objective_scaler=1.0,
+                        fitness_method=self.config.mga_fitness[step],
+                    )
+
                     algorithm.update_hyperparameters(
                         max_iter=self.config.mga_iter[step],
                         pop_size=self.config.mga_pop_size[step],
@@ -329,14 +338,13 @@ class MhmgaSolver(MhmgaSolverBase):
                         tourn_size=self.config.mga_tourn_size[step],
                         mutation_prob=self.config.mga_mutation_prob[step],
                         mutation_sigma=self.config.mga_mutation_sigma[step],
+                        mutation_alpha=self.config.mga_mutation_alpha[step],
                         crossover_prob=self.config.mga_crossover_prob[step],
                         niche_elitism=self.config.mga_niche_elitism[step],
                         noptimal_rel=self.config.mga_noptimal_rel[step],
                         noptimal_abs=self.config.mga_noptimal_abs[step],
                         violation_factor=PENALTY_MULTIPLIER,
                         mutation_scaler=np.ones_like(self.scenario.lower_bounds),
-                        objective_scaler=1.0,
-                        fitness_method=self.config.mga_fitness[step],
                         extrema_epsilon_rel=self.config.mga_extrema_epsilon_rel[step],
                         extrema_epsilon_abs=self.config.mga_extrema_epsilon_abs[step],
                     )

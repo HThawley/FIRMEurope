@@ -23,9 +23,12 @@ expected_mga_hyperparameters = {
     "mga_champ_count": {"default": 0, "ditherable": False, "broadcastable": True, "types": ((int, -1, np.inf), (float, 0, 1),)},
     "mga_start_div_niches": {"default": 10, "ditherable": False, "broadcastable": False, "types": ((int, 0, np.inf),)},
     "mga_new_div_niches": {"default": 0, "ditherable": False, "broadcastable": True, "types": ((int, 0, np.inf),)},
-    "mga_extrema_dims": {"default": "none", "ditherable": False, "broadcastable": False, "types": ((str, ("none", "all", "all-max", "all-min", "custom")),)},
-    "mga_extrema_is_min": {"default": "auto", "ditherable": False, "broadcastable": False, "types": ((str, ("auto", "none", "custom")),)},
-    "mga_niche_elitism": {"default": True, "ditherable": False, "broadcastable": True, "types": ((bool, ("none", "selfish", "unselfish")),)},
+    "mga_extrema_dims": {"default": "none", "ditherable": False, "broadcastable": False, "types":
+                         ((str, ("none", "all", "all-max", "all-min", "custom")),)},
+    "mga_extrema_is_min": {"default": "auto", "ditherable": False, "broadcastable": False, "types":
+                           ((str, ("auto", "none", "custom")),)},
+    "mga_niche_elitism": {"default": True, "ditherable": False, "broadcastable": True, "types":
+                          ((bool, ("false", "none", "true")),)},
     "mga_log_freq": {"default": 1, "ditherable": False, "broadcastable": False, "types": ((int, -1, np.inf),)},
     "mga_disp_rate": {"default": 1, "ditherable": False, "broadcastable": True, "types": ((int, -1, np.inf),)},
     "mga_verbose_level": {"default": 3, "ditherable": False, "broadcastable": True, "types": ((int, 0, np.inf),)},

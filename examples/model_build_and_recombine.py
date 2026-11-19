@@ -320,7 +320,6 @@ if __name__ == "__main__":
         # niche_elitism=self.config.mga_niche_elitism[0],
         # noptimal_rel=self.config.mga_noptimal_rel[0],
         # noptimal_abs=self.config.mga_noptimal_abs[0],
-        # objective_scaler=1.0,
     )
 
     for name in ("base",):

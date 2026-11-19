@@ -20,7 +20,7 @@ The `firm_ce.optimisation` subpackage bridges `Scenario` configuration and the `
 - **`class DeSolverBase` & `class SingleTimeSolver`**: Wraps `scipy.optimize.differential_evolution` with deferred vectorized population evaluation, per-iteration `callback.csv` / `current_optimum.csv` / `population.bin` logging, and final CSV conversion.
 
 ### 4. [`mhmga_solver.py`](./src/firm_ce/optimisation/mhmga_solver.py)
-- **`class MhmgaSolverBase` & `class MhmgaSolver`**: Orchestrates multi-step `MGAProblem` runs (optimisation niche + optional extrema niches + stepped diversity niches), checkpoint restarting from `population.bin` / `latest_population.npy`, recombination inspection (`inspect_mhmga_recombination`), `mga_alternatives.csv` export, and binary log finalisation.
+- **`class MhmgaSolverBase` & `class MhmgaSolver`**: Orchestrates multi-step `MGAProblem` runs using the three-tier `MGAProblem` configuration interface (`configure()`, `update_settings()`, and `update_hyperparameters()`) across optimisation, optional extrema, and stepped diversity niches. Supports checkpoint restarting from `population.bin` / `latest_population.npy`, single-niche recombination inspection (`inspect_mhmga_recombination`), `mga_alternatives.csv` export, and binary log finalisation.
 
 ### 5. [`solver.py`](./src/firm_ce/optimisation/solver.py)
 - Convenience facade re-exporting `BaseSolver`, `DeSolverBase`, `SingleTimeSolver`, `MhmgaSolverBase`, `MhmgaSolver`, `get_solver`, `graceful_sigint_handler`, `convert_binary_logs_to_csv`, and `recover_interrupted_run`.
