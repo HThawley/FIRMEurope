@@ -423,7 +423,7 @@ class ValidationTensor(_BaseValidation):
             + np.sum(o.Mhydro, axis=2)
             + s.Mror
         )
-        total_load = s.Mload + np.sum(o.Mcharge, axis=2)
+        total_load = (s.Mload / (1.0 - s.internal_loss)) + np.sum(o.Mcharge, axis=2)
         nodal_balance = total_gen + o.Mimport - total_load
         expected_balance = o.Mcurtail - o.Mdeficit
 

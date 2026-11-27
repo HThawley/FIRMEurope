@@ -363,18 +363,57 @@ def GetShortDurSurplust(solution, t, Msurplust):
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
 def CommitTrickle(solution, t):
-    """Safely updates ledger without erasing trickle allocations"""
+    """Safely updates ledger without erasing trickle allocations and discharges pre-charged storage into deficits."""
+    res = solution.static.resolution
     has_deficit = False
     has_curtail = False
     for n in range(solution.static.nodes):
         unbal = solution.operations.Munbalanced[t, n]
 
         for s in range(solution.static.nstor):
+            prev_soc = (
+                solution.operations.Mstorage_init[n, s] if t == 0 else solution.operations.Mstorage[t - 1, n, s]
+            )
+            if s == 0:
+                prev_soc += solution.static.TSphes_inflow[t, n]
+
+            max_chg = max(
+                0.0,
+                (solution.assets.CstorageE[n, s] - prev_soc) / solution.static.storage_charge_eff[s] / res,
+            )
+            max_dis = max(0.0, prev_soc * solution.static.storage_discha_eff[s] / res)
+            solution.operations.Mcharge[t, n, s] = min(solution.operations.Mcharge[t, n, s], max_chg)
+            solution.operations.Mdischarge[t, n, s] = min(solution.operations.Mdischarge[t, n, s], max_dis)
+
             unbal += solution.operations.Mcharge[t, n, s] - solution.operations.Mdischarge[t, n, s]
+
         for h in range(solution.static.nhyd):
+            prev_hyd = (
+                solution.operations.Mreservoir_init[n, h] if t == 0 else solution.operations.Mreservoir[t - 1, n, h]
+            )
+            max_hyd = max(0.0, (prev_hyd + solution.static.TShyd_inflow[t, n, h]) / res)
+            solution.operations.Mhydro[t, n, h] = min(solution.operations.Mhydro[t, n, h], max_hyd)
             unbal -= solution.operations.Mhydro[t, n, h]
+
         for k in range(solution.static.npeak):
             unbal -= solution.operations.Mpeak[t, n, k]
+
+        if unbal > TOLERANCE:
+            for s in range(solution.static.nstor - 1, -1, -1):
+                if solution.operations.Mcharge[t, n, s] > TOLERANCE:
+                    continue
+                prev_soc = (
+                    solution.operations.Mstorage_init[n, s] if t == 0 else solution.operations.Mstorage[t - 1, n, s]
+                )
+                if s == 0:
+                    prev_soc += solution.static.TSphes_inflow[t, n]
+
+                rem_p = solution.assets.CstorageP[n, s] - solution.operations.Mdischarge[t, n, s]
+                rem_e = prev_soc * solution.static.storage_discha_eff[s] / res - solution.operations.Mdischarge[t, n, s]
+                add_dis = max(0.0, min(unbal, rem_p, rem_e))
+                if add_dis > TOLERANCE:
+                    solution.operations.Mdischarge[t, n, s] += add_dis
+                    unbal -= add_dis
 
         if unbal > TOLERANCE:
             solution.operations.Mdeficit[t, n] = unbal
@@ -435,7 +474,7 @@ def GetPeakHeadroom(solution, t, n, k):
         return max(0.0, power_headroom)
 
     year = solution.static.year_of_interval[t]
-    budget_headroom = solution.operations.remaining_peak_budget[year, k]
+    budget_headroom = solution.operations.remaining_peak_budget[year, k] / solution.static.resolution
     return max(0.0, min(power_headroom, budget_headroom))
 
 
@@ -446,7 +485,7 @@ def DispatchPeak(solution, t, n, k, amount):
     solution.operations.Mpeak[t, n, k] += amount
     if k != 2:
         year = solution.static.year_of_interval[t]
-        solution.operations.remaining_peak_budget[year, k] -= amount
+        solution.operations.remaining_peak_budget[year, k] -= amount * solution.static.resolution
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
@@ -454,14 +493,15 @@ def GetTotalPeakHeadroomBound(solution):
     """Sound upper bound on total deliverable peak energy across the whole
     horizon, used as the cheap feasibility pre-check before ReversePassPeak."""
     intervals = solution.static.intervals
+    res = solution.static.resolution
 
-    gas_headroom = solution.assets.Cpeak[:, 2].sum() * intervals - solution.operations.Mpeak[:, :, 2].sum()
+    gas_headroom = (solution.assets.Cpeak[:, 2].sum() * intervals - solution.operations.Mpeak[:, :, 2].sum()) * res
 
-    biomass_power = solution.assets.Cpeak[:, 0].sum() * intervals - solution.operations.Mpeak[:, :, 0].sum()
+    biomass_power = (solution.assets.Cpeak[:, 0].sum() * intervals - solution.operations.Mpeak[:, :, 0].sum()) * res
     biomass_budget = solution.operations.remaining_peak_budget[:, 0].sum()
     biomass_headroom = min(biomass_power, biomass_budget)
 
-    biogas_power = solution.assets.Cpeak[:, 1].sum() * intervals - solution.operations.Mpeak[:, :, 1].sum()
+    biogas_power = (solution.assets.Cpeak[:, 1].sum() * intervals - solution.operations.Mpeak[:, :, 1].sum()) * res
     biogas_budget = solution.operations.remaining_peak_budget[:, 1].sum()
     biogas_headroom = min(biogas_power, biogas_budget)
 

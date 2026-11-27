@@ -77,7 +77,7 @@ class BaseSolver(ABC):
         out_dir = self.scenario.solution_dir
         os.makedirs(out_dir, exist_ok=True)
 
-        if not self.config.restart_optimisation:
+        if self.config.restart_optimisation is not True or getattr(self.config, "model_location", None) == "new":
             with open(os.path.join(out_dir, "callback.csv"), "w", newline="") as csvfile:
                 csv.writer(csvfile)
 

@@ -133,7 +133,13 @@ class MhmgaSolver(MhmgaSolverBase):
 
     def instantiate_algorithm(self, log_path: str, init_callback: bool) -> MGAProblem:
         if self.config.restart_optimisation:
-            if getattr(self.config, "model_location", None) == "new":
+            if isinstance(self.config.restart_optimisation, str):
+                model_folder = self.config.restart_optimisation
+                if not os.path.isabs(model_folder) and not model_folder.replace("\\", "/").startswith("results/"):
+                    model_folder = os.path.join("results", model_folder)
+                scenario_subdir = os.path.basename(self.scenario.solution_dir)
+                pop_dir = os.path.join(model_folder, scenario_subdir)
+            elif getattr(self.config, "model_location", None) == "new":
                 pop_dir = "results/temp"
             else:
                 pop_dir = self.scenario.solution_dir
@@ -155,12 +161,13 @@ class MhmgaSolver(MhmgaSolverBase):
             pop_size = self.config.mga_pop_size[0]
             expected_rows = num_niches * pop_size
 
-            if os.path.exists(bin_path):
-                pop_cols = ndim + 3
-                raw_data = np.fromfile(bin_path, dtype=npfloat).reshape(-1, pop_cols)
-                raw_pop = raw_data[-expected_rows:]
-            elif os.path.exists(npy_path):
+            if os.path.exists(npy_path):
                 raw_pop = np.load(npy_path)
+            elif os.path.exists(bin_path):
+                pop_cols = ndim + 3
+                byte_count = expected_rows * pop_cols * np.dtype(npfloat).itemsize
+                offset = max(0, os.path.getsize(bin_path) - byte_count)
+                raw_pop = np.fromfile(bin_path, dtype=npfloat, offset=offset).reshape(-1, pop_cols)
             elif os.path.exists(csv_path):
                 raw_pop = pd.read_csv(csv_path, header=None, dtype=npfloat).to_numpy()
             else:

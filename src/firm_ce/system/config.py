@@ -6,6 +6,7 @@ from firm_ce.common.helpers import (
     parse_boolean,
     parse_comma_separated,
     parse_ditherable_hyperparameter,
+    parse_restart_optimisation,
 )
 
 expected_mga_hyperparameters = {
@@ -146,9 +147,9 @@ class ModelConfig:
         self.parameterisation = config.get("parameterisation", "absolute")
         self.model_name = config["model_name"]
 
-        self.restart_optimisation = parse_boolean(config.get("restart_optimisation", False))
+        self.restart_optimisation = parse_restart_optimisation(config.get("restart_optimisation", False))
         if self.restart_optimisation and self.type != "mhmga":
-            raise NotImplementedError("Restart from temp only implemented for mhmga")
+            raise NotImplementedError("Restart only implemented for mhmga")
 
         self.save_details = parse_boolean(config.get("save_details", False))
         if self.save_details and self.type != "mhmga":

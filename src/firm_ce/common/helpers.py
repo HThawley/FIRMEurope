@@ -152,6 +152,21 @@ def parse_boolean(value: str) -> bool:
     return str(value).lower() in ("true", "t", "1.0", "1", "y", "yes")
 
 
+def parse_restart_optimisation(value: str | bool) -> bool | str:
+    """
+    Parses `restart_optimisation` into False, True, or a string pointing to a model folder name.
+    """
+    if isinstance(value, bool):
+        return value
+    s = str(value).strip()
+    s_lower = s.lower()
+    if s_lower in ("false", "f", "0.0", "0", "n", "no", "none", ""):
+        return False
+    if s_lower in ("true", "t", "1.0", "1", "y", "yes"):
+        return True
+    return s
+
+
 @njit(fastmath=FASTMATH)
 def get_annuity_factor(discount_rate: nbfloat, lifetime: nbfloat) -> nbfloat:
     return (1 - (1 + discount_rate) ** (-1 * lifetime)) / discount_rate

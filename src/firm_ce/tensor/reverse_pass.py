@@ -170,19 +170,31 @@ def SetupStorageDonors(solution, t):
             solution.operations.trickling_flag[n, s] = False
             solution.operations.discharge_max_t[n, s] = 0.0
 
-        if solution.operations.rolling_deficits[n] <= TOLERANCE:
-            for s in range(solution.static.nstor):
-                available_e_power = (
-                    solution.operations.storage_min_future[n, s]
-                    * solution.static.storage_discha_eff[s]
-                    / solution.static.resolution
-                )
-                available_p_power = solution.assets.CstorageP[n, s] - solution.operations.Mdischarge[t, n, s]
+        has_def = solution.operations.rolling_deficits[n] > TOLERANCE
+        max_precharge_s = -1
+        if has_def:
+            for s in range(solution.static.nstor - 1, -1, -1):
+                if solution.operations.precharge_flag[n, s]:
+                    max_precharge_s = s
+                    break
 
-                max_d = max(0.0, min(available_p_power, available_e_power))
-                if max_d > TOLERANCE:
-                    solution.operations.trickling_flag[n, s] = True
-                    solution.operations.discharge_max_t[n, s] = max_d
+        for s in range(solution.static.nstor):
+            if has_def and (solution.operations.precharge_flag[n, s] or s >= max_precharge_s):
+                continue
+            if solution.operations.Mcharge[t, n, s] > TOLERANCE:
+                continue
+
+            available_e_power = (
+                solution.operations.storage_min_future[n, s]
+                * solution.static.storage_discha_eff[s]
+                / solution.static.resolution
+            )
+            available_p_power = solution.assets.CstorageP[n, s] - solution.operations.Mdischarge[t, n, s]
+
+            max_d = max(0.0, min(available_p_power, available_e_power))
+            if max_d > TOLERANCE:
+                solution.operations.trickling_flag[n, s] = True
+                solution.operations.discharge_max_t[n, s] = max_d
 
 
 @njit(fastmath=FASTMATH, boundscheck=BOUNDSCHECK, inline="always")
@@ -201,7 +213,8 @@ def FillPrechargers(solution, t, n, transfer_amount):
             solution.operations.storage_max_future[n, s] += energy_added
             solution.operations.storage_min_future[n, s] += energy_added
 
-            rolling_deficits[n] = max(0.0, rolling_deficits[n] - allocated)
+            rt_eff = solution.static.storage_charge_eff[s] * solution.static.storage_discha_eff[s]
+            rolling_deficits[n] = max(0.0, rolling_deficits[n] - allocated * rt_eff)
     return transfer_amount
 
 
